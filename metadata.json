@@ -1,0 +1,7 @@
+{
+  "name": "GAME: Reality Creator",
+  "description": "A gamified productivity system that turns your daily tasks into a high-stakes quest for consciousness. AGI",
+  "requestFramePermissions": [
+    "microphone"
+  ]
+}
