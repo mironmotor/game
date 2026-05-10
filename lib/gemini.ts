@@ -120,7 +120,7 @@ export async function* getMultiAgentGeminiResponseStream(message: string, histor
 
 Инструкции для каждого модуля:
 1. "Гиппокамп (Модуль Памяти)": Извлечь релевантный опыт пользователя. Что работало или не работало ранее. СТРОГО 1-2 кор����тких предложения. Только факты. Никаких приветствий.
-2. "Префронтальная кора (Модуль Симуляции)": Прогноз и следующие шаги. СТРОГО 1-2 коротких предложения. Без воды. Никаких приветствий.
+2. "Префронтальная кора (Модуль Симуляции)": Прогно�� и следующие шаги. СТРОГО 1-2 коротких предложения. Без воды. Никаких приветствий.
 3. "Амигдала (Модуль Критики и Рисков)": Жесткая критика, поиск рисков и логических дыр. СТРОГО 1-2 коротких предложения. Максимально прямолинейно. Никаких приветствий.
 4. "Модуль Креативности": Смелый, нестандартный подход (латеральное мышление). СТРОГО 1-2 коротких предложения. Никаких приветствий.
 
@@ -132,7 +132,7 @@ ${contextPart}`;
   
   try {
     expertsRawResponse = await ai.models.generateContent({
-      model: "gemini-2.0-flash",
+      model: "gemini-2.5-flash",
       contents: [
         ...history,
         { role: "user", parts: [{ text: message }] }
@@ -183,7 +183,7 @@ ${contextPart}`;
 
   // Send to Synthesizer using gemini-2.5-flash via stream
   const responseStream = await ai.models.generateContentStream({
-    model: "gemini-2.0-flash",
+    model: "gemini-2.5-flash",
     contents: [
       { role: "user", parts: [{ text: `User Message: "${message}"\n\n${expertOutputs}` }] }
     ],
@@ -202,7 +202,7 @@ export async function executeAiAgentTask(taskDesc: string, context?: string) {
   const ai = new GoogleGenAI({ apiKey: process.env.NEXT_PUBLIC_GEMINI_API_KEY! });
   
   const response = await ai.models.generateContent({
-    model: "gemini-2.0-flash",
+    model: "gemini-2.5-flash",
     contents: [
       { role: "user", parts: [{ text: `TASK TO EXECUTE: ${taskDesc}\n\nCONTEXT:\n${context || "No additional context."}` }] }
     ],
@@ -223,7 +223,7 @@ export async function getGeminiResponseStream(message: string, history: any[], u
   const finalSystemInstruction = customSystemPrompt ? customSystemPrompt : (SYSTEM_INSTRUCTION + contextPart);
   
   const responseStream = await ai.models.generateContentStream({
-    model: "gemini-2.0-flash",
+    model: "gemini-2.5-flash",
     contents: [
       ...history,
       { role: "user", parts: [{ text: message }] }
@@ -244,7 +244,7 @@ export async function getGeminiResponse(message: string, history: any[], userCon
   const contextPart = userContext ? `\n\nUSER HISTORY CONTEXT:\n${userContext}` : "";
   
   const model = ai.models.generateContent({
-    model: "gemini-2.0-flash",
+    model: "gemini-2.5-flash",
     contents: [
       ...history,
       { role: "user", parts: [{ text: message }] }
@@ -265,7 +265,7 @@ export async function generateImage(prompt: string): Promise<string | null> {
   
   try {
     const response = await ai.models.generateContent({
-      model: 'gemini-2.0-flash',
+      model: 'gemini-2.5-flash',
       contents: {
         parts: [
           {
@@ -306,7 +306,7 @@ export async function generateSpeech(text: string): Promise<string | null> {
   try {
     const ai = new GoogleGenAI({ apiKey: process.env.NEXT_PUBLIC_GEMINI_API_KEY });
     const response = await ai.models.generateContent({
-      model: "gemini-2.0-flash",
+      model: "gemini-2.5-flash",
       contents: [{ parts: [{ text }] }],
       config: {
         responseModalities: ["AUDIO"],
