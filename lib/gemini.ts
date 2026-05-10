@@ -101,7 +101,7 @@ End with a "RESULT: [SUCCESS/COMPLETED]" block.
 `;
 
 export async function* getMultiAgentGeminiResponseStream(message: string, history: any[], userContext?: string, showReasoning: boolean = false) {
-  const apiKey = process.env.NEXT_PUBLIC_GEMINI_API_KEY;
+  const apiKey = process.env.GEMINI_API_KEY;
   if (!apiKey) {
     throw new Error("Gemini API key is missing");
   }
@@ -120,7 +120,7 @@ export async function* getMultiAgentGeminiResponseStream(message: string, histor
 
 Инструкции для каждого модуля:
 1. "Гиппокамп (Модуль Памяти)": Извлечь релевантный опыт пользователя. Что работало или не работало ранее. СТРОГО 1-2 кор����тких предложения. Только факты. Никаких приветствий.
-2. "Префронтальная кора (Модуль Симуляции)": Прогно�� и следующие шаги. СТРОГО 1-2 коротких предложения. Без воды. Никаких приветствий.
+2. "Префронтальная кора (Модуль Симуляции)": Прогно�� �� следующие шаги. СТРОГО 1-2 коротких предложения. Без воды. Никаких приветствий.
 3. "Амигдала (Модуль Критики и Рисков)": Жесткая критика, поиск рисков и логических дыр. СТРОГО 1-2 коротких предложения. Максимально прямолинейно. Никаких приветствий.
 4. "Модуль Креативности": Смелый, нестандартный подход (латеральное мышление). СТРОГО 1-2 коротких предложения. Никаких приветствий.
 
@@ -199,7 +199,7 @@ ${contextPart}`;
 }
 
 export async function executeAiAgentTask(taskDesc: string, context?: string) {
-  const ai = new GoogleGenAI({ apiKey: process.env.NEXT_PUBLIC_GEMINI_API_KEY! });
+  const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY! });
   
   const response = await ai.models.generateContent({
     model: "gemini-2.5-flash",
@@ -217,7 +217,7 @@ export async function executeAiAgentTask(taskDesc: string, context?: string) {
 }
 
 export async function getGeminiResponseStream(message: string, history: any[], userContext?: string, customSystemPrompt?: string) {
-  const ai = new GoogleGenAI({ apiKey: process.env.NEXT_PUBLIC_GEMINI_API_KEY! });
+  const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY! });
   
   const contextPart = userContext ? `\n\nUSER HISTORY CONTEXT:\n${userContext}` : "";
   const finalSystemInstruction = customSystemPrompt ? customSystemPrompt : (SYSTEM_INSTRUCTION + contextPart);
@@ -239,7 +239,7 @@ export async function getGeminiResponseStream(message: string, history: any[], u
 }
 
 export async function getGeminiResponse(message: string, history: any[], userContext?: string) {
-  const ai = new GoogleGenAI({ apiKey: process.env.NEXT_PUBLIC_GEMINI_API_KEY! });
+  const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY! });
   
   const contextPart = userContext ? `\n\nUSER HISTORY CONTEXT:\n${userContext}` : "";
   
@@ -261,7 +261,7 @@ export async function getGeminiResponse(message: string, history: any[], userCon
 }
 
 export async function generateImage(prompt: string): Promise<string | null> {
-  const ai = new GoogleGenAI({ apiKey: process.env.NEXT_PUBLIC_GEMINI_API_KEY! });
+  const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY! });
   
   try {
     const response = await ai.models.generateContent({
@@ -298,13 +298,13 @@ export async function generateImage(prompt: string): Promise<string | null> {
 }
 
 export async function generateSpeech(text: string): Promise<string | null> {
-  if (!process.env.NEXT_PUBLIC_GEMINI_API_KEY) {
+  if (!process.env.GEMINI_API_KEY) {
     console.error("Gemini API key is missing");
     return null;
   }
 
   try {
-    const ai = new GoogleGenAI({ apiKey: process.env.NEXT_PUBLIC_GEMINI_API_KEY });
+    const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
     const response = await ai.models.generateContent({
       model: "gemini-2.5-flash",
       contents: [{ parts: [{ text }] }],
