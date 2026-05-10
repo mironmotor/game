@@ -103,10 +103,8 @@ End with a "RESULT: [SUCCESS/COMPLETED]" block.
 export async function* getMultiAgentGeminiResponseStream(message: string, history: any[], userContext?: string, showReasoning: boolean = false) {
   const apiKey = process.env.NEXT_PUBLIC_GEMINI_API_KEY;
   if (!apiKey) {
-    console.error("[v0] NEXT_PUBLIC_GEMINI_API_KEY is not set!");
     throw new Error("Gemini API key is missing");
   }
-  console.log("[v0] Initializing Gemini with API key:", apiKey.substring(0, 8) + "...");
   const ai = new GoogleGenAI({ apiKey });
   
   const contextPart = userContext ? `\n\nUSER HISTORY CONTEXT:\n${userContext}` : "";
@@ -121,7 +119,7 @@ export async function* getMultiAgentGeminiResponseStream(message: string, histor
 ]
 
 Инструкции для каждого модуля:
-1. "Гиппокамп (Модуль Памяти)": Извлечь релевантный опыт пользователя. Что работало или не работало ранее. СТРОГО 1-2 кор��тких предложения. Только факты. Никаких приветствий.
+1. "Гиппокамп (Модуль Памяти)": Извлечь релевантный опыт пользователя. Что работало или не работало ранее. СТРОГО 1-2 кор����тких предложения. Только факты. Никаких приветствий.
 2. "Префронтальная кора (Модуль Симуляции)": Прогноз и следующие шаги. СТРОГО 1-2 коротких предложения. Без воды. Никаких приветствий.
 3. "Амигдала (Модуль Критики и Рисков)": Жесткая критика, поиск рисков и логических дыр. СТРОГО 1-2 коротких предложения. Максимально прямолинейно. Никаких приветствий.
 4. "Модуль Креативности": Смелый, нестандартный подход (латеральное мышление). СТРОГО 1-2 коротких предложения. Никаких приветствий.
@@ -133,9 +131,8 @@ ${contextPart}`;
   let expertResponses: { name: string, text: string }[] = [];
   
   try {
-    console.log("[v0] Calling Gemini API for experts...");
     expertsRawResponse = await ai.models.generateContent({
-      model: "gemini-2.5-flash",
+      model: "gemini-2.0-flash",
       contents: [
         ...history,
         { role: "user", parts: [{ text: message }] }
@@ -146,15 +143,12 @@ ${contextPart}`;
         temperature: 0.6,
       }
     });
-    console.log("[v0] Gemini API response received");
     
     const rawText = expertsRawResponse.text?.trim() || "[]";
     const jsonStr = rawText.replace(/```json\n?|\n?```/g, '').trim();
     expertResponses = JSON.parse(jsonStr);
   } catch (e: any) {
-    console.error("[v0] Gemini API call failed:", e.message || e);
-    console.error("[v0] Full error:", JSON.stringify({ name: e.name, message: e.message, status: e.status, statusText: e.statusText }));
-    // Fallback if API call or parsing fails
+    console.error("Gemini API call failed:", e.message || e);
     expertResponses = [
       { name: "Системный Сбой", text: `Ошибка API: ${e.message || 'Неизвестная ошибка'}` }
     ];
@@ -189,7 +183,7 @@ ${contextPart}`;
 
   // Send to Synthesizer using gemini-2.5-flash via stream
   const responseStream = await ai.models.generateContentStream({
-    model: "gemini-2.5-flash",
+    model: "gemini-2.0-flash",
     contents: [
       { role: "user", parts: [{ text: `User Message: "${message}"\n\n${expertOutputs}` }] }
     ],
@@ -208,7 +202,7 @@ export async function executeAiAgentTask(taskDesc: string, context?: string) {
   const ai = new GoogleGenAI({ apiKey: process.env.NEXT_PUBLIC_GEMINI_API_KEY! });
   
   const response = await ai.models.generateContent({
-    model: "gemini-2.5-flash",
+    model: "gemini-2.0-flash",
     contents: [
       { role: "user", parts: [{ text: `TASK TO EXECUTE: ${taskDesc}\n\nCONTEXT:\n${context || "No additional context."}` }] }
     ],
@@ -229,7 +223,7 @@ export async function getGeminiResponseStream(message: string, history: any[], u
   const finalSystemInstruction = customSystemPrompt ? customSystemPrompt : (SYSTEM_INSTRUCTION + contextPart);
   
   const responseStream = await ai.models.generateContentStream({
-    model: "gemini-2.5-flash",
+    model: "gemini-2.0-flash",
     contents: [
       ...history,
       { role: "user", parts: [{ text: message }] }
@@ -250,7 +244,7 @@ export async function getGeminiResponse(message: string, history: any[], userCon
   const contextPart = userContext ? `\n\nUSER HISTORY CONTEXT:\n${userContext}` : "";
   
   const model = ai.models.generateContent({
-    model: "gemini-2.5-flash",
+    model: "gemini-2.0-flash",
     contents: [
       ...history,
       { role: "user", parts: [{ text: message }] }
@@ -271,7 +265,7 @@ export async function generateImage(prompt: string): Promise<string | null> {
   
   try {
     const response = await ai.models.generateContent({
-      model: 'gemini-2.0-flash-exp',
+      model: 'gemini-2.0-flash',
       contents: {
         parts: [
           {
@@ -312,7 +306,7 @@ export async function generateSpeech(text: string): Promise<string | null> {
   try {
     const ai = new GoogleGenAI({ apiKey: process.env.NEXT_PUBLIC_GEMINI_API_KEY });
     const response = await ai.models.generateContent({
-      model: "gemini-2.5-flash",
+      model: "gemini-2.0-flash",
       contents: [{ parts: [{ text }] }],
       config: {
         responseModalities: ["AUDIO"],
