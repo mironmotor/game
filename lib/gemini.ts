@@ -101,7 +101,13 @@ End with a "RESULT: [SUCCESS/COMPLETED]" block.
 `;
 
 export async function* getMultiAgentGeminiResponseStream(message: string, history: any[], userContext?: string, showReasoning: boolean = false) {
-  const ai = new GoogleGenAI({ apiKey: process.env.NEXT_PUBLIC_GEMINI_API_KEY! });
+  const apiKey = process.env.NEXT_PUBLIC_GEMINI_API_KEY;
+  if (!apiKey) {
+    console.error("[v0] NEXT_PUBLIC_GEMINI_API_KEY is not set!");
+    throw new Error("Gemini API key is missing");
+  }
+  console.log("[v0] Initializing Gemini with API key:", apiKey.substring(0, 8) + "...");
+  const ai = new GoogleGenAI({ apiKey });
   
   const contextPart = userContext ? `\n\nUSER HISTORY CONTEXT:\n${userContext}` : "";
   
@@ -197,7 +203,7 @@ export async function executeAiAgentTask(taskDesc: string, context?: string) {
   const ai = new GoogleGenAI({ apiKey: process.env.NEXT_PUBLIC_GEMINI_API_KEY! });
   
   const response = await ai.models.generateContent({
-    model: "gemini-3-flash-preview",
+    model: "gemini-2.5-flash",
     contents: [
       { role: "user", parts: [{ text: `TASK TO EXECUTE: ${taskDesc}\n\nCONTEXT:\n${context || "No additional context."}` }] }
     ],
@@ -218,7 +224,7 @@ export async function getGeminiResponseStream(message: string, history: any[], u
   const finalSystemInstruction = customSystemPrompt ? customSystemPrompt : (SYSTEM_INSTRUCTION + contextPart);
   
   const responseStream = await ai.models.generateContentStream({
-    model: "gemini-3-flash-preview",
+    model: "gemini-2.5-flash",
     contents: [
       ...history,
       { role: "user", parts: [{ text: message }] }
@@ -239,7 +245,7 @@ export async function getGeminiResponse(message: string, history: any[], userCon
   const contextPart = userContext ? `\n\nUSER HISTORY CONTEXT:\n${userContext}` : "";
   
   const model = ai.models.generateContent({
-    model: "gemini-3-flash-preview",
+    model: "gemini-2.5-flash",
     contents: [
       ...history,
       { role: "user", parts: [{ text: message }] }
@@ -260,7 +266,7 @@ export async function generateImage(prompt: string): Promise<string | null> {
   
   try {
     const response = await ai.models.generateContent({
-      model: 'gemini-2.5-flash-image',
+      model: 'gemini-2.0-flash-exp',
       contents: {
         parts: [
           {
@@ -301,7 +307,7 @@ export async function generateSpeech(text: string): Promise<string | null> {
   try {
     const ai = new GoogleGenAI({ apiKey: process.env.NEXT_PUBLIC_GEMINI_API_KEY });
     const response = await ai.models.generateContent({
-      model: "gemini-2.5-flash-preview-tts",
+      model: "gemini-2.5-flash",
       contents: [{ parts: [{ text }] }],
       config: {
         responseModalities: ["AUDIO"],
