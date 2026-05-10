@@ -175,7 +175,7 @@ function GameContent() {
   const [isLoading, setIsLoading] = useState(false);
   const [systemModel, setSystemModel] = useState<'gemini3' | 'multiagent'>('gemini3');
   const [time, setTime] = useState<string>('');
-  const [agentInsight, setAgentInsight] = useState<string>('Инициализация нейросети... Ожидание паттернов поведения.');
+  const [agentInsight, setAgentInsight] = useState<string>('Инициализация нейрос��ти... Ожидание паттернов поведения.');
   const [currentTab, setCurrentTab] = useState<'home' | 'stats' | 'character' | 'god'>('character');
   const [energyMode, setEnergyMode] = useState<'idle' | 'high' | 'normal' | 'low'>('idle');
   const [selectedOrbitalTaskId, setSelectedOrbitalTaskId] = useState<string | null>(null);
@@ -716,7 +716,7 @@ ${taskContext}
         if (activeSessionId && sessionMessages.length === 0) {
           try {
             const { getGeminiResponse } = await import('@/lib/gemini');
-            const titleResponse = await getGeminiResponse(`Сгенерируй очень короткое название (2-4 слова) для этого диалога: "${userMsg}"`, [], '', 'Ты генератор названий. Отвечай только названием, без кавычек.');
+            const titleResponse = await getGeminiResponse(`Сгенерируй очень короткое название (2-4 слова) для этого диалога: "${userMsg}"`, [], '', 'Ты ��енератор названий. Отвечай только названием, без кавычек.');
             if (titleResponse) {
               await updateSessionTitle(activeSessionId, titleResponse.trim());
             }
@@ -783,10 +783,11 @@ ${taskContext}
           return newMsgs;
         });
       } else {
-        console.error("Handle Send Error:", error);
+        console.error("[v0] Handle Send Error:", error);
+        console.error("[v0] Error details:", JSON.stringify({ name: error.name, message: error.message, stack: error.stack }));
         setMessages(prev => {
           const newMsgs = [...prev];
-          newMsgs[newMsgs.length - 1] = { role: 'model', content: "SYSTEM ERROR: Connection to neural link failed." };
+          newMsgs[newMsgs.length - 1] = { role: 'model', content: `SYSTEM ERROR: ${error.message || 'Connection to neural link failed.'}` };
           return newMsgs;
         });
       }
@@ -1549,7 +1550,7 @@ ${taskContext}
                           <div className="flex-1 flex flex-col overflow-y-auto custom-scrollbar pr-2">
                             <div className="flex flex-col gap-4 pb-4">
                               <p className="text-sm text-white/60 mb-4">
-                                Выберите режим проекции для расширения возможностей агента. GAME — режим управления реальностью.
+                                Выберите режим проекции для расширения возможнос��ей агента. GAME — режим управления реальностью.
                               </p>
 
                               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
