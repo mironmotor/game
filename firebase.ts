@@ -1,5 +1,5 @@
 import { initializeApp } from 'firebase/app';
-import { getAuth, GoogleAuthProvider, signInWithPopup, signOut, onAuthStateChanged, User } from 'firebase/auth';
+import { getAuth, GoogleAuthProvider, signInWithPopup, signInWithRedirect, getRedirectResult, signOut, onAuthStateChanged, User } from 'firebase/auth';
 import { getFirestore, doc, setDoc, getDoc, collection, onSnapshot, query, orderBy, limit, writeBatch, serverTimestamp, Timestamp } from 'firebase/firestore';
 import firebaseConfig from './firebase-applet-config.json';
 
@@ -10,7 +10,11 @@ export const db = getFirestore(app, firebaseConfig.firestoreDatabaseId);
 export const googleProvider = new GoogleAuthProvider();
 
 // Auth Helpers
-export const loginWithGoogle = () => signInWithPopup(auth, googleProvider);
+// Use redirect on GitHub Pages (popup gets blocked); fallback to popup on localhost
+const isGitHubPages = typeof window !== 'undefined' && window.location.hostname.includes('github.io');
+export const loginWithGoogle = () =>
+  isGitHubPages ? signInWithRedirect(auth, googleProvider) : signInWithPopup(auth, googleProvider);
+export { getRedirectResult };
 export const logout = () => signOut(auth);
 
 // Error Handling

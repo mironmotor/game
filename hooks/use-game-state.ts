@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
-import { auth, db, handleFirestoreError, OperationType } from '@/firebase';
+import { auth, db, handleFirestoreError, OperationType, getRedirectResult } from '@/firebase';
 import { onAuthStateChanged, User } from 'firebase/auth';
 import { 
   doc, 
@@ -98,8 +98,11 @@ export function useGameState() {
     }
   }, []);
 
-  // Auth listener
+  // Auth listener + handle redirect result from GitHub Pages OAuth flow
   useEffect(() => {
+    // Handle redirect result (fires after Google OAuth redirect on GitHub Pages)
+    getRedirectResult(auth).catch(() => {/* ignore errors on non-redirect loads */});
+
     const unsubscribe = onAuthStateChanged(auth, (u) => {
       setUser(u);
       if (!u) {
