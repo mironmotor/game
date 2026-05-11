@@ -1,23 +1,14 @@
-import { initializeApp } from 'firebase/app';
-import { getAuth, GoogleAuthProvider, signInWithPopup, signInWithRedirect, getRedirectResult, signOut, onAuthStateChanged, User } from 'firebase/auth';
-import { getFirestore, doc, setDoc, getDoc, collection, onSnapshot, query, orderBy, limit, writeBatch, serverTimestamp, Timestamp } from 'firebase/firestore';
-import firebaseConfig from './firebase-applet-config.json';
+// Firebase stub — all data is stored in localStorage via use-game-state.ts
+// This file exists to avoid breaking imports in components that still reference it
 
-// Initialize Firebase
-const app = initializeApp(firebaseConfig);
-export const auth = getAuth(app);
-export const db = getFirestore(app, firebaseConfig.firestoreDatabaseId);
-export const googleProvider = new GoogleAuthProvider();
+export const auth = { currentUser: null };
+export const db = null;
+export const googleProvider = null;
 
-// Auth Helpers
-// Use redirect on GitHub Pages (popup gets blocked); fallback to popup on localhost
-const isGitHubPages = typeof window !== 'undefined' && window.location.hostname.includes('github.io');
-export const loginWithGoogle = () =>
-  isGitHubPages ? signInWithRedirect(auth, googleProvider) : signInWithPopup(auth, googleProvider);
-export { getRedirectResult };
-export const logout = () => signOut(auth);
+export const loginWithGoogle = async () => { return null; };
+export const logout = async () => { return null; };
+export const getRedirectResult = async () => { return null; };
 
-// Error Handling
 export enum OperationType {
   CREATE = 'create',
   UPDATE = 'update',
@@ -31,40 +22,9 @@ export interface FirestoreErrorInfo {
   error: string;
   operationType: OperationType;
   path: string | null;
-  authInfo: {
-    userId: string | undefined;
-    email: string | null | undefined;
-    emailVerified: boolean | undefined;
-    isAnonymous: boolean | undefined;
-    tenantId: string | null | undefined;
-    providerInfo: {
-      providerId: string;
-      displayName: string | null;
-      email: string | null;
-      photoUrl: string | null;
-    }[];
-  }
+  authInfo: any;
 }
 
 export function handleFirestoreError(error: unknown, operationType: OperationType, path: string | null) {
-  const errInfo: FirestoreErrorInfo = {
-    error: error instanceof Error ? error.message : String(error),
-    authInfo: {
-      userId: auth.currentUser?.uid,
-      email: auth.currentUser?.email,
-      emailVerified: auth.currentUser?.emailVerified,
-      isAnonymous: auth.currentUser?.isAnonymous,
-      tenantId: auth.currentUser?.tenantId,
-      providerInfo: auth.currentUser?.providerData.map(provider => ({
-        providerId: provider.providerId,
-        displayName: provider.displayName,
-        email: provider.email,
-        photoUrl: provider.photoURL
-      })) || []
-    },
-    operationType,
-    path
-  }
-  console.error('Firestore Error: ', JSON.stringify(errInfo));
-  throw new Error(JSON.stringify(errInfo));
+  console.error('Storage error:', error, operationType, path);
 }

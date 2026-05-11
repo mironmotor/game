@@ -1,19 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
-import { auth, db, handleFirestoreError, OperationType, getRedirectResult } from '@/firebase';
-import { onAuthStateChanged, User } from 'firebase/auth';
-import { 
-  doc, 
-  onSnapshot, 
-  setDoc, 
-  collection, 
-  query, 
-  where, 
-  getDocs,
-  writeBatch,
-  serverTimestamp
-} from 'firebase/firestore';
+import { useState, useEffect, useCallback, useRef } from 'react';
 
 export interface Task {
   id: string;
@@ -55,461 +42,203 @@ export interface DailyXP {
   xp: number;
 }
 
+const STORAGE_KEYS = {
+  xp: 'game_xp',
+  tasks: 'game_tasks',
+  messages: 'game_messages',
+  sessions: 'game_sessions',
+  history: 'game_history',
+  lastLaunch: 'game_last_launch',
+};
+
+function loadFromStorage<T>(key: string, fallback: T): T {
+  if (typeof window === 'undefined') return fallback;
+  try {
+    const raw = localStorage.getItem(key);
+    return raw ? JSON.parse(raw) : fallback;
+  } catch {
+    return fallback;
+  }
+}
+
+function saveToStorage(key: string, value: any) {
+  if (typeof window === 'undefined') return;
+  try {
+    localStorage.setItem(key, JSON.stringify(value));
+  } catch {}
+}
+
 export function useGameState() {
-  const [user, setUser] = useState<User | null>(null);
-  const [state, setState] = useState<{
-    xp: number;
-    tasks: Task[];
-    messages: Message[];
-    sessions: ChatSession[];
-    lastLaunch: string | null;
-    dailyHistory: DailyXP[];
-    isLoaded: boolean;
-  }>({
-    xp: 0,
-    tasks: [],
-    messages: [],
-    sessions: [],
-    lastLaunch: null,
-    dailyHistory: [],
-    isLoaded: false,
-  });
+  const [isLoaded, setIsLoaded] = useState(false);
+  const [xp, setXp] = useState(0);
+  const [tasks, setTasks] = useState<Task[]>([]);
+  const [messages, setMessages] = useState<Message[]>([]);
+  const [sessions, setSessions] = useState<ChatSession[]>([]);
+  const [dailyHistory, setDailyHistory] = useState<DailyXP[]>([]);
+  const [lastLaunch, setLastLaunch] = useState<string | null>(null);
+  const [rank, setRank] = useState(9999);
 
-  const loadFromLocal = useCallback(() => {
-    if (typeof window !== 'undefined') {
-      const savedXp = localStorage.getItem('game_xp');
-      const savedTasks = localStorage.getItem('game_tasks');
-      const savedLaunch = localStorage.getItem('game_last_launch');
-      const savedHistory = localStorage.getItem('game_history');
-      const savedMessages = localStorage.getItem('game_messages');
-      const savedSessions = localStorage.getItem('game_sessions');
+  // Fake user object so components that check `user` still work
+  const user = { uid: 'local', email: 'local@game', displayName: 'Boss' };
 
-      setTimeout(() => {
-        setState({
-          xp: savedXp ? parseInt(savedXp) : 0,
-          tasks: savedTasks ? JSON.parse(savedTasks) : [],
-          messages: savedMessages ? JSON.parse(savedMessages) : [],
-          sessions: savedSessions ? JSON.parse(savedSessions) : [],
-          lastLaunch: savedLaunch || null,
-          dailyHistory: savedHistory ? JSON.parse(savedHistory) : [],
-          isLoaded: true,
-        });
-      }, 0);
-    }
+  useEffect(() => {
+    setXp(loadFromStorage(STORAGE_KEYS.xp, 0));
+    setTasks(loadFromStorage(STORAGE_KEYS.tasks, []));
+    setMessages(loadFromStorage(STORAGE_KEYS.messages, []));
+    setSessions(loadFromStorage(STORAGE_KEYS.sessions, []));
+    setDailyHistory(loadFromStorage(STORAGE_KEYS.history, []));
+    setLastLaunch(loadFromStorage(STORAGE_KEYS.lastLaunch, null));
+    setIsLoaded(true);
   }, []);
 
-  // Auth listener + handle redirect result from GitHub Pages OAuth flow
+  // Recompute rank from xp
   useEffect(() => {
-    // Handle redirect result (fires after Google OAuth redirect on GitHub Pages)
-    getRedirectResult(auth).catch(() => {/* ignore errors on non-redirect loads */});
+    setRank(Math.max(1, 10000 - Math.floor(xp / 10)));
+  }, [xp]);
 
-    const unsubscribe = onAuthStateChanged(auth, (u) => {
-      setUser(u);
-      if (!u) {
-        // If logged out, reset to local storage or defaults
-        setState(prev => ({ ...prev, isLoaded: false }));
-        loadFromLocal();
-      }
-    });
-    return () => unsubscribe();
-  }, [loadFromLocal]);
+  const launchGame = useCallback(async () => {
+    const now = new Date().toISOString();
+    setLastLaunch(now);
+    saveToStorage(STORAGE_KEYS.lastLaunch, now);
+  }, []);
 
-  // Firestore Sync
-  useEffect(() => {
-    if (!user) return;
-
-    const userDocRef = doc(db, 'users', user.uid);
-    const tasksColRef = collection(db, 'users', user.uid, 'tasks');
-    const messagesColRef = collection(db, 'users', user.uid, 'messages');
-    const sessionsColRef = collection(db, 'users', user.uid, 'sessions');
-
-    const unsubUser = onSnapshot(userDocRef, (docSnap) => {
-      if (docSnap.exists()) {
-        const data = docSnap.data();
-        setState(prev => ({
-          ...prev,
-          xp: data.totalXp || 0,
-          lastLaunch: data.lastLaunch || null,
-          dailyHistory: data.dailyHistory || [],
-          isLoaded: true
-        }));
-      } else {
-        // Initialize user doc if it doesn't exist
-        setDoc(userDocRef, {
-          uid: user.uid,
-          totalXp: 0,
-          rank: 10000,
-          dailyHistory: [],
-          updatedAt: serverTimestamp()
-        }).catch(e => handleFirestoreError(e, OperationType.CREATE, `users/${user.uid}`));
-      }
-    }, (e) => handleFirestoreError(e, OperationType.GET, `users/${user.uid}`));
-
-    const unsubTasks = onSnapshot(tasksColRef, (querySnap) => {
-      const tasksData: Task[] = [];
-      querySnap.forEach((doc) => {
-        tasksData.push(doc.data() as Task);
-      });
-      setState(prev => ({ ...prev, tasks: tasksData }));
-    }, (e) => handleFirestoreError(e, OperationType.GET, `users/${user.uid}/tasks`));
-
-    const unsubMessages = onSnapshot(messagesColRef, (querySnap) => {
-      const msgs: Message[] = [];
-      querySnap.forEach((doc) => {
-        msgs.push(doc.data() as Message);
-      });
-      // Sort by timestamp
-      msgs.sort((a, b) => (a.timestamp?.seconds || 0) - (b.timestamp?.seconds || 0));
-      setState(prev => ({ ...prev, messages: msgs }));
-    }, (e) => handleFirestoreError(e, OperationType.GET, `users/${user.uid}/messages`));
-
-    const unsubSessions = onSnapshot(sessionsColRef, (querySnap) => {
-      const sessionsData: ChatSession[] = [];
-      querySnap.forEach((doc) => {
-        sessionsData.push(doc.data() as ChatSession);
-      });
-      sessionsData.sort((a, b) => (b.updatedAt?.seconds || 0) - (a.updatedAt?.seconds || 0));
-      setState(prev => ({ ...prev, sessions: sessionsData }));
-    }, (e) => handleFirestoreError(e, OperationType.GET, `users/${user.uid}/sessions`));
-
-    return () => {
-      unsubUser();
-      unsubTasks();
-      unsubMessages();
-      unsubSessions();
-    };
-  }, [user]);
-
-  // Derived state for rank
-  const rank = Math.max(1, Math.floor(10000 / (state.xp / 1000 + 1)));
-
-  // Save to LocalStorage fallback
-  useEffect(() => {
-    if (!user && state.isLoaded && typeof window !== 'undefined') {
-      localStorage.setItem('game_xp', state.xp.toString());
-      localStorage.setItem('game_tasks', JSON.stringify(state.tasks));
-      localStorage.setItem('game_history', JSON.stringify(state.dailyHistory));
-      if (state.lastLaunch) localStorage.setItem('game_last_launch', state.lastLaunch);
-    }
-  }, [state.xp, state.tasks, state.lastLaunch, state.dailyHistory, state.isLoaded, user]);
-
-  const syncUserToFirestore = async (updates: any) => {
-    if (!user) return;
-    try {
-      await setDoc(doc(db, 'users', user.uid), {
-        uid: user.uid,
-        ...updates,
-        updatedAt: serverTimestamp()
-      }, { merge: true });
-    } catch (e) {
-      handleFirestoreError(e, OperationType.UPDATE, `users/${user.uid}`);
-    }
-  };
-
-  const addXp = async (amount: number) => {
-    const today = new Date().toDateString();
-    const newXp = state.xp + amount;
-    const newRank = Math.max(1, Math.floor(10000 / (newXp / 1000 + 1)));
-    const existing = state.dailyHistory.find(h => h.date === today);
-    let newHistory;
-    if (existing) {
-      newHistory = state.dailyHistory.map(h => h.date === today ? { ...h, xp: h.xp + amount } : h);
-    } else {
-      newHistory = [...state.dailyHistory, { date: today, xp: amount }].slice(-14);
-    }
-
-    if (user) {
-      await syncUserToFirestore({ totalXp: newXp, dailyHistory: newHistory, rank: newRank });
-    } else {
-      setState(prev => ({ ...prev, xp: newXp, dailyHistory: newHistory }));
-    }
-  };
-  
-  const launchGame = async () => {
-    const today = new Date().toDateString();
-    if (state.lastLaunch !== today) {
-      await addXp(10);
-      if (user) {
-        await syncUserToFirestore({ lastLaunch: today });
-      } else {
-        setState(prev => ({ ...prev, lastLaunch: today }));
-      }
-      return true;
-    }
-    return false;
-  };
-
-  const updateTasks = async (newTasks: Task[]) => {
-    if (user) {
-      const batch = writeBatch(db);
-      newTasks.forEach(t => {
-        const taskRef = doc(db, 'users', user.uid, 'tasks', t.id);
-        batch.set(taskRef, { ...t, uid: user.uid, createdAt: serverTimestamp() }, { merge: true });
-      });
-      try {
-        await batch.commit();
-      } catch (e) {
-        handleFirestoreError(e, OperationType.WRITE, `users/${user.uid}/tasks`);
-      }
-    } else {
-      setState(prev => {
-        const merged = [...prev.tasks];
-        newTasks.forEach(newTask => {
-          const index = merged.findIndex(t => t.id === newTask.id);
-          if (index > -1) merged[index] = newTask;
-          else merged.push(newTask);
-        });
-        return { ...prev, tasks: merged };
-      });
-    }
-  };
-
-  const setTaskActive = async (taskId: string) => {
-    const updatedTasks = state.tasks.map(t => ({
-      ...t,
-      status: t.id === taskId ? 'active' : (t.status === 'active' ? 'pending' : t.status)
-    })) as Task[];
-
-    if (user) {
-      const batch = writeBatch(db);
-      updatedTasks.forEach(t => {
-        const taskRef = doc(db, 'users', user.uid, 'tasks', t.id);
-        batch.update(taskRef, { status: t.status });
-      });
-      try {
-        await batch.commit();
-      } catch (e) {
-        handleFirestoreError(e, OperationType.UPDATE, `users/${user.uid}/tasks`);
-      }
-    } else {
-      setState(prev => ({ ...prev, tasks: updatedTasks }));
-    }
-  };
-
-  const deleteTasks = async (taskIds: string[]) => {
-    if (user) {
-      const batch = writeBatch(db);
-      taskIds.forEach(id => {
-        const taskRef = doc(db, 'users', user.uid, 'tasks', id);
-        batch.delete(taskRef);
-      });
-      try {
-        await batch.commit();
-      } catch (e) {
-        handleFirestoreError(e, OperationType.DELETE, `users/${user.uid}/tasks`);
-      }
-    } else {
-      setState(prev => ({
-        ...prev,
-        tasks: prev.tasks.filter(t => !taskIds.includes(t.id))
-      }));
-    }
-  };
-
-  const completeTask = async (taskId: string) => {
-    const task = state.tasks.find(t => t.id === taskId);
-    if (task && task.status !== 'completed') {
-      await addXp(task.xp);
-      const completedAt = new Date().toISOString();
-      
-      const pendingTasks = state.tasks.filter(t => t.id !== taskId && (t.status === 'pending' || t.status === 'active'));
-      const isAllCompleted = state.tasks.length > 0 && pendingTasks.length === 0;
-
-      if (isAllCompleted) {
-        await addXp(100);
-      }
-
-      if (user) {
-        try {
-          await setDoc(doc(db, 'users', user.uid, 'tasks', taskId), { status: 'completed', completedAt }, { merge: true });
-        } catch (error) {
-          handleFirestoreError(error, OperationType.UPDATE, `users/${user.uid}/tasks/${taskId}`);
-        }
-      } else {
-        setState(prev => ({
-          ...prev,
-          tasks: prev.tasks.map(t => t.id === taskId ? { ...t, status: 'completed', completedAt } : t)
-        }));
-      }
-      return isAllCompleted;
-    }
-    return false;
-  };
-
-  const executeTaskWithAi = async (taskId: string) => {
-    const task = state.tasks.find(t => t.id === taskId);
-    if (!task) return;
-
-    // Set status to running
-    const updateStatus = async (status: 'running' | 'completed' | 'failed', result?: string) => {
-      if (user) {
-        await setDoc(doc(db, 'users', user.uid, 'tasks', taskId), { 
-          aiAgentStatus: status,
-          ...(result ? { aiAgentResult: result } : {})
-        }, { merge: true });
-      } else {
-        setState(prev => ({
-          ...prev,
-          tasks: prev.tasks.map(t => t.id === taskId ? { 
-            ...t, 
-            aiAgentStatus: status,
-            ...(result ? { aiAgentResult: result } : {})
-          } : t)
-        }));
-      }
-    };
-
-    await updateStatus('running');
-
-    try {
-      const { executeAiAgentTask } = await import('@/lib/gemini');
-      const result = await executeAiAgentTask(task.desc, `User Rank: ${rank}, Total XP: ${state.xp}`);
-      await updateStatus('completed', result);
-      // Auto-complete task if it's informational
-      if (result && result.includes('RESULT: [SUCCESS/COMPLETED]')) {
-        await completeTask(taskId);
-      }
-    } catch (error: any) {
-      if (error && (error.name === 'AbortError' || (error.message && error.message.toLowerCase().includes('abort')))) {
-        console.log("AI Execution skipped: request aborted");
-        await updateStatus('failed', "SYSTEM: Execution aborted.");
-      } else {
-        console.error("AI Execution failed", error);
-        await updateStatus('failed', "SYSTEM ERROR: AI Agent failed to execute task.");
-      }
-    }
-  };
-
-  const createSession = async (title: string = 'Новый сеанс', mode: string = 'game') => {
-    if (!user) return null;
-    const id = Math.random().toString(36).substring(7);
-    const sessionRef = doc(db, 'users', user.uid, 'sessions', id);
-    try {
-      await setDoc(sessionRef, {
-        id,
-        title,
-        mode,
-        createdAt: serverTimestamp(),
-        updatedAt: serverTimestamp()
-      });
-      return id;
-    } catch (e) {
-      handleFirestoreError(e, OperationType.CREATE, `users/${user.uid}/sessions/${id}`);
-      return null;
-    }
-  };
-
-  const updateSessionTitle = async (sessionId: string, title: string) => {
-    if (!user) return;
-    try {
-      await setDoc(doc(db, 'users', user.uid, 'sessions', sessionId), { title, updatedAt: serverTimestamp() }, { merge: true });
-    } catch (e) {
-      handleFirestoreError(e, OperationType.UPDATE, `users/${user.uid}/sessions/${sessionId}`);
-    }
-  };
-
-  const saveMessage = async (role: 'user' | 'model', content: string, sessionId?: string) => {
-    if (!user) return;
-    const id = Math.random().toString(36).substring(7);
-    const msgRef = doc(db, 'users', user.uid, 'messages', id);
-    try {
-      await setDoc(msgRef, {
-        id,
-        role,
-        content,
-        sessionId: sessionId || null,
-        timestamp: serverTimestamp()
-      });
-      if (sessionId) {
-        await setDoc(doc(db, 'users', user.uid, 'sessions', sessionId), { updatedAt: serverTimestamp() }, { merge: true });
-      }
-    } catch (e) {
-      handleFirestoreError(e, OperationType.CREATE, `users/${user.uid}/messages/${id}`);
-    }
-  };
-
-  // Deadline check
-  useEffect(() => {
-    if (!state.isLoaded) return;
-    const checkDeadlines = async () => {
-      const now = new Date();
-      const expiredTasks = state.tasks.filter(t => 
-        t.status !== 'completed' && 
-        t.status !== 'failed' && 
-        t.deadline && 
-        new Date(t.deadline) < now &&
-        !t.failureHandled
-      );
-
-      if (expiredTasks.length > 0) {
-        if (user) {
-          const batch = writeBatch(db);
-          expiredTasks.forEach(t => {
-            const taskRef = doc(db, 'users', user.uid, 'tasks', t.id);
-            batch.update(taskRef, { status: 'failed', failureHandled: true });
-          });
-          await batch.commit();
+  const addXp = useCallback(async (amount: number) => {
+    setXp(prev => {
+      const next = prev + amount;
+      saveToStorage(STORAGE_KEYS.xp, next);
+      // Update daily history
+      const today = new Date().toISOString().slice(0, 10);
+      setDailyHistory(hist => {
+        const existing = hist.find(h => h.date === today);
+        let next_hist: DailyXP[];
+        if (existing) {
+          next_hist = hist.map(h => h.date === today ? { ...h, xp: h.xp + amount } : h);
         } else {
-          setState(prev => ({
-            ...prev,
-            tasks: prev.tasks.map(t => {
-              const isExpired = expiredTasks.find(et => et.id === t.id);
-              return isExpired ? { ...t, status: 'failed', failureHandled: true } : t;
-            })
-          }));
+          next_hist = [...hist, { date: today, xp: amount }];
         }
-      }
-    };
-
-    const interval = setInterval(checkDeadlines, 60000); // Check every minute
-    checkDeadlines();
-    return () => clearInterval(interval);
-  }, [state.tasks, state.isLoaded, user]);
-
-  const deleteSession = async (sessionId: string) => {
-    if (!user) return;
-    try {
-      // Delete all messages in the session first
-      const messagesQuery = query(
-        collection(db, 'users', user.uid, 'messages'),
-        where('sessionId', '==', sessionId)
-      );
-      const messagesSnapshot = await getDocs(messagesQuery);
-      
-      const batch = writeBatch(db);
-      messagesSnapshot.docs.forEach(doc => {
-        batch.delete(doc.ref);
+        saveToStorage(STORAGE_KEYS.history, next_hist);
+        return next_hist;
       });
-      
-      // Delete the session document
-      const sessionRef = doc(db, 'users', user.uid, 'sessions', sessionId);
-      batch.delete(sessionRef);
-      
-      await batch.commit();
-    } catch (e) {
-      handleFirestoreError(e, OperationType.DELETE, `users/${user.uid}/sessions/${sessionId}`);
-    }
-  };
+      return next;
+    });
+  }, []);
 
-  return { 
+  const updateTasks = useCallback(async (newTasks: Task[]) => {
+    setTasks(newTasks);
+    saveToStorage(STORAGE_KEYS.tasks, newTasks);
+  }, []);
+
+  const completeTask = useCallback(async (taskId: string): Promise<boolean> => {
+    let allDone = false;
+    setTasks(prev => {
+      const updated = prev.map(t => {
+        if (t.id === taskId) {
+          addXp(t.xp);
+          return { ...t, status: 'completed' as const, completedAt: new Date().toISOString() };
+        }
+        return t;
+      });
+      const remaining = updated.filter(t => t.status !== 'completed' && t.status !== 'failed');
+      allDone = remaining.length === 0;
+      saveToStorage(STORAGE_KEYS.tasks, updated);
+      return updated;
+    });
+    return allDone;
+  }, [addXp]);
+
+  const setTaskActive = useCallback(async (taskId: string) => {
+    setTasks(prev => {
+      const updated = prev.map(t => t.id === taskId ? { ...t, status: 'active' as const } : t);
+      saveToStorage(STORAGE_KEYS.tasks, updated);
+      return updated;
+    });
+  }, []);
+
+  const deleteTasks = useCallback(async (taskIds: string[]) => {
+    setTasks(prev => {
+      const updated = prev.filter(t => !taskIds.includes(t.id));
+      saveToStorage(STORAGE_KEYS.tasks, updated);
+      return updated;
+    });
+  }, []);
+
+  const saveMessage = useCallback(async (role: 'user' | 'model', content: string, sessionId?: string) => {
+    const msg: Message = {
+      id: `msg_${Date.now()}_${Math.random().toString(36).slice(2)}`,
+      sessionId,
+      role,
+      content,
+      timestamp: new Date().toISOString(),
+    };
+    setMessages(prev => {
+      const updated = [...prev, msg];
+      saveToStorage(STORAGE_KEYS.messages, updated);
+      return updated;
+    });
+  }, []);
+
+  const createSession = useCallback(async (title: string, mode: string): Promise<string> => {
+    const id = `session_${Date.now()}_${Math.random().toString(36).slice(2)}`;
+    const session: ChatSession = {
+      id,
+      title,
+      mode,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    };
+    setSessions(prev => {
+      const updated = [session, ...prev];
+      saveToStorage(STORAGE_KEYS.sessions, updated);
+      return updated;
+    });
+    return id;
+  }, []);
+
+  const updateSessionTitle = useCallback(async (sessionId: string, title: string) => {
+    setSessions(prev => {
+      const updated = prev.map(s => s.id === sessionId ? { ...s, title, updatedAt: new Date().toISOString() } : s);
+      saveToStorage(STORAGE_KEYS.sessions, updated);
+      return updated;
+    });
+  }, []);
+
+  const deleteSession = useCallback(async (sessionId: string) => {
+    setSessions(prev => {
+      const updated = prev.filter(s => s.id !== sessionId);
+      saveToStorage(STORAGE_KEYS.sessions, updated);
+      return updated;
+    });
+    setMessages(prev => {
+      const updated = prev.filter(m => m.sessionId !== sessionId);
+      saveToStorage(STORAGE_KEYS.messages, updated);
+      return updated;
+    });
+  }, []);
+
+  const executeTaskWithAi = useCallback(async (taskId: string, prompt: string) => {
+    // placeholder — handled in component
+  }, []);
+
+  return {
     user,
-    xp: state.xp, 
-    tasks: state.tasks, 
-    messages: state.messages,
-    sessions: state.sessions,
-    rank, 
-    dailyHistory: state.dailyHistory, 
-    addXp, 
-    updateTasks, 
-    completeTask, 
-    launchGame, 
-    setTaskActive, 
+    xp,
+    tasks,
+    messages,
+    sessions,
+    rank,
+    dailyHistory,
+    lastLaunch,
+    isLoaded,
+    launchGame,
+    addXp,
+    updateTasks,
+    completeTask,
+    setTaskActive,
+    deleteTasks,
     saveMessage,
     createSession,
     updateSessionTitle,
     deleteSession,
     executeTaskWithAi,
-    deleteTasks,
-    isLoaded: state.isLoaded 
   };
 }

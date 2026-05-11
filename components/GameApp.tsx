@@ -2,13 +2,14 @@
 
 import React, { useState, useRef, useEffect, Component, ErrorInfo, ReactNode } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { Terminal, Send, Zap, Trophy, ListChecks, Play, CheckCircle2, Circle, Home, BarChart3, LogIn, LogOut, User as UserIcon, AlertTriangle, Cpu, Loader2, ChevronDown, ChevronUp, Flame, BatteryMedium, CloudFog, Target, X, Activity, Mic, MicOff, Code, FileText, Brain, Image as ImageIcon, Plus, History } from 'lucide-react';
+import { Terminal, Send, Zap, Trophy, ListChecks, Play, CheckCircle2, Circle, Home, BarChart3, User as UserIcon, AlertTriangle, Cpu, Loader2, ChevronDown, ChevronUp, Flame, BatteryMedium, CloudFog, Target, X, Activity, Mic, MicOff, Code, FileText, Brain, Image as ImageIcon, Plus, History } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import { getGeminiResponse, getGeminiResponseStream } from '@/lib/gemini';
 import { useGameState, Task, Message as GameMessage } from '@/hooks/use-game-state';
 import { useBinauralBeats, AuraFrequency } from '@/hooks/use-binaural-beats';
 import { AuraBackground } from '@/components/AuraVisualizer';
-import { loginWithGoogle, logout } from '@/firebase';
+// firebase stub imported for any remaining references
+import '@/firebase';
 
 import Image from 'next/image';
 
@@ -960,39 +961,12 @@ ${taskContext}
             </div>
           </div>
           
-          {/* Auth Section */}
+          {/* User Section */}
           <div className="col-span-2 md:col-span-1 border border-white/10 bg-black/40 p-3 rounded-lg flex items-center justify-between gap-3">
-            {user ? (
-              <>
-                <div className="flex items-center gap-2 overflow-hidden">
-                  {user.photoURL ? (
-                    <div className="relative w-6 h-6 rounded-full border border-[#00ff88]/30 overflow-hidden">
-                      <Image 
-                        src={user.photoURL} 
-                        alt="Avatar" 
-                        fill 
-                        className="object-cover"
-                        referrerPolicy="no-referrer"
-                      />
-                    </div>
-                  ) : (
-                    <UserIcon size={16} className="text-[#00ff88]/50" />
-                  )}
-                  <div className="text-[9px] uppercase font-black truncate text-white/70">{user.displayName || 'Creator'}</div>
-                </div>
-                <button onClick={logout} className="text-red-500/50 hover:text-red-500 transition-colors">
-                  <LogOut size={14} />
-                </button>
-              </>
-            ) : (
-              <button 
-                onClick={loginWithGoogle}
-                className="w-full flex items-center justify-center gap-2 text-[9px] uppercase font-black text-[#00ff88] hover:text-white transition-colors"
-              >
-                <LogIn size={14} />
-                <span>Войти</span>
-              </button>
-            )}
+            <div className="flex items-center gap-2 overflow-hidden">
+              <UserIcon size={16} className="text-[#00ff88]/50" />
+              <div className="text-[9px] uppercase font-black truncate text-white/70">{user.displayName || 'Boss'}</div>
+            </div>
           </div>
         </div>
         )}
@@ -1163,20 +1137,7 @@ ${taskContext}
               </button>
             </motion.div>
             
-            {!user && (
-              <div className="mt-8 flex flex-col items-center gap-4">
-                <div className="text-[10px] text-[#00ff88]/30 uppercase tracking-widest text-center max-w-xs">
-                  Внимание: прогресс сохраняется локально. Войдите через Google для облачной синхронизации.
-                </div>
-                <button 
-                  onClick={loginWithGoogle}
-                  className="flex items-center justify-center gap-2 text-[10px] uppercase font-black text-[#00ff88] hover:text-white transition-colors border border-[#00ff88]/30 px-6 py-3 rounded-lg hover:bg-[#00ff88]/10"
-                >
-                  <LogIn size={14} />
-                  <span>Войти через Google</span>
-                </button>
-              </div>
-            )}
+
           </div>
         ) : (
           <div className="flex flex-col gap-12 pb-20">
