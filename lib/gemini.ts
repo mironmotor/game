@@ -124,7 +124,7 @@ ${contextPart}`;
 
   // Make 1 single call to gemini-2.5-flash for the experts instead of 4
   const expertsRawResponse = await ai.models.generateContent({
-    model: "gemini-2.5-flash",
+    model: "gemini-2.0-flash",
     contents: [
       ...history,
       { role: "user", parts: [{ text: message }] }
@@ -178,7 +178,7 @@ ${contextPart}`;
 
   // Send to Synthesizer using gemini-2.5-pro or flash via stream
   const responseStream = await ai.models.generateContentStream({
-    model: "gemini-2.5-pro",
+    model: "gemini-2.0-flash",
     contents: [
       { role: "user", parts: [{ text: `User Message: "${message}"\n\n${expertOutputs}` }] }
     ],
@@ -197,7 +197,7 @@ export async function executeAiAgentTask(taskDesc: string, context?: string) {
   const ai = new GoogleGenAI({ apiKey: process.env.NEXT_PUBLIC_GEMINI_API_KEY! });
   
   const response = await ai.models.generateContent({
-    model: "gemini-2.5-flash",
+    model: "gemini-2.0-flash",
     contents: [
       { role: "user", parts: [{ text: `TASK TO EXECUTE: ${taskDesc}\n\nCONTEXT:\n${context || "No additional context."}` }] }
     ],
@@ -218,7 +218,7 @@ export async function getGeminiResponseStream(message: string, history: any[], u
   const finalSystemInstruction = customSystemPrompt ? customSystemPrompt : (SYSTEM_INSTRUCTION + contextPart);
   
   const responseStream = await ai.models.generateContentStream({
-    model: "gemini-2.5-flash",
+    model: "gemini-2.0-flash",
     contents: [
       ...history,
       { role: "user", parts: [{ text: message }] }
@@ -239,7 +239,7 @@ export async function getGeminiResponse(message: string, history: any[], userCon
   const contextPart = userContext ? `\n\nUSER HISTORY CONTEXT:\n${userContext}` : "";
   
   const model = ai.models.generateContent({
-    model: "gemini-2.5-flash",
+    model: "gemini-2.0-flash",
     contents: [
       ...history,
       { role: "user", parts: [{ text: message }] }
