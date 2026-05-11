@@ -398,16 +398,12 @@ function GameContent() {
           }
         }
 
-        // Generate and play speech
+        // Generate and play speech (Web Speech API speaks directly, no audio URL needed)
         try {
           const { generateSpeech } = await import('@/lib/gemini');
           const textForSpeech = fullResponse.replace(/```json\s*[\s\S]*?\s*```/g, '').replace(/[*_~`#]/g, '').trim();
           if (textForSpeech) {
-            const audioDataUrl = await generateSpeech(textForSpeech);
-            if (audioDataUrl && audioRef.current) {
-              audioRef.current.src = audioDataUrl;
-              audioRef.current.play().catch(e => console.error("Could not play AGI audio automatically:", e));
-            }
+            await generateSpeech(textForSpeech);
           }
         } catch (e) {
           console.error("AGI Speech generation failed:", e);

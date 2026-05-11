@@ -25,13 +25,13 @@ The active tasks are listed in the message. Directly comment on their tasks, and
 JSON RULES (ONLY when creating or updating tasks):
 - Output a JSON block at the end of your message
 - Wrap it in backtick-fenced json code block
-- Include: id (unique string), desc, mgr (MGR-1/MGR-2/MGR-3), xp (10/30/50), status ("active"), scheduledTime ("HH:MM"), deadline (ISO 8601 date)
+- Include: id (unique string like "task_1"), desc (SHORT clear description in Russian, 3-8 words, NO game jargon, NO "T-MINUS", NO "SECTOR", NO military/sci-fi terms), mgr (MGR-1/MGR-2/MGR-3), xp (10/30/50), status ("active"), scheduledTime ("HH:MM"), deadline (ISO 8601 date)
 - Can also include: delete_tasks (array of ids), complete_tasks (array of ids), xp_gain (number), agent_insight (short string)
 
 Example JSON:
 \`\`\`json
 {
-  "tasks": [{"id": "task_1", "desc": "Write project plan", "mgr": "MGR-3", "xp": 50, "status": "active", "scheduledTime": "10:00", "deadline": "2026-05-11T18:00:00Z"}],
+  "tasks": [{"id": "task_1", "desc": "Написать план проекта", "mgr": "MGR-3", "xp": 50, "status": "active", "scheduledTime": "10:00", "deadline": "2026-05-11T18:00:00Z"}],
   "xp_gain": 50,
   "agent_insight": "День начинается с фокуса"
 }
@@ -60,7 +60,7 @@ End with a "RESULT: [SUCCESS/COMPLETED]" block.
 `;
 
 const OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions";
-const OPENROUTER_MODEL = "nvidia/nemotron-nano-9b-v2:free";
+const OPENROUTER_MODEL = "openai/gpt-5.1";
 
 // Convert Google-style history {role, parts: [{text}]} to OpenAI-style {role, content}
 function convertHistoryToOpenAI(history: any[]): any[] {
@@ -368,34 +368,41 @@ export async function generateImage(prompt: string): Promise<string | null> {
 }
 
 export async function generateSpeech(text: string): Promise<string | null> {
-  // Google Translate TTS — free, no API key, Russian voice
+  // Web Speech API — built into all modern browsers, free, no API key needed
+  // This runs in the browser (client-side), not on the server
+  if (typeof window === 'undefined') return null;
+  
   try {
     const cleanText = text
-      .replace(/\*\*/g, '')
-      .replace(/\*/g, '')
-      .replace(/#{1,6}\s/g, '')
-      .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1')
+      .replace(/```json\s*[\s\S]*?\s*```/g, '')
       .replace(/```[\s\S]*?```/g, '')
-      .replace(/`([^`]+)`/g, '$1')
+      .replace(/[*_~`#]/g, '')
+      .replace(/\[[^\]]*\]\([^)]*\)/g, '')
       .replace(/\n+/g, '. ')
       .replace(/\s+/g, ' ')
       .trim()
-      .slice(0, 180); // Google TTS limit ~200 chars
+      .slice(0, 200);
 
-    if (!cleanText) return null;
+    if (!cleanText || !window.speechSynthesis) return null;
 
-    const url = `https://translate.google.com/translate_tts?ie=UTF-8&tl=ru&client=tw-ob&q=${encodeURIComponent(cleanText)}`;
-    const resp = await fetch(url);
-    if (!resp.ok) throw new Error(`Google TTS error: ${resp.status}`);
-    const mp3Buf = await resp.arrayBuffer();
-    const blob = new Blob([mp3Buf], { type: 'audio/mpeg' });
-    return new Promise<string>((resolve) => {
-      const reader = new FileReader();
-      reader.onloadend = () => resolve(reader.result as string);
-      reader.readAsDataURL(blob);
-    });
+    // Cancel any ongoing speech
+    window.speechSynthesis.cancel();
+
+    const utterance = new SpeechSynthesisUtterance(cleanText);
+    utterance.lang = 'ru-RU';
+    utterance.rate = 1.0;
+    utterance.pitch = 0.9; // slightly lower = more "Jarvis-like"
+    utterance.volume = 1.0;
+
+    // Try to find a Russian voice
+    const voices = window.speechSynthesis.getVoices();
+    const ruVoice = voices.find(v => v.lang.startsWith('ru'));
+    if (ruVoice) utterance.voice = ruVoice;
+
+    window.speechSynthesis.speak(utterance);
+    return 'spoken'; // signal that speech was started
   } catch (error) {
-    console.error('Google TTS failed:', error);
+    console.error('Web Speech TTS failed:', error);
     return null;
   }
 }
