@@ -790,14 +790,14 @@ ${taskContext}
         console.warn('Main chat network error: Failed to fetch');
         setMessages(prev => {
           const newMsgs = [...prev];
-          newMsgs[newMsgs.length - 1] = { role: 'model', content: "SYSTEM ERROR: Сетевое подключение разорвано. Проверьте интернет." };
+          newMsgs[newMsgs.length - 1] = { role: 'model', content: "Сетевая ошибка. Проверь интернет и API ключ." };
           return newMsgs;
         });
       } else {
         console.error("Handle Send Error:", error);
         setMessages(prev => {
           const newMsgs = [...prev];
-          newMsgs[newMsgs.length - 1] = { role: 'model', content: "SYSTEM ERROR: Connection to neural link failed." };
+          newMsgs[newMsgs.length - 1] = { role: 'model', content: `Ошибка API: ${error.message || 'unknown'}. Проверь консоль браузера (F12).` };
           return newMsgs;
         });
       }

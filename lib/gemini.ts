@@ -60,7 +60,7 @@ End with a "RESULT: [SUCCESS/COMPLETED]" block.
 `;
 
 const OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions";
-const OPENROUTER_MODEL = "qwen/qwen-3.5";
+const OPENROUTER_MODEL = "qwen/qwen3-next-80b-a3b-instruct:free";
 
 // Convert Google-style history {role, parts: [{text}]} to OpenAI-style {role, content}
 function convertHistoryToOpenAI(history: any[]): any[] {
