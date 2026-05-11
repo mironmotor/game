@@ -8,19 +8,19 @@ MGR LEVELS:
 - MGR-2: Focus tasks (30 XP) — require concentration
 - MGR-1: Simple logistics (10 XP) — quick routine tasks
 
-TONE: Short, friendly, practical. 1-2 sentences max. No dramatic roleplay. No fake system messages. No error simulations. Just talk normally to the user in Russian. Call them "Босс".
+TONE: Short, friendly, practical. 1-2 sentences max. No dramatic roleplay. No fake system messages. No error simulations. Only greet ONCE at the very start of a new session with "С возвращением, Босс!" — after that, answer directly without any greeting. Just talk normally to the user in Russian. Call them "Босс".
 
 HOW IT WORKS:
 
 If there are NO active tasks (the message starts with "[СИСТЕМА: НОВАЯ СЕССИЯ]"):
-Ask 3 questions ONE AT A TIME, waiting for each answer:
+Start with "С возвращением, Босс!" then ask 3 questions ONE AT A TIME, waiting for each answer:
 1. "Какая главная задача на сегодня, Босс? (MGR-3)"
 2. After they answer: "Что ещё требует внимания или привычек? (MGR-2)"
 3. After they answer: "Какая мелкая логистика осталась? (MGR-1)"
 4. After ALL 3 answers — create a JSON block with all tasks
 
 If there ARE active tasks (the message starts with "[СИСТЕМА: ПРОДОЛЖЕНИЕ СЕССИИ]"):
-The active tasks are listed in the message. Briefly greet the user back, comment on their tasks, and ask what they want to work on. Do NOT ask the 3 MGR questions.
+The active tasks are listed in the message. Directly comment on their tasks, and ask what they want to work on. NO greeting. Do NOT ask the 3 MGR questions.
 
 JSON RULES (ONLY when creating or updating tasks):
 - Output a JSON block at the end of your message
@@ -367,11 +367,37 @@ export async function generateImage(prompt: string): Promise<string | null> {
   }
 }
 
-// TTS disabled: Google API key replaced with OpenRouter (no TTS equivalent)
 export async function generateSpeech(text: string): Promise<string | null> {
-  // TTS disabled: OpenRouter doesn't support speech synthesis
-  console.log('TTS skipped: OpenRouter has no TTS');
-  return null;
+  // Google Translate TTS — free, no API key, Russian voice
+  try {
+    const cleanText = text
+      .replace(/\*\*/g, '')
+      .replace(/\*/g, '')
+      .replace(/#{1,6}\s/g, '')
+      .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1')
+      .replace(/```[\s\S]*?```/g, '')
+      .replace(/`([^`]+)`/g, '$1')
+      .replace(/\n+/g, '. ')
+      .replace(/\s+/g, ' ')
+      .trim()
+      .slice(0, 180); // Google TTS limit ~200 chars
+
+    if (!cleanText) return null;
+
+    const url = `https://translate.google.com/translate_tts?ie=UTF-8&tl=ru&client=tw-ob&q=${encodeURIComponent(cleanText)}`;
+    const resp = await fetch(url);
+    if (!resp.ok) throw new Error(`Google TTS error: ${resp.status}`);
+    const mp3Buf = await resp.arrayBuffer();
+    const blob = new Blob([mp3Buf], { type: 'audio/mpeg' });
+    return new Promise<string>((resolve) => {
+      const reader = new FileReader();
+      reader.onloadend = () => resolve(reader.result as string);
+      reader.readAsDataURL(blob);
+    });
+  } catch (error) {
+    console.error('Google TTS failed:', error);
+    return null;
+  }
 }
 
 function pcmBase64ToWavUrl(pcmBase64: string, sampleRate = 24000): string {
