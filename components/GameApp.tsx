@@ -519,6 +519,22 @@ function GameContent() {
     }
   };
 
+  const handleContinue = () => {
+    // Enter the game silently — restore last session without sending AI greeting
+    if (audioRef.current) {
+      audioRef.current.src = 'data:audio/wav;base64,UklGRigAAABXQVZFZm10IBIAAAABAAEARKwAAIhYAQACABAAAABkYXRhAgAAAAEA';
+      audioRef.current.play().catch(() => {});
+    }
+    const lastSession = sessions.find(s => !s.mode || !s.mode.startsWith('agi_'));
+    if (lastSession) {
+      setCurrentSessionId(lastSession.id);
+      setMessages(dbMessages.filter(m => m.sessionId === lastSession.id));
+    }
+    const lastMode = (lastSession?.mode as 'high' | 'normal' | 'low') || 'normal';
+    setEnergyMode(['high','normal','low'].includes(lastMode) ? lastMode : 'normal');
+    setIsStarted(true);
+  };
+
   const handleStart = async (mode: 'high' | 'normal' | 'low') => {
     // Unlock audio context on user interaction
     if (audioRef.current) {
@@ -1079,6 +1095,25 @@ ${taskContext}
                     </button>
                   ))}
                 </div>
+              </motion.div>
+            )}
+
+            {/* Continue button - shown when there's existing session history */}
+            {sessions.filter(s => !s.mode?.startsWith('agi_')).length > 0 && (
+              <motion.div
+                initial={{ opacity: 0, y: 10 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ delay: 0.15 }}
+                className="w-full max-w-4xl px-4"
+              >
+                <button
+                  onClick={handleContinue}
+                  className="w-full flex items-center justify-center gap-3 p-4 rounded-xl border-2 border-[#00ff88]/50 bg-[#00ff88]/5 hover:bg-[#00ff88]/15 hover:border-[#00ff88] hover:scale-[1.02] transition-all group mb-2"
+                >
+                  <Play size={20} className="text-[#00ff88]" />
+                  <span className="font-black text-[#00ff88] uppercase tracking-wider">Продолжить без приветствия</span>
+                </button>
+                <p className="text-center text-[10px] text-white/30 uppercase tracking-widest">— или выбери режим для нового старта —</p>
               </motion.div>
             )}
 
