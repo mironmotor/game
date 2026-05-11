@@ -1,4 +1,4 @@
-import { GoogleGenAI, Type, Modality } from "@google/genai";
+import { GoogleGenAI } from "@google/genai";
 
 const SYSTEM_INSTRUCTION = `
 You are the "GAME: Reality Creator" AI Agent. Your goal is to help the user structure their day as a high-stakes gamified quest.
@@ -100,11 +100,88 @@ Start with a "STATUS: EXECUTING..." header.
 End with a "RESULT: [SUCCESS/COMPLETED]" block.
 `;
 
-export async function* getMultiAgentGeminiResponseStream(message: string, history: any[], userContext?: string, showReasoning: boolean = false) {
-  const ai = new GoogleGenAI({ apiKey: process.env.NEXT_PUBLIC_GEMINI_API_KEY! });
-  
+const OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions";
+const OPENROUTER_MODEL = "nvidia/nemotron-3-super-120b-a12b:free";
+
+function getApiKey(): string {
+  return process.env.NEXT_PUBLIC_OPENROUTER_API_KEY || process.env.NEXT_PUBLIC_GEMINI_API_KEY || "";
+}
+
+export async function* getGeminiResponseStream(message: string, history: any[], userContext?: string, customSystemPrompt?: string) {
   const contextPart = userContext ? `\n\nUSER HISTORY CONTEXT:\n${userContext}` : "";
-  
+  const finalSystemInstruction = customSystemPrompt ? customSystemPrompt : (SYSTEM_INSTRUCTION + contextPart);
+
+  const response = await fetch(OPENROUTER_URL, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "Authorization": `Bearer ${getApiKey()}`,
+    },
+    body: JSON.stringify({
+      model: OPENROUTER_MODEL,
+      messages: [
+        { role: "system", content: finalSystemInstruction },
+        ...history,
+        { role: "user", content: message }
+      ],
+      stream: true,
+      temperature: 0.7,
+    }),
+  });
+
+  if (!response.ok || !response.body) throw new Error(`OpenRouter API error: ${response.status}`);
+
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = '';
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    const lines = buffer.split('\n');
+    buffer = lines.pop() || '';
+    for (const line of lines) {
+      const trimmed = line.trim();
+      if (!trimmed || trimmed === 'data: [DONE]') continue;
+      if (trimmed.startsWith('data: ')) {
+        try {
+          const parsed = JSON.parse(trimmed.slice(6));
+          const delta = parsed.choices?.[0]?.delta?.content;
+          if (delta) yield { text: delta };
+        } catch {}
+      }
+    }
+  }
+}
+
+export async function getGeminiResponse(message: string, history: any[], userContext?: string) {
+  const contextPart = userContext ? `\n\nUSER HISTORY CONTEXT:\n${userContext}` : "";
+
+  const response = await fetch(OPENROUTER_URL, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "Authorization": `Bearer ${getApiKey()}`,
+    },
+    body: JSON.stringify({
+      model: OPENROUTER_MODEL,
+      messages: [
+        { role: "system", content: SYSTEM_INSTRUCTION + contextPart },
+        ...history,
+        { role: "user", content: message }
+      ],
+      temperature: 0.7,
+    }),
+  });
+
+  const data = await response.json();
+  return data.choices?.[0]?.message?.content || '';
+}
+
+export async function* getMultiAgentGeminiResponseStream(message: string, history: any[], userContext?: string, showReasoning: boolean = false) {
+  const contextPart = userContext ? `\n\nUSER HISTORY CONTEXT:\n${userContext}` : "";
+
   const multiAgentPrompt = `Вы - система из 4-х специализированных ИИ-модулей, анализирующих запрос пользователя.
 Выведите ТОЛЬКО валидный JSON массив объектов в следующем формате:
 [
@@ -122,28 +199,32 @@ export async function* getMultiAgentGeminiResponseStream(message: string, histor
 
 ${contextPart}`;
 
-  // Make 1 single call to gemini-2.5-flash for the experts instead of 4
-  const expertsRawResponse = await ai.models.generateContent({
-    model: "gemini-2.0-flash",
-    contents: [
-      ...history,
-      { role: "user", parts: [{ text: message }] }
-    ],
-    config: {
-      systemInstruction: multiAgentPrompt,
-      responseMimeType: "application/json",
+  // Experts call - non-streaming
+  const expertsResponse = await fetch(OPENROUTER_URL, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "Authorization": `Bearer ${getApiKey()}`,
+    },
+    body: JSON.stringify({
+      model: OPENROUTER_MODEL,
+      messages: [
+        { role: "system", content: multiAgentPrompt },
+        ...history,
+        { role: "user", content: message }
+      ],
       temperature: 0.6,
-    }
+    }),
   });
 
   let expertResponses: { name: string, text: string }[] = [];
   try {
-    const rawText = expertsRawResponse.text?.trim() || "[]";
+    const expertsData = await expertsResponse.json();
+    const rawText = expertsData.choices?.[0]?.message?.content?.trim() || "[]";
     const jsonStr = rawText.replace(/```json\n?|\n?```/g, '').trim();
     expertResponses = JSON.parse(jsonStr);
   } catch (e) {
     console.error("Failed to parse JSON from multi-agent", e);
-    // Fallback if parsing fails
     expertResponses = [
       { name: "Системный Сбой", text: "Модули не смогли синхронизировать данные (429 или ошибка парсинга)." }
     ];
@@ -176,125 +257,149 @@ ${contextPart}`;
 Подавай эту информацию как единую мощную и иммерсивную сводку (можно использовать списки и абзацы). Ограничения на длину в этом сообщении НЕТ.`;
   }
 
-  // Send to Synthesizer using gemini-2.5-pro or flash via stream
-  const responseStream = await ai.models.generateContentStream({
-    model: "gemini-2.0-flash",
-    contents: [
-      { role: "user", parts: [{ text: `User Message: "${message}"\n\n${expertOutputs}` }] }
-    ],
-    config: {
-      systemInstruction: synthesizerInstruction,
+  // Synthesizer call - streaming
+  const synthResponse = await fetch(OPENROUTER_URL, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "Authorization": `Bearer ${getApiKey()}`,
+    },
+    body: JSON.stringify({
+      model: OPENROUTER_MODEL,
+      messages: [
+        { role: "system", content: synthesizerInstruction },
+        { role: "user", content: `User Message: "${message}"\n\n${expertOutputs}` }
+      ],
+      stream: true,
       temperature: 0.5,
-    }
+    }),
   });
 
-  for await (const chunk of responseStream) {
-    yield chunk;
+  if (!synthResponse.ok || !synthResponse.body) throw new Error(`OpenRouter API error (synthesizer): ${synthResponse.status}`);
+
+  const reader = synthResponse.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = '';
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    const lines = buffer.split('\n');
+    buffer = lines.pop() || '';
+    for (const line of lines) {
+      const trimmed = line.trim();
+      if (!trimmed || trimmed === 'data: [DONE]') continue;
+      if (trimmed.startsWith('data: ')) {
+        try {
+          const parsed = JSON.parse(trimmed.slice(6));
+          const delta = parsed.choices?.[0]?.delta?.content;
+          if (delta) yield { text: delta };
+        } catch {}
+      }
+    }
   }
 }
 
 export async function executeAiAgentTask(taskDesc: string, context?: string) {
-  const ai = new GoogleGenAI({ apiKey: process.env.NEXT_PUBLIC_GEMINI_API_KEY! });
-  
-  const response = await ai.models.generateContent({
-    model: "gemini-2.0-flash",
-    contents: [
-      { role: "user", parts: [{ text: `TASK TO EXECUTE: ${taskDesc}\n\nCONTEXT:\n${context || "No additional context."}` }] }
-    ],
-    config: {
-      systemInstruction: AGENT_EXECUTION_INSTRUCTION,
+  const response = await fetch(OPENROUTER_URL, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "Authorization": `Bearer ${getApiKey()}`,
+    },
+    body: JSON.stringify({
+      model: OPENROUTER_MODEL,
+      messages: [
+        { role: "system", content: AGENT_EXECUTION_INSTRUCTION },
+        { role: "user", content: `TASK TO EXECUTE: ${taskDesc}\n\nCONTEXT:\n${context || "No additional context."}` }
+      ],
       temperature: 0.4,
-      tools: [{ googleSearch: {} }],
-    }
+    }),
   });
 
-  return response.text;
-}
-
-export async function getGeminiResponseStream(message: string, history: any[], userContext?: string, customSystemPrompt?: string) {
-  const ai = new GoogleGenAI({ apiKey: process.env.NEXT_PUBLIC_GEMINI_API_KEY! });
-  
-  const contextPart = userContext ? `\n\nUSER HISTORY CONTEXT:\n${userContext}` : "";
-  const finalSystemInstruction = customSystemPrompt ? customSystemPrompt : (SYSTEM_INSTRUCTION + contextPart);
-  
-  const responseStream = await ai.models.generateContentStream({
-    model: "gemini-2.0-flash",
-    contents: [
-      ...history,
-      { role: "user", parts: [{ text: message }] }
-    ],
-    config: {
-      systemInstruction: finalSystemInstruction,
-      temperature: 0.7,
-      tools: [{ googleSearch: {} }],
-    }
-  });
-
-  return responseStream;
-}
-
-export async function getGeminiResponse(message: string, history: any[], userContext?: string) {
-  const ai = new GoogleGenAI({ apiKey: process.env.NEXT_PUBLIC_GEMINI_API_KEY! });
-  
-  const contextPart = userContext ? `\n\nUSER HISTORY CONTEXT:\n${userContext}` : "";
-  
-  const model = ai.models.generateContent({
-    model: "gemini-2.0-flash",
-    contents: [
-      ...history,
-      { role: "user", parts: [{ text: message }] }
-    ],
-    config: {
-      systemInstruction: SYSTEM_INSTRUCTION + contextPart,
-      temperature: 0.7,
-      tools: [{ googleSearch: {} }],
-    }
-  });
-
-  const response = await model;
-  return response.text;
+  const data = await response.json();
+  return data.choices?.[0]?.message?.content || '';
 }
 
 export async function generateImage(prompt: string): Promise<string | null> {
-  const ai = new GoogleGenAI({ apiKey: process.env.NEXT_PUBLIC_GEMINI_API_KEY! });
-  
+  // Try OpenRouter image generation first (black-forest-labs)
   try {
-    const response = await ai.models.generateContent({
-      model: 'gemini-2.0-flash-preview-image-generation',
-      contents: {
-        parts: [
-          {
-            text: prompt,
-          },
+    const response = await fetch(OPENROUTER_URL, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": `Bearer ${getApiKey()}`,
+      },
+      body: JSON.stringify({
+        model: "black-forest-labs/flux-schnell",
+        messages: [
+          { role: "user", content: prompt }
         ],
-      },
-      config: {
-        imageConfig: {
-          aspectRatio: "1:1",
-        },
-      },
+      }),
     });
 
-    for (const part of response.candidates?.[0]?.content?.parts || []) {
-      if (part.inlineData) {
-        const base64EncodeString: string = part.inlineData.data;
-        return `data:${part.inlineData.mimeType || 'image/png'};base64,${base64EncodeString}`;
-      }
+    if (!response.ok) {
+      throw new Error(`OpenRouter image API error: ${response.status}`);
     }
+
+    const data = await response.json();
+    // OpenRouter image models return base64 in the content or in a data array
+    const content = data.choices?.[0]?.message?.content;
+    if (content && content.startsWith('data:image')) {
+      return content;
+    }
+    // Some models return a URL
+    if (content && content.startsWith('http')) {
+      return content;
+    }
+
+    // Fallback: check for data array in the response
+    if (data.data && data.data[0]?.b64_json) {
+      return `data:image/png;base64,${data.data[0].b64_json}`;
+    }
+    if (data.data && data.data[0]?.url) {
+      return data.data[0].url;
+    }
+
     return null;
   } catch (error) {
-    if (error instanceof Error && (error.name === 'AbortError' || error.message.toLowerCase().includes('abort'))) {
-      console.log("Image generation skipped: user aborted");
-      return null;
+    console.error("OpenRouter image generation failed, falling back to Google:", error);
+    // Fallback to Google Gemini image generation
+    if (!process.env.NEXT_PUBLIC_GEMINI_API_KEY) {
+      console.error("Gemini API key is also missing");
+      throw error;
     }
-    console.error("Image generation failed:", error);
-    throw error;
+
+    try {
+      const ai = new GoogleGenAI({ apiKey: process.env.NEXT_PUBLIC_GEMINI_API_KEY });
+      const geminiResponse = await ai.models.generateContent({
+        model: 'gemini-2.0-flash-preview-image-generation',
+        contents: {
+          parts: [{ text: prompt }],
+        },
+        config: {
+          imageConfig: { aspectRatio: "1:1" },
+        },
+      });
+
+      for (const part of geminiResponse.candidates?.[0]?.content?.parts || []) {
+        if (part.inlineData) {
+          const base64EncodeString: string = part.inlineData.data;
+          return `data:${part.inlineData.mimeType || 'image/png'};base64,${base64EncodeString}`;
+        }
+      }
+      return null;
+    } catch (geminiError) {
+      console.error("Google image generation also failed:", geminiError);
+      throw error;
+    }
   }
 }
 
 export async function generateSpeech(text: string): Promise<string | null> {
   if (!process.env.NEXT_PUBLIC_GEMINI_API_KEY) {
-    console.error("Gemini API key is missing");
+    console.error("Gemini API key is missing for TTS");
     return null;
   }
 
@@ -307,7 +412,7 @@ export async function generateSpeech(text: string): Promise<string | null> {
         responseModalities: ["AUDIO"],
         speechConfig: {
           voiceConfig: {
-            prebuiltVoiceConfig: { voiceName: 'Puck' }, // Puck is a good male voice
+            prebuiltVoiceConfig: { voiceName: 'Puck' },
           },
         },
       },
@@ -315,7 +420,6 @@ export async function generateSpeech(text: string): Promise<string | null> {
 
     const base64Audio = response.candidates?.[0]?.content?.parts?.[0]?.inlineData?.data;
     if (base64Audio) {
-      // Gemini returns raw PCM audio data. We must wrap it in a WAV header to play in <audio> tag.
       return pcmBase64ToWavUrl(base64Audio, 24000);
     }
     return null;
