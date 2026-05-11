@@ -60,7 +60,7 @@ End with a "RESULT: [SUCCESS/COMPLETED]" block.
 `;
 
 const OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions";
-const OPENROUTER_MODEL = "openai/gpt-5.1";
+const OPENROUTER_MODEL = "google/gemini-2.0-flash-exp:free";
 
 // Convert Google-style history {role, parts: [{text}]} to OpenAI-style {role, content}
 function convertHistoryToOpenAI(history: any[]): any[] {
