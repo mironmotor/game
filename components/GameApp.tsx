@@ -401,7 +401,7 @@ function GameContent() {
         // Generate and play speech
         try {
           const { generateSpeech } = await import('@/lib/gemini');
-          const textForSpeech = fullResponse.replace(/```json\n[\s\S]*?\n```/g, '').replace(/[*_~`#]/g, '').trim();
+          const textForSpeech = fullResponse.replace(/```json\s*[\s\S]*?\s*```/g, '').replace(/[*_~`#]/g, '').trim();
           if (textForSpeech) {
             const audioDataUrl = await generateSpeech(textForSpeech);
             if (audioDataUrl && audioRef.current) {
@@ -622,7 +622,7 @@ ${taskContext}
         try {
           const { generateSpeech } = await import('@/lib/gemini');
           // Clean up response for speech (remove markdown, json blocks)
-          const textForSpeech = fullResponse.replace(/```json\n[\s\S]*?\n```/g, '').replace(/[*_~`#]/g, '').trim();
+          const textForSpeech = fullResponse.replace(/```json\s*[\s\S]*?\s*```/g, '').replace(/[*_~`#]/g, '').trim();
           if (textForSpeech) {
             const audioDataUrl = await generateSpeech(textForSpeech);
             if (audioDataUrl && audioRef.current) {
@@ -634,7 +634,7 @@ ${taskContext}
           console.error("Speech generation failed:", e);
         }
 
-        const jsonMatch = fullResponse.match(/```json\n([\s\S]*?)\n```/);
+        const jsonMatch = fullResponse.match(/```json\s*([\s\S]*?)\s*```/);
         if (jsonMatch) {
           try {
             const data = JSON.parse(jsonMatch[1]);
@@ -745,7 +745,7 @@ ${taskContext}
         // Generate and play speech
         try {
           const { generateSpeech } = await import('@/lib/gemini');
-          const textForSpeech = fullResponse.replace(/```json\n[\s\S]*?\n```/g, '').replace(/[*_~`#]/g, '').trim();
+          const textForSpeech = fullResponse.replace(/```json\s*[\s\S]*?\s*```/g, '').replace(/[*_~`#]/g, '').trim();
           if (textForSpeech) {
             const audioDataUrl = await generateSpeech(textForSpeech);
             if (audioDataUrl && audioRef.current) {
@@ -757,7 +757,7 @@ ${taskContext}
           console.error("Speech generation failed:", e);
         }
 
-        const jsonMatch = fullResponse.match(/```json\n([\s\S]*?)\n```/);
+        const jsonMatch = fullResponse.match(/```json\s*([\s\S]*?)\s*```/);
         if (jsonMatch) {
           try {
             const data = JSON.parse(jsonMatch[1]);
@@ -812,7 +812,7 @@ ${taskContext}
   };
 
   const renderContent = (content: string) => {
-    let cleaned = content.replace(/```json\n([\s\S]*?)\n```/g, '');
+    let cleaned = content.replace(/```json\s*([\s\S]*?)\s*```/g, '');
     cleaned = cleaned.replace(/```json[\s\S]*$/, '');
     return cleaned.trim();
   };

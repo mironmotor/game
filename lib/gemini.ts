@@ -103,6 +103,16 @@ End with a "RESULT: [SUCCESS/COMPLETED]" block.
 const OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions";
 const OPENROUTER_MODEL = "nvidia/nemotron-3-super-120b-a12b:free";
 
+// Convert Google-style history {role, parts: [{text}]} to OpenAI-style {role, content}
+function convertHistoryToOpenAI(history: any[]): any[] {
+  return history.map(msg => {
+    if (msg.parts && Array.isArray(msg.parts)) {
+      return { role: msg.role, content: msg.parts.map((p: any) => p.text || '').join('') };
+    }
+    return msg;
+  });
+}
+
 function getApiKey(): string {
   return process.env.NEXT_PUBLIC_OPENROUTER_API_KEY || process.env.NEXT_PUBLIC_GEMINI_API_KEY || "";
 }
@@ -121,7 +131,7 @@ export async function* getGeminiResponseStream(message: string, history: any[], 
       model: OPENROUTER_MODEL,
       messages: [
         { role: "system", content: finalSystemInstruction },
-        ...history,
+        ...convertHistoryToOpenAI(history),
         { role: "user", content: message }
       ],
       stream: true,
@@ -168,7 +178,7 @@ export async function getGeminiResponse(message: string, history: any[], userCon
       model: OPENROUTER_MODEL,
       messages: [
         { role: "system", content: SYSTEM_INSTRUCTION + contextPart },
-        ...history,
+        ...convertHistoryToOpenAI(history),
         { role: "user", content: message }
       ],
       temperature: 0.7,
@@ -210,7 +220,7 @@ ${contextPart}`;
       model: OPENROUTER_MODEL,
       messages: [
         { role: "system", content: multiAgentPrompt },
-        ...history,
+        ...convertHistoryToOpenAI(history),
         { role: "user", content: message }
       ],
       temperature: 0.6,
@@ -268,6 +278,7 @@ ${contextPart}`;
       model: OPENROUTER_MODEL,
       messages: [
         { role: "system", content: synthesizerInstruction },
+        ...convertHistoryToOpenAI(history),
         { role: "user", content: `User Message: "${message}"\n\n${expertOutputs}` }
       ],
       stream: true,
@@ -397,49 +408,13 @@ export async function generateImage(prompt: string): Promise<string | null> {
   }
 }
 
+// TTS disabled: Google API key replaced with OpenRouter (no TTS equivalent)
 export async function generateSpeech(text: string): Promise<string | null> {
-  if (!process.env.NEXT_PUBLIC_GEMINI_API_KEY) {
-    console.error("Gemini API key is missing for TTS");
-    return null;
-  }
-
-  try {
-    const ai = new GoogleGenAI({ apiKey: process.env.NEXT_PUBLIC_GEMINI_API_KEY });
-    const response = await ai.models.generateContent({
-      model: "gemini-2.5-flash-preview-tts",
-      contents: [{ parts: [{ text }] }],
-      config: {
-        responseModalities: ["AUDIO"],
-        speechConfig: {
-          voiceConfig: {
-            prebuiltVoiceConfig: { voiceName: 'Puck' },
-          },
-        },
-      },
-    });
-
-    const base64Audio = response.candidates?.[0]?.content?.parts?.[0]?.inlineData?.data;
-    if (base64Audio) {
-      return pcmBase64ToWavUrl(base64Audio, 24000);
-    }
-    return null;
-  } catch (error) {
-    if (error instanceof Error) {
-      if (error.name === 'AbortError' || error.message.toLowerCase().includes('abort')) {
-        console.log("Speech generation skipped: user aborted");
-      } else if (error.message.includes('fetch')) {
-        console.warn("Speech generation skipped: network/fetch error");
-      } else {
-        console.error("Speech generation failed:", error);
-      }
-    } else {
-      console.error("Speech generation failed:", error);
-    }
-    return null;
-  }
+  // TTS disabled: OpenRouter doesn't support speech synthesis
+  console.log('TTS skipped: OpenRouter has no TTS');
+  return null;
 }
 
-// Helper to convert raw PCM base64 to a playable WAV data URL
 function pcmBase64ToWavUrl(pcmBase64: string, sampleRate = 24000): string {
   let binaryString: string;
   if (typeof Buffer !== 'undefined') {
