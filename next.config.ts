@@ -17,6 +17,8 @@ const nextConfig: NextConfig = {
     ],
   },
   output: 'export',
+  basePath: '/game',
+  assetPrefix: '/game',
   transpilePackages: ['motion'],
 };
 
