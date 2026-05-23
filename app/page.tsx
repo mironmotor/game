@@ -1,9 +1,9 @@
-import GameApp from '@/components/GameApp';
+import HudApp from '@/components/hud/HudApp';
 
 export default function Home() {
   return (
-    <main>
-      <GameApp />
+    <main className="min-h-screen overflow-hidden">
+      <HudApp />
     </main>
   );
 }

@@ -1,0 +1,9 @@
+{"type":"ping"}
+{"type":"terminal_error","line":"ModuleNotFoundError: No module named 'torch'","cwd":"/Users/gost/Documents/game"}
+{"type":"terminal_error","line":"ModuleNotFoundError: No module named 'torch'","cwd":"/Users/gost/Documents/game"}
+{"type":"terminal_error","line":"ModuleNotFoundError: No module named 'torch'","cwd":"/Users/gost/Documents/game"}
+{"type":"open_folder","path":"/Users/gost/Documents/game/mark17"}
+{"type":"open_folder","path":"/Users/gost/Documents/game/mark17"}
+{"type":"open_folder","path":"/Users/gost/Documents/game/mark17"}
+{"type":"shell_command","cmd":"npm run dev"}
+{"type":"terminal_error","line":"Traceback (most recent call last):\n  File \"app.py\"\nValueError: too many values","cwd":"/tmp"}

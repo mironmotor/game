@@ -2,6 +2,14 @@ node_modules/
 .next/
 coverage/
 .DS_Store
+__pycache__/
+*.pyc
+tsconfig.tsbuildinfo
 *.log
 .env*
 !.env.example
+.env
+.env.local
+mark17/output/
+mark17/state/
+mark17/state/*.db

@@ -1,4 +1,5 @@
 @import "tailwindcss";
+@import "../components/hud/hud.css";
 
 @layer utilities {
   .scrollbar-thin::-webkit-scrollbar {

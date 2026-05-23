@@ -1,14 +1,27 @@
 import type {Metadata} from 'next';
-import './globals.css'; // Global styles
+import { Orbitron, Roboto_Mono } from 'next/font/google';
+import './globals.css';
+
+const orbitron = Orbitron({
+  subsets: ['latin'],
+  variable: '--font-hud-display',
+  weight: ['400', '500', '600', '700'],
+});
+
+const robotoMono = Roboto_Mono({
+  subsets: ['latin'],
+  variable: '--font-hud-mono',
+  weight: ['300', '400', '500'],
+});
 
 export const metadata: Metadata = {
-  title: 'My Google AI Studio App',
-  description: 'My Google AI Studio App',
+  title: 'GAME — Reality Creator',
+  description: 'Геймифицированный HUD с AGI-ассистентом',
 };
 
 export default function RootLayout({children}: {children: React.ReactNode}) {
   return (
-    <html lang="en">
+    <html lang="ru" className={`${orbitron.variable} ${robotoMono.variable}`}>
       <head>
         <script dangerouslySetInnerHTML={{ __html: `
           // Fix for "Cannot set property fetch of #<Window> which has only a getter"
@@ -30,7 +43,9 @@ export default function RootLayout({children}: {children: React.ReactNode}) {
           })();
         ` }} />
       </head>
-      <body className="font-mono bg-[#050505] text-white" suppressHydrationWarning>{children}</body>
+      <body className="font-mono bg-[#0a0818] text-white antialiased" suppressHydrationWarning>
+        {children}
+      </body>
     </html>
   );
 }

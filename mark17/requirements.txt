@@ -1,0 +1,7 @@
+# MacBook Air 2015: Python 3.10 или 3.11 (3.13 без torch wheels на macOS)
+numpy>=1.24.0
+matplotlib>=3.7.0
+
+# Опционально (snn_stdp_demo.py):
+# snntorch>=0.7.0
+# torch>=2.0.0,<2.6

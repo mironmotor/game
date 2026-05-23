@@ -1983,7 +1983,7 @@ ${taskContext}
                             className={`w-full bg-black/80 border ${isListening ? 'border-[#ff3366]/50 shadow-[0_0_15px_rgba(255,51,102,0.2)]' : 'border-[#1a1a1a] focus:border-[#00ff88]/50'} text-[#00ff88] pl-12 pr-12 py-2.5 rounded-lg transition-all placeholder:text-[#00ff88]/10 text-base resize-none max-h-64 overflow-y-auto focus:outline-none`}
                           />
                           <button
-                            onClick={toggleVoiceInput}
+                            onClick={() => toggleVoiceInput('home')}
                             className={`absolute right-4 top-3 transition-colors ${isListening ? 'text-[#ff3366] animate-pulse' : 'text-[#00ff88]/30 hover:text-[#00ff88]'}`}
                             title="Голосовой ввод"
                           >
