@@ -1,7 +1,8 @@
-# MacBook Air 2015: Python 3.10 или 3.11 (3.13 без torch wheels на macOS)
+# Max17 / mark17 core dependencies.
+# mark17 is the internal package name for the Max17 core.
 numpy>=1.24.0
-matplotlib>=3.7.0
 
-# Опционально (snn_stdp_demo.py):
+# Optional demo-only dependencies (not required by json_cli.py or /api/max17):
+# matplotlib>=3.7.0
 # snntorch>=0.7.0
 # torch>=2.0.0,<2.6

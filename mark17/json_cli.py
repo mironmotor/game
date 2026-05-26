@@ -1,0 +1,319 @@
+#!/usr/bin/env python3
+"""JSON bridge CLI for Game -> Max17.
+
+mark17 is the internal package name for the Max17 core.
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import sys
+import tempfile
+import traceback
+from pathlib import Path
+from typing import Any
+
+_ROOT = Path(__file__).resolve().parent.parent
+if str(_ROOT) not in sys.path:
+    sys.path.insert(0, str(_ROOT))
+
+from mark17.daemon import Mark17Brain
+from mark17.events import Event
+from mark17.critic import evaluate_event
+from mark17.responder import compose_answer
+from mark17.vector_memory import VectorMemory
+from mark17.synapse_graph import SynapseGraph
+
+ALLOWED_EVENTS = frozenset(
+    {
+        "user_message",
+        "task_created",
+        "task_completed",
+        "deadline_failed",
+        "terminal_error",
+        "system_state",
+    }
+)
+
+
+def _read_input() -> dict[str, Any]:
+    raw = sys.stdin.read().strip()
+    if not raw:
+        raise ValueError("missing JSON input on stdin")
+    data = json.loads(raw)
+    if not isinstance(data, dict):
+        raise ValueError("input must be a JSON object")
+    return data
+
+
+def _as_event(data: dict[str, Any]) -> Event:
+    event_type = str(data.get("type") or data.get("event") or "")
+    if event_type not in ALLOWED_EVENTS:
+        allowed = ", ".join(sorted(ALLOWED_EVENTS))
+        raise ValueError(f"unsupported event type '{event_type}'. Allowed: {allowed}")
+
+    payload = {
+        key: value
+        for key, value in data.items()
+        if key not in {"type", "event", "source", "ts"}
+    }
+
+    if event_type == "user_message":
+        text = data.get("message") or data.get("text") or data.get("content") or ""
+        payload["text"] = str(text)
+    elif event_type == "terminal_error":
+        line = data.get("line") or data.get("message") or data.get("text") or ""
+        payload["line"] = str(line)
+
+    return Event(
+        type=event_type,
+        payload=payload,
+        source=str(data.get("source", "game")),
+    )
+
+
+def _next_adaptation(result: dict[str, Any]) -> str:
+    evaluation = result.get("self_evaluation")
+    if isinstance(evaluation, dict) and evaluation.get("reinforce"):
+        return str(evaluation["reinforce"])
+
+    memory = result.get("memory")
+    if isinstance(memory, dict):
+        if memory.get("hint"):
+            return str(memory["hint"])
+        hits = memory.get("hits")
+        if isinstance(hits, list) and hits:
+            summary = hits[0].get("summary")
+            if summary:
+                return f"Recall related memory: {summary}"
+
+    plasticity = result.get("plasticity")
+    if isinstance(plasticity, dict):
+        if plasticity.get("hint"):
+            return str(plasticity["hint"])
+        if plasticity.get("learned"):
+            return "Pattern reinforced. Keep watching for repeated context."
+
+    llm = result.get("llm")
+    if isinstance(llm, dict) and llm.get("text"):
+        return str(llm["text"]).splitlines()[0][:240]
+
+    decision = result.get("decision")
+    if isinstance(decision, dict) and decision.get("reason"):
+        return str(decision["reason"])
+
+    return "No adaptation proposed."
+
+
+def _confidence(result: dict[str, Any]) -> float:
+    plasticity = result.get("plasticity")
+    if isinstance(plasticity, dict) and isinstance(plasticity.get("confidence"), (int, float)):
+        return float(plasticity["confidence"])
+
+    decision = result.get("decision")
+    if isinstance(decision, dict) and isinstance(decision.get("confidence"), (int, float)):
+        return float(decision["confidence"])
+
+    return 0.0
+
+
+def _recalled_memories(event: Event, brain: Mark17Brain) -> list[dict[str, Any]]:
+    if event.type != "user_message":
+        return []
+
+    query = str(event.payload.get("text") or "").strip()
+    if not query:
+        return []
+
+    return [
+        {
+            "id": hit.id,
+            "event_type": hit.event_type,
+            "importance": round(hit.importance, 3),
+            "score": round(hit.score, 3),
+            "summary": hit.content.get("hint") or hit.signature[:120],
+            "reinforce": hit.content.get("payload", {}).get("reinforce"),
+        }
+        for hit in brain.memory.recall(query, limit=3)
+    ]
+
+
+def _semantic_memories(event: Event, vector_memory: VectorMemory) -> list[dict[str, Any]]:
+    if event.type != "user_message":
+        return []
+
+    query = str(event.payload.get("text") or "").strip()
+    if not query:
+        return []
+
+    return [hit.to_dict() for hit in vector_memory.recall(query, limit=3)]
+
+
+def _merge_memory(
+    result: dict[str, Any],
+    *,
+    recalled: list[dict[str, Any]],
+    semantic: list[dict[str, Any]],
+) -> None:
+    memory = result.get("memory")
+    if not isinstance(memory, dict):
+        memory = {}
+    memory["recalled"] = recalled
+    memory["semantic"] = semantic
+    result["memory"] = memory
+
+
+def normalize(result: dict[str, Any]) -> dict[str, Any]:
+    normalized = {
+        "ok": bool(result.get("ok", False)),
+        "route": result.get("route", "error"),
+        "memory": result.get("memory") or {},
+        "plasticity": result.get("plasticity") or {},
+        "llm": result.get("llm") or {},
+        "confidence": max(0.0, min(1.0, _confidence(result))),
+        "next_adaptation": _next_adaptation(result),
+        "self_evaluation": result.get("self_evaluation")
+        or {
+            "score": 0.0,
+            "reason": "self-evaluation unavailable",
+            "store_memory": False,
+            "reinforce": "",
+        },
+        "raw": {
+            "event_type": result.get("event_type"),
+            "decision": result.get("decision") or {},
+            "message": result.get("message"),
+        },
+    }
+    answer = result.get("answer")
+    if isinstance(answer, dict):
+        normalized["answer"] = answer
+    synapses = result.get("synapses")
+    if isinstance(synapses, dict):
+        normalized["synapses"] = synapses
+    return normalized
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description="Max17 JSON bridge over mark17 core")
+    parser.add_argument("--state-dir", type=Path, default=Path(__file__).resolve().parent / "state")
+    parser.add_argument("--ephemeral", action="store_true", help="use a temporary state dir for one-shot smoke tests")
+    parser.add_argument("--warmup", type=Path, help="JSONL events to process before stdin event")
+    parser.add_argument("--plasticity-threshold", type=float, default=0.7)
+    parser.add_argument("--ollama-model", default="qwen2.5:0.5b")
+    parser.add_argument("--ollama-host", default="http://127.0.0.1:11434")
+    parser.add_argument("--no-llm", action="store_true")
+    args = parser.parse_args()
+
+    try:
+        event = _as_event(_read_input())
+        if args.ephemeral:
+            with tempfile.TemporaryDirectory(prefix="max17-smoke-") as tmp:
+                result = _handle_event(event, args, Path(tmp))
+        else:
+            result = _handle_event(event, args, args.state_dir)
+        sys.stdout.write(json.dumps(normalize(result), ensure_ascii=False) + "\n")
+        return 0
+    except Exception as exc:
+        error = {
+            "ok": False,
+            "route": "error",
+            "memory": {},
+            "plasticity": {},
+            "llm": {},
+            "confidence": 0.0,
+            "next_adaptation": "Bridge error. Inspect error payload.",
+            "error": str(exc),
+            "trace": traceback.format_exc(),
+        }
+        sys.stdout.write(json.dumps(error, ensure_ascii=False) + "\n")
+        return 1
+
+
+def _handle_event(event: Event, args: argparse.Namespace, state_dir: Path) -> dict[str, Any]:
+    brain = Mark17Brain(
+        state_dir,
+        plasticity_threshold=args.plasticity_threshold,
+        llm_enabled=not args.no_llm,
+        llm_model=args.ollama_model,
+        llm_host=args.ollama_host,
+    )
+    vector_memory = VectorMemory(state_dir)
+    synapse_graph = SynapseGraph(state_dir)
+    if args.warmup:
+        _run_warmup(args.warmup, brain, vector_memory, synapse_graph)
+    result = brain.handle(event)
+    _merge_memory(
+        result,
+        recalled=_recalled_memories(event, brain),
+        semantic=_semantic_memories(event, vector_memory),
+    )
+    evaluation = evaluate_event(event, result)
+    result["self_evaluation"] = evaluation.to_dict()
+    result["next_adaptation"] = _next_adaptation(result)
+    result["synapses"] = synapse_graph.update_from_event(event, result, result["self_evaluation"])
+    answer = compose_answer(event, result, result["self_evaluation"])
+    if answer:
+        result["answer"] = answer
+    if evaluation.store_memory:
+        brain.memory.remember(
+            Event(
+                type="remember",
+                payload={
+                    "note": evaluation.reason,
+                    "event_type": event.type,
+                    "route": result.get("route"),
+                    "reinforce": evaluation.reinforce,
+                    "score": evaluation.score,
+                },
+                source="critic",
+            ),
+            hint=evaluation.reason,
+            action="self_evaluation",
+        )
+        vector_memory.remember(event, result["self_evaluation"])
+    brain.plasticity.save()
+    return result
+
+
+def _run_warmup(
+    path: Path,
+    brain: Mark17Brain,
+    vector_memory: VectorMemory,
+    synapse_graph: SynapseGraph,
+) -> None:
+    for line in path.read_text().splitlines():
+        line = line.strip()
+        if not line or line.startswith("#"):
+            continue
+        raw = json.loads(line)
+        if not isinstance(raw, dict):
+            continue
+        event = _as_event(raw)
+        result = brain.handle(event)
+        evaluation = evaluate_event(event, result)
+        result["self_evaluation"] = evaluation.to_dict()
+        result["next_adaptation"] = _next_adaptation(result)
+        synapse_graph.update_from_event(event, result, result["self_evaluation"])
+        if evaluation.store_memory:
+            brain.memory.remember(
+                Event(
+                    type="remember",
+                    payload={
+                        "note": evaluation.reason,
+                        "event_type": event.type,
+                        "route": result.get("route"),
+                        "reinforce": evaluation.reinforce,
+                        "score": evaluation.score,
+                    },
+                    source="critic",
+                ),
+                hint=evaluation.reason,
+                action="self_evaluation",
+            )
+            vector_memory.remember(event, evaluation.to_dict())
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

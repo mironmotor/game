@@ -28,6 +28,7 @@ export default function RootLayout({children}: {children: React.ReactNode}) {
           (function() {
             try {
               var originalFetch = window.fetch;
+              if (typeof originalFetch !== 'function') return;
               Object.defineProperty(window, 'fetch', {
                 get: function() { return originalFetch; },
                 set: function(v) { 

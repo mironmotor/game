@@ -18,3 +18,108 @@ View your app in AI Studio: https://ai.studio/apps/dcf78fd2-d064-4f32-a65f-e4dbd
 2. Set the `GEMINI_API_KEY` in [.env.local](.env.local) to your Gemini API key
 3. Run the app:
    `npm run dev`
+
+## Max17 bridge
+
+`mark17` is the internal package name for the Max17 cognitive core.
+
+### Product principle
+
+Every Max17 answer should increase the user's contact with reality, not reduce it.
+
+Good responses should push toward real-world action, body awareness, creation, work, money, live relationships, and honest self-understanding. Responses that only keep the user inside the system waiting for "divine answers" are treated as a product failure, even if they look polished.
+
+This principle is encoded in `mark17/principles.py` and used by the deterministic responder.
+
+### Install Python dependencies
+
+The core bridge requires Python 3 and NumPy.
+
+```bash
+python3 -m pip install -r mark17/requirements.txt
+```
+
+### Run the Max17 smoke test
+
+```bash
+npm run max17:smoke
+```
+
+The smoke test runs `mark17/json_cli.py` directly with LLM disabled and an ephemeral temporary state directory.
+It warms up both keyword memory and the experimental local vector memory, then checks a semantic recall flow.
+
+### Experimental vector memory
+
+Max17 keeps the existing `Hippocampus` SQLite keyword memory intact. The experimental semantic layer lives beside it in `mark17/vector_memory.py` and stores records in `vector_memory.db` under the selected state directory.
+
+This prototype uses deterministic local token hashing, a small domain synonym map, normalized vectors, and cosine similarity. It does not call external APIs and does not require transformer models. For `user_message` events the API returns both:
+
+```json
+{
+  "memory": {
+    "recalled": [],
+    "semantic": []
+  }
+}
+```
+
+### Experimental synapse graph
+
+Max17 also keeps a first weighted association graph in `mark17/synapse_graph.py`, stored as `synapse_graph.db` under the selected state directory. It does not replace keyword or vector memory.
+
+The graph creates deterministic associations between events, recalled memories, semantic memories, task statuses, routes, self-evaluations, and adaptations. Repeated relations increase `evidence_count` and gently strengthen `weight`.
+
+Responses can include:
+
+```json
+{
+  "synapses": {
+    "updated": 0,
+    "top": []
+  }
+}
+```
+
+### Call `/api/max17` with curl
+
+Start the Next.js dev server:
+
+```bash
+npm run dev
+```
+
+Then send an event:
+
+```bash
+curl -s -X POST http://localhost:3000/api/max17 \
+  -H 'Content-Type: application/json' \
+  -d '{"type":"terminal_error","line":"Max17 manual smoke warning"}'
+```
+
+The API accepts these event types:
+
+```text
+user_message
+task_created
+task_completed
+deadline_failed
+terminal_error
+system_state
+```
+
+### Enable local LLM routing
+
+By default, `/api/max17` runs with the Max17 LLM bridge disabled so the route does not depend on Ollama.
+
+To allow Max17 to call the local Ollama bridge:
+
+```bash
+MAX17_LLM_ENABLED=true npm run dev
+```
+
+Optional environment variables:
+
+```bash
+PYTHON_BIN=python3
+MAX17_STATE_DIR=/absolute/path/to/state
+```

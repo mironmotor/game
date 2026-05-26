@@ -3,11 +3,13 @@
 import React, { useState, useRef, useEffect, useCallback, Component, type ReactNode, type ErrorInfo } from 'react';
 import { GameHud, type HudNavId } from './GameHud';
 import { useGameState } from '@/hooks/use-game-state';
-import { getGeminiResponseStream } from '@/lib/gemini';
+import { sendMax17Event, type Max17Response } from '@/lib/max17-client';
 import './hud.css';
 
 const AGI_INTRO =
   'Цифровой агент нового поколения, созданный помогать вам достигать целей и решать сложные задачи. GAME анализирует контекст, предлагает квесты и ведёт вас к результату.';
+
+type Max17HudEvent = Record<string, unknown>;
 
 class FirestoreErrorBoundary extends Component<{ children: ReactNode }, { hasError: boolean; errorInfo: unknown }> {
   constructor(props: { children: ReactNode }) {
@@ -60,6 +62,50 @@ function calcTopPercent(rank: number) {
   return Math.min(99.99, (rank / total) * 100).toFixed(2);
 }
 
+function getLlmText(response: Max17Response) {
+  const text = response.llm?.text;
+  if (typeof text !== 'string') return '';
+  if (response.llm?.status === 'skipped') return '';
+  return text.trim();
+}
+
+function formatRecalledMemory(response: Max17Response) {
+  const recalled = response.memory?.recalled ?? [];
+  if (!recalled.length) return 'Память: близких совпадений пока нет.';
+
+  return `Память: ${recalled
+    .slice(0, 3)
+    .map((item) => item.summary || item.reinforce || item.event_type || 'событие')
+    .join(' · ')}`;
+}
+
+function formatMax17HudReply(response: Max17Response) {
+  const composedText = response.answer?.text?.trim();
+  if (composedText) return composedText;
+
+  const llmText = getLlmText(response);
+  if (llmText) {
+    return [
+      llmText,
+      formatRecalledMemory(response),
+      response.next_adaptation ? `Подсказка Max17: ${response.next_adaptation}` : '',
+    ]
+      .filter(Boolean)
+      .join(' ');
+  }
+
+  const confidence = Math.round(response.confidence * 100);
+  const routeLine = `Маршрут: ${response.route || 'unknown'} · уверенность ${confidence}%`;
+  const adaptationLine = response.next_adaptation
+    ? `Следующая адаптация: ${response.next_adaptation}`
+    : 'Следующая адаптация: наблюдать паттерн и копить контекст.';
+  const reason = response.self_evaluation?.reason
+    ? `Оценка: ${response.self_evaluation.reason}`
+    : '';
+
+  return [routeLine, formatRecalledMemory(response), adaptationLine, reason].filter(Boolean).join(' ');
+}
+
 function HudContent() {
   const {
     xp,
@@ -69,7 +115,6 @@ function HudContent() {
     completeTask,
     createSession,
     saveMessage,
-    messages: dbMessages,
     sessions,
   } = useGameState();
 
@@ -80,7 +125,11 @@ function HudContent() {
   const [isLoading, setIsLoading] = useState(false);
   const [activeNav, setActiveNav] = useState<HudNavId>('codex');
   const [sessionId, setSessionId] = useState<string | null>(null);
+  const [max17State, setMax17State] = useState<Pick<Max17Response, 'route' | 'confidence' | 'next_adaptation'> | null>(null);
   const recognitionRef = useRef<SpeechRecognition | null>(null);
+  const systemStateSentRef = useRef(false);
+  const knownTaskIdsRef = useRef<Set<string>>(new Set());
+  const emittedFailedTaskIdsRef = useRef<Set<string>>(new Set());
 
   useEffect(() => {
     const t = setInterval(() => setNow(new Date()), 1000);
@@ -126,16 +175,45 @@ function HudContent() {
     }
   }, [isListening]);
 
-  const getHistoryContext = useCallback(() => {
-    return `Total XP: ${xp}. Rank: #${rank}. Active tasks: ${tasks.filter((t) => t.status !== 'completed').length}.`;
-  }, [xp, rank, tasks]);
+  const emitMax17HudEvent = useCallback(
+    async (event: Max17HudEvent, surfaceState = false) => {
+      try {
+        const max17 = await sendMax17Event(event);
+        if (surfaceState) {
+          setMax17State({
+            route: max17.route,
+            confidence: max17.confidence,
+            next_adaptation: max17.next_adaptation,
+          });
+        }
+        if (process.env.NODE_ENV === 'development') {
+          console.debug('[Max17 HUD]', {
+            type: event.type,
+            route: max17.route,
+            confidence: max17.confidence,
+            next_adaptation: max17.next_adaptation,
+          });
+        }
+        return max17;
+      } catch (error) {
+        if (surfaceState) {
+          setMax17State(null);
+        }
+        if (process.env.NODE_ENV === 'development') {
+          console.debug('[Max17 HUD] event skipped', { type: event.type, error });
+        }
+        return null;
+      }
+    },
+    [],
+  );
 
   const handleSend = async () => {
     if (!input.trim() || isLoading) return;
     const userMsg = input.trim();
     setInput('');
     setIsLoading(true);
-    setAgiMessage('Обрабатываю запрос...');
+    setAgiMessage(`Вы: ${userMsg} MAX17: обрабатываю событие...`);
 
     let activeSessionId = sessionId;
     try {
@@ -152,30 +230,27 @@ function HudContent() {
       const sid = activeSessionId ?? undefined;
       await saveMessage('user', userMsg, sid);
 
-      const sessionMessages = dbMessages.filter((m) => m.sessionId === activeSessionId);
-      const history = sessionMessages.slice(-10).map((m) => ({
-        role: m.role as 'user' | 'model',
-        parts: [{ text: m.content }],
-      }));
+      const max17 = await emitMax17HudEvent(
+        {
+          type: 'user_message',
+          text: userMsg,
+          source: 'hud',
+          timestamp: new Date().toISOString(),
+        },
+        true,
+      );
 
-      const stream = await getGeminiResponseStream(userMsg, history, getHistoryContext());
-      let fullResponse = '';
+      const fullResponse = max17
+        ? formatMax17HudReply(max17)
+        : 'Локальный Max17-мост сейчас недоступен. Сообщение принято, основной HUD продолжает работать.';
 
-      for await (const chunk of stream) {
-        if (chunk.text) {
-          fullResponse += chunk.text;
-          setAgiMessage(fullResponse);
-        }
-      }
-
-      if (fullResponse) {
-        await saveMessage('model', fullResponse, sid);
-      } else {
-        setAgiMessage('Не удалось получить ответ. Попробуйте ещё раз.');
-      }
+      setAgiMessage(`Вы: ${userMsg} MAX17: ${fullResponse}`);
+      await saveMessage('model', fullResponse, sid);
     } catch (e) {
       console.error(e);
-      setAgiMessage('Ошибка связи с AGI. Проверьте GEMINI_API_KEY в .env.local');
+      setAgiMessage(
+        `Вы: ${userMsg} MAX17: не удалось сохранить или обработать сообщение. HUD остаётся активным без Gemini.`,
+      );
     } finally {
       setIsLoading(false);
     }
@@ -185,6 +260,19 @@ function HudContent() {
     const task = tasks.find((t) => t.id === taskId);
     if (task && task.status !== 'completed') {
       await completeTask(taskId);
+      void emitMax17HudEvent({
+        type: 'task_completed',
+        task: {
+          id: task.id,
+          desc: task.desc,
+          mgr: task.mgr,
+          xp: task.xp,
+          status: 'completed',
+          deadline: task.deadline,
+        },
+        source: 'hud',
+        timestamp: new Date().toISOString(),
+      });
     }
   };
 
@@ -196,49 +284,135 @@ function HudContent() {
   const focus = Math.min(99, 75 + Math.floor((xp % 500) / 12));
   const balance = Math.max(12450, xp * 12 + 8000);
 
+  useEffect(() => {
+    if (!isLoaded) return;
+
+    if (!systemStateSentRef.current) {
+      systemStateSentRef.current = true;
+      knownTaskIdsRef.current = new Set(tasks.map((task) => task.id));
+      emittedFailedTaskIdsRef.current = new Set(
+        tasks.filter((task) => task.status === 'failed').map((task) => task.id),
+      );
+      void emitMax17HudEvent({
+        type: 'system_state',
+        source: 'hud',
+        timestamp: new Date().toISOString(),
+        energy,
+        focus,
+        reputation: reputationLevel,
+        balance,
+        tasks_count: tasks.length,
+        active_tasks_count: pendingTasks.length,
+      });
+      return;
+    }
+
+    const knownTaskIds = knownTaskIdsRef.current;
+    const emittedFailedTaskIds = emittedFailedTaskIdsRef.current;
+
+    for (const task of tasks) {
+      if (!knownTaskIds.has(task.id)) {
+        knownTaskIds.add(task.id);
+        void emitMax17HudEvent({
+          type: 'task_created',
+          task: {
+            id: task.id,
+            desc: task.desc,
+            mgr: task.mgr,
+            xp: task.xp,
+            status: task.status,
+            scheduledTime: task.scheduledTime,
+            deadline: task.deadline,
+          },
+          source: 'hud',
+          timestamp: new Date().toISOString(),
+        });
+      }
+
+      if (task.status === 'failed' && !emittedFailedTaskIds.has(task.id)) {
+        emittedFailedTaskIds.add(task.id);
+        void emitMax17HudEvent({
+          type: 'deadline_failed',
+          task: {
+            id: task.id,
+            desc: task.desc,
+            mgr: task.mgr,
+            xp: task.xp,
+            status: task.status,
+            deadline: task.deadline,
+          },
+          source: 'hud',
+          timestamp: new Date().toISOString(),
+        });
+      }
+    }
+  }, [balance, emitMax17HudEvent, energy, focus, isLoaded, pendingTasks.length, reputationLevel, tasks]);
+
   const promptText = isListening
     ? 'Слушаю вас...'
     : isLoading
       ? 'Думаю над ответом...'
       : 'Я слушаю. Что нужно сделать?';
+  const max17Confidence = max17State ? Math.round(max17State.confidence * 100) : 0;
 
   if (!isLoaded) {
     return <div className="hud-loading">Загрузка HUD...</div>;
   }
 
   return (
-    <GameHud
-      rank={rank}
-      topPercent={calcTopPercent(rank)}
-      time={formatClock(now)}
-      date={formatDate(now)}
-      temperature={28}
-      missions={tasks}
-      rewardXp={rewardXp}
-      energy={energy}
-      focus={focus}
-      reputationLevel={reputationLevel}
-      balance={balance}
-      onlineCount={1247}
-      agiMessage={agiMessage}
-      promptText={promptText}
-      input={input}
-      isListening={isListening}
-      isLoading={isLoading}
-      activeNav={activeNav}
-      friendsBadge={2}
-      onInputChange={setInput}
-      onSend={handleSend}
-      onToggleListen={toggleListen}
-      onNavChange={setActiveNav}
-      onMissionToggle={handleMissionToggle}
-      onKeyDown={(e) => {
-        if (e.key === 'Enter' && !e.shiftKey) {
-          e.preventDefault();
-          handleSend();
-        }
-      }}
-    />
+    <>
+      <GameHud
+        rank={rank}
+        topPercent={calcTopPercent(rank)}
+        time={formatClock(now)}
+        date={formatDate(now)}
+        temperature={28}
+        missions={tasks}
+        rewardXp={rewardXp}
+        energy={energy}
+        focus={focus}
+        reputationLevel={reputationLevel}
+        balance={balance}
+        onlineCount={1247}
+        agiMessage={agiMessage}
+        promptText={promptText}
+        input={input}
+        isListening={isListening}
+        isLoading={isLoading}
+        activeNav={activeNav}
+        friendsBadge={2}
+        onInputChange={setInput}
+        onSend={handleSend}
+        onToggleListen={toggleListen}
+        onNavChange={setActiveNav}
+        onMissionToggle={handleMissionToggle}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter' && !e.shiftKey) {
+            e.preventDefault();
+            handleSend();
+          }
+        }}
+      />
+      {max17State && (
+        <div
+          className="pointer-events-none fixed bottom-[112px] left-1/2 z-10 max-w-[min(520px,calc(100vw-32px))] -translate-x-1/2 truncate border border-cyan-300/20 bg-black/40 px-3 py-1 text-[9px] uppercase tracking-[0.22em] text-cyan-100/70 shadow-[0_0_18px_rgba(0,242,255,0.12)] backdrop-blur-md"
+          title={max17State.next_adaptation}
+        >
+          <span className="text-cyan-300/90">MAX17:</span>{' '}
+          <span>{max17State.route}</span>
+          <span className="px-1 text-white/25">·</span>
+          <span>{max17Confidence}%</span>
+          {max17State.next_adaptation && (
+            <>
+              <span className="px-1 text-white/25">·</span>
+              <span className="normal-case tracking-normal text-white/45">
+                {max17State.next_adaptation}
+              </span>
+            </>
+          )}
+        </div>
+      )}
+    </>
   );
 }
 
