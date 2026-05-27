@@ -13,3 +13,5 @@ tsconfig.tsbuildinfo
 mark17/output/
 mark17/state/
 mark17/state/*.db
+
+out/
