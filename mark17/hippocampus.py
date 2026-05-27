@@ -65,6 +65,7 @@ class Hippocampus:
             "payload": event.payload,
             "hint": hint,
             "action": action,
+            "source": event.source,
         }
         sig = event.signature()
         now = time.time()
@@ -134,30 +135,57 @@ class Hippocampus:
         hits.sort(key=lambda h: h.score, reverse=True)
         return hits[:limit]
 
-    def recent(self, *, limit: int = 50) -> list[MemoryHit]:
+    def recent(
+        self,
+        *,
+        limit: int = 50,
+        event_type: str | None = None,
+        source: str | None = None,
+    ) -> list[MemoryHit]:
         """Return recent memories without changing their score or hit counters."""
+        limit = max(1, int(limit or 50))
+        query_limit = limit * 5 if source else limit
         with self._conn() as c:
-            rows = c.execute(
-                """
-                SELECT *
-                FROM memories
-                ORDER BY last_used DESC, created_at DESC
-                LIMIT ?
-                """,
-                (limit,),
-            ).fetchall()
+            if event_type:
+                rows = c.execute(
+                    """
+                    SELECT *
+                    FROM memories
+                    WHERE event_type = ?
+                    ORDER BY last_used DESC, created_at DESC
+                    LIMIT ?
+                    """,
+                    (event_type, query_limit),
+                ).fetchall()
+            else:
+                rows = c.execute(
+                    """
+                    SELECT *
+                    FROM memories
+                    ORDER BY last_used DESC, created_at DESC
+                    LIMIT ?
+                    """,
+                    (query_limit,),
+                ).fetchall()
 
-        return [
-            MemoryHit(
-                id=row["id"],
-                event_type=row["event_type"],
-                signature=row["signature"],
-                content=json.loads(row["content"]),
-                importance=row["importance"],
-                score=row["importance"],
+        hits: list[MemoryHit] = []
+        for row in rows:
+            content = json.loads(row["content"])
+            if source and content.get("source") != source:
+                continue
+            hits.append(
+                MemoryHit(
+                    id=row["id"],
+                    event_type=row["event_type"],
+                    signature=row["signature"],
+                    content=content,
+                    importance=row["importance"],
+                    score=row["importance"],
+                )
             )
-            for row in rows
-        ]
+            if len(hits) >= limit:
+                break
+        return hits
 
     def decay_all(self) -> int:
         """Synaptic scaling: редкие воспоминания слабеют."""

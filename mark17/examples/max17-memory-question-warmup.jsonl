@@ -1,0 +1,4 @@
+{"type":"task_completed","task":{"id":"focus-001","desc":"Deep focus session for Max17 memory recall","mgr":"MGR-2","xp":30,"status":"completed"},"source":"smoke"}
+{"type":"task_completed","task":{"id":"semantic-001","desc":"Core development session for semantic memory, pattern consolidation, and adaptive learning","mgr":"MGR-2","xp":45,"status":"completed"},"source":"smoke"}
+{"type":"task_completed","task":{"id":"synapse-001","desc":"Synapse graph connected memory recall with core development outcomes","mgr":"MGR-2","xp":40,"status":"completed"},"source":"smoke"}
+{"type":"sleep_consolidation","source":"smoke","limit":50}

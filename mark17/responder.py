@@ -23,6 +23,28 @@ CAPABILITY_TRIGGERS = (
     "what can you do",
 )
 
+MEMORY_QUESTION_TRIGGERS = (
+    "что ты помнишь",
+    "что помнишь",
+    "что в памяти",
+    "после sleep",
+    "после сна",
+    "после консолидации",
+    "sleep consolidation",
+    "what do you remember",
+    "memory status",
+)
+
+DEBUG_TRIGGERS = (
+    "покажи debug",
+    "покажи дебаг",
+    "покажи телеметрию",
+    "почему ты так ответил",
+    "show debug",
+    "show telemetry",
+    "why did you answer",
+)
+
 CAPABILITY_ANSWER = (
     "Я Max17, когнитивное ядро Game в текущей v0.4. Сейчас я принимаю сообщения из HUD, "
     "маршрутизирую события через meta-controller, запоминаю важные события в SQLite memory, "
@@ -51,6 +73,43 @@ def _confidence(result: dict[str, Any]) -> float:
     return 0.0
 
 
+def _clean_public_text(value: Any, *, limit: int = 220) -> str:
+    text = str(value or "").strip().replace("\n", " ")
+    if not text:
+        return ""
+
+    low = text.casefold()
+    blocked = (
+        "routed to llm",
+        "handled through",
+        "resolved by memory route",
+        "reinforced through plasticity",
+        "self evaluation",
+        "evaluated as",
+        "llm with status",
+        "route:",
+        "recalled_with",
+        "similar_to",
+        "routed_to",
+        "evaluated_as",
+        "adapted_by",
+    )
+    if any(phrase in low for phrase in blocked):
+        return ""
+
+    for prefix in (
+        "task_completed: ",
+        "task_created: ",
+        "deadline_failed: ",
+        "user_message: ",
+        "consolidated_pattern: ",
+    ):
+        if text.startswith(prefix):
+            text = text[len(prefix) :]
+
+    return " ".join(text.split()).rstrip(".")[:limit]
+
+
 def _first_recalled_summary(result: dict[str, Any]) -> str:
     memory = result.get("memory")
     if not isinstance(memory, dict):
@@ -65,7 +124,7 @@ def _first_recalled_summary(result: dict[str, Any]) -> str:
         return ""
 
     summary = first.get("summary") or first.get("reinforce") or first.get("event_type")
-    return str(summary).strip().rstrip(".")[:220] if summary else ""
+    return _clean_public_text(summary) if summary else ""
 
 
 def _first_semantic_summary(result: dict[str, Any]) -> str:
@@ -82,7 +141,7 @@ def _first_semantic_summary(result: dict[str, Any]) -> str:
         return ""
 
     summary = first.get("summary") or first.get("reinforce") or first.get("text")
-    return str(summary).strip().rstrip(".")[:220] if summary else ""
+    return _clean_public_text(summary) if summary else ""
 
 
 def _first_synapse_summary(result: dict[str, Any]) -> str:
@@ -108,8 +167,7 @@ def _first_synapse_summary(result: dict[str, Any]) -> str:
 
     summary = first.get("summary")
     if summary:
-        relation = str(first.get("relation_type") or "related_to")
-        return f"{relation}: {str(summary).strip().rstrip('.')[:180]}"
+        return _clean_public_text(summary, limit=180)
     return ""
 
 
@@ -151,6 +209,131 @@ def _is_capability_question(user_text: str) -> bool:
     if any(trigger in normalized for trigger in CAPABILITY_TRIGGERS):
         return True
     return "что" in normalized and ("умеешь" in normalized or "можешь" in normalized)
+
+
+def _is_memory_question(user_text: str) -> bool:
+    normalized = user_text.casefold()
+    if any(trigger in normalized for trigger in MEMORY_QUESTION_TRIGGERS):
+        return True
+    return "помн" in normalized and ("что" in normalized or "memory" in normalized)
+
+
+def _is_debug_question(user_text: str) -> bool:
+    normalized = user_text.casefold()
+    return any(trigger in normalized for trigger in DEBUG_TRIGGERS)
+
+
+def _memory_entries(result: dict[str, Any], key: str, *, limit: int = 3) -> list[str]:
+    memory = result.get("memory")
+    if not isinstance(memory, dict):
+        return []
+
+    rows = memory.get(key)
+    if not isinstance(rows, list):
+        return []
+
+    entries: list[str] = []
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        summary = (
+            row.get("summary")
+            or row.get("reinforce")
+            or row.get("text")
+            or row.get("event_type")
+        )
+        cleaned = _clean_public_text(summary)
+        if cleaned and cleaned not in entries:
+            entries.append(cleaned)
+        if len(entries) >= limit:
+            break
+    return entries
+
+
+def _consolidation_patterns(result: dict[str, Any], *, limit: int = 4) -> list[str]:
+    patterns: list[str] = []
+
+    consolidation = result.get("consolidation")
+    if isinstance(consolidation, dict):
+        rows = consolidation.get("patterns")
+        if isinstance(rows, list):
+            for row in rows:
+                if isinstance(row, dict):
+                    summary = _clean_public_text(row.get("summary"))
+                    if summary and summary not in patterns:
+                        patterns.append(summary)
+                if len(patterns) >= limit:
+                    return patterns
+
+    for summary in _memory_entries(result, "consolidated_patterns", limit=limit):
+        if summary not in patterns:
+            patterns.append(summary)
+        if len(patterns) >= limit:
+            break
+
+    return patterns
+
+
+def _memory_question_answer(event: Event, result: dict[str, Any]) -> dict[str, Any]:
+    patterns = _consolidation_patterns(result)
+    semantic = _memory_entries(result, "semantic", limit=2)
+    recalled = _memory_entries(result, "recalled", limit=2)
+    synapse = _first_synapse_summary(result)
+    confidence = _confidence(result)
+
+    parts: list[str] = []
+    if patterns:
+        parts.append(
+            "После последней консолидации я помню несколько устойчивых паттернов: "
+            + "; ".join(patterns[:4])
+            + "."
+        )
+    else:
+        parts.append(
+            "В этом ответе я не вижу сохранённых консолидированных паттернов, "
+            "но могу опереться на текущую память и semantic recall."
+        )
+
+    if semantic:
+        parts.append("Ближайшие смыслы в semantic memory: " + "; ".join(semantic[:2]) + ".")
+    elif recalled:
+        parts.append("Ближайшие следы в SQLite memory/recall: " + "; ".join(recalled[:2]) + ".")
+
+    if synapse:
+        parts.append(f"По ассоциациям видно усиление связи: {synapse}.")
+    else:
+        parts.append("Synapse Graph уже хранит ассоциации, но для этого запроса сильная связь пока не выделилась.")
+
+    parts.append(
+        "Пока это ранняя память: я не понимаю её как полноценный LLM, "
+        "но уже могу находить похожие смыслы, сохранять паттерны и усиливать связи."
+    )
+
+    return {
+        "text": " ".join(parts),
+        "source": "composer",
+        "confidence": round(confidence, 4),
+    }
+
+
+def _debug_answer(result: dict[str, Any], self_evaluation: dict[str, Any] | None) -> dict[str, Any]:
+    llm = result.get("llm") if isinstance(result.get("llm"), dict) else {}
+    synapses = result.get("synapses") if isinstance(result.get("synapses"), dict) else {}
+    reason = _self_evaluation_reason(self_evaluation)
+    text = (
+        "Debug: "
+        f"route={result.get('route', 'unknown')}; "
+        f"confidence={_confidence(result):.2f}; "
+        f"llm_status={llm.get('status', 'unknown')}; "
+        f"synapses_updated={synapses.get('updated', 0)}"
+    )
+    if reason:
+        text += f"; self_evaluation={reason}"
+    return {
+        "text": text + ".",
+        "source": "composer_debug",
+        "confidence": round(_confidence(result), 4),
+    }
 
 
 def _consolidation_answer(response: dict[str, Any]) -> dict[str, Any]:
@@ -218,6 +401,9 @@ def compose_answer(
         return None
 
     user_text = str(event.payload.get("text") or "").strip()
+    if _is_debug_question(user_text):
+        return _debug_answer(response, self_evaluation)
+
     if _is_capability_question(user_text):
         return {
             "text": CAPABILITY_ANSWER,
@@ -225,29 +411,25 @@ def compose_answer(
             "confidence": 0.95,
         }
 
+    if _is_memory_question(user_text):
+        return _memory_question_answer(event, response)
+
     recalled = _first_recalled_summary(response)
     semantic = _first_semantic_summary(response)
-    synapse = _first_synapse_summary(response)
     next_step = _next_adaptation(response, user_text)
-    reason = _self_evaluation_reason(self_evaluation)
 
-    parts = ["Я зафиксировал запрос."]
+    parts = ["Я понял запрос."]
     if semantic:
-        parts.append(f"Семантическая память нашла похожий смысл: {semantic}.")
+        parts.append(f"В памяти есть похожий смысл: {semantic}.")
     elif recalled:
-        parts.append(f"Память нашла похожий след: {recalled}.")
+        parts.append(f"В памяти есть похожий след: {recalled}.")
     else:
-        parts.append("В памяти пока нет близкого совпадения.")
-
-    if synapse:
-        parts.append(f"Связь усилилась: {synapse}.")
+        parts.append("Близкого воспоминания пока нет.")
 
     parts.append(_confidence_tone(confidence))
-    parts.append(f"Следующий шаг: {next_step}.")
+    if next_step:
+        parts.append(f"Полезный следующий шаг: {next_step}.")
     parts.append(REALITY_CONTACT_HINT)
-
-    if reason:
-        parts.append(f"Внутренняя оценка: {reason}.")
 
     return {
         "text": " ".join(parts),

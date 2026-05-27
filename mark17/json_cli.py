@@ -156,17 +156,46 @@ def _semantic_memories(event: Event, vector_memory: VectorMemory) -> list[dict[s
     return [hit.to_dict() for hit in vector_memory.recall(query, limit=3)]
 
 
+def _recent_consolidated_patterns(brain: Mark17Brain, *, limit: int = 5) -> list[dict[str, Any]]:
+    patterns: list[dict[str, Any]] = []
+    for hit in brain.memory.recent(
+        limit=limit,
+        event_type="consolidated_pattern",
+        source="consolidation",
+    ):
+        payload = hit.content.get("payload") if isinstance(hit.content, dict) else None
+        payload = payload if isinstance(payload, dict) else {}
+        summary = payload.get("summary") or hit.content.get("hint") or hit.signature[:120]
+        patterns.append(
+            {
+                "id": hit.id,
+                "event_type": hit.event_type,
+                "importance": round(hit.importance, 3),
+                "score": round(hit.score, 3),
+                "summary": summary,
+                "pattern_id": payload.get("pattern_id"),
+                "evidence_count": payload.get("evidence_count"),
+                "strength": payload.get("strength"),
+                "source": payload.get("source") or hit.content.get("source"),
+            }
+        )
+    return patterns
+
+
 def _merge_memory(
     result: dict[str, Any],
     *,
     recalled: list[dict[str, Any]],
     semantic: list[dict[str, Any]],
+    consolidated_patterns: list[dict[str, Any]] | None = None,
 ) -> None:
     memory = result.get("memory")
     if not isinstance(memory, dict):
         memory = {}
     memory["recalled"] = recalled
     memory["semantic"] = semantic
+    if consolidated_patterns is not None:
+        memory["consolidated_patterns"] = consolidated_patterns
     result["memory"] = memory
 
 
@@ -260,6 +289,7 @@ def _handle_event(event: Event, args: argparse.Namespace, state_dir: Path) -> di
         result,
         recalled=_recalled_memories(event, brain),
         semantic=_semantic_memories(event, vector_memory),
+        consolidated_patterns=_recent_consolidated_patterns(brain) if event.type == "user_message" else [],
     )
     evaluation = evaluate_event(event, result)
     result["self_evaluation"] = evaluation.to_dict()
@@ -354,6 +384,9 @@ def _run_warmup(
         if not isinstance(raw, dict):
             continue
         event = _as_event(raw)
+        if event.type == "sleep_consolidation":
+            _handle_sleep_consolidation(event, brain, vector_memory, synapse_graph)
+            continue
         result = brain.handle(event)
         evaluation = evaluate_event(event, result)
         result["self_evaluation"] = evaluation.to_dict()
