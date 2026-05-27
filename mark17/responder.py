@@ -153,6 +153,51 @@ def _is_capability_question(user_text: str) -> bool:
     return "что" in normalized and ("умеешь" in normalized or "можешь" in normalized)
 
 
+def _consolidation_answer(response: dict[str, Any]) -> dict[str, Any]:
+    consolidation = response.get("consolidation")
+    if not isinstance(consolidation, dict):
+        return {
+            "text": "Я запустил режим сна, но устойчивые паттерны пока не выделились.",
+            "source": "composer",
+            "confidence": 0.0,
+        }
+
+    patterns = consolidation.get("patterns")
+    if not isinstance(patterns, list) or not patterns:
+        return {
+            "text": (
+                "Я обработал последние события, но пока не увидел повторяющихся паттернов. "
+                f"{REALITY_CONTACT_HINT}"
+            ),
+            "source": "composer",
+            "confidence": 0.0,
+        }
+
+    summaries = [
+        str(pattern.get("summary", "")).strip().rstrip(".")
+        for pattern in patterns[:2]
+        if isinstance(pattern, dict) and pattern.get("summary")
+    ]
+    text = (
+        f"Я обработал последние события и выделил {len(patterns)} устойчивых паттернов. "
+        f"Главное: {'; '.join(summaries)}. "
+        f"{REALITY_CONTACT_HINT}"
+    )
+    confidence = 0.0
+    strengths = [
+        float(pattern.get("strength", 0.0))
+        for pattern in patterns
+        if isinstance(pattern, dict) and isinstance(pattern.get("strength"), (int, float))
+    ]
+    if strengths:
+        confidence = sum(strengths) / len(strengths)
+    return {
+        "text": text,
+        "source": "composer",
+        "confidence": round(confidence, 4),
+    }
+
+
 def compose_answer(
     event: Event,
     response: dict[str, Any],
@@ -165,6 +210,9 @@ def compose_answer(
     """
 
     confidence = _confidence(response)
+
+    if event.type == "sleep_consolidation":
+        return _consolidation_answer(response)
 
     if event.type != "user_message":
         return None

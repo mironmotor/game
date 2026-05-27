@@ -1,0 +1,5 @@
+{
+  "type": "sleep_consolidation",
+  "source": "manual",
+  "limit": 50
+}

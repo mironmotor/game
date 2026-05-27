@@ -156,6 +156,7 @@ def importance_for_event(event: Event, evaluation: dict[str, Any] | None = None)
         "terminal_error": 0.62,
         "user_message": 0.55,
         "system_state": 0.25,
+        "consolidated_pattern": 0.88,
     }.get(event.type, 0.45)
 
     if event.type == "system_state":

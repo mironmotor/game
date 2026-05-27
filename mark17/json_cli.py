@@ -24,6 +24,7 @@ from mark17.critic import evaluate_event
 from mark17.responder import compose_answer
 from mark17.vector_memory import VectorMemory
 from mark17.synapse_graph import SynapseGraph
+from mark17.consolidation import ConsolidationEngine
 
 ALLOWED_EVENTS = frozenset(
     {
@@ -33,6 +34,7 @@ ALLOWED_EVENTS = frozenset(
         "deadline_failed",
         "terminal_error",
         "system_state",
+        "sleep_consolidation",
     }
 )
 
@@ -74,6 +76,10 @@ def _as_event(data: dict[str, Any]) -> Event:
 
 
 def _next_adaptation(result: dict[str, Any]) -> str:
+    existing = result.get("next_adaptation")
+    if isinstance(existing, str) and existing.strip():
+        return existing
+
     evaluation = result.get("self_evaluation")
     if isinstance(evaluation, dict) and evaluation.get("reinforce"):
         return str(evaluation["reinforce"])
@@ -192,6 +198,9 @@ def normalize(result: dict[str, Any]) -> dict[str, Any]:
     synapses = result.get("synapses")
     if isinstance(synapses, dict):
         normalized["synapses"] = synapses
+    consolidation = result.get("consolidation")
+    if isinstance(consolidation, dict):
+        normalized["consolidation"] = consolidation
     return normalized
 
 
@@ -243,6 +252,9 @@ def _handle_event(event: Event, args: argparse.Namespace, state_dir: Path) -> di
     synapse_graph = SynapseGraph(state_dir)
     if args.warmup:
         _run_warmup(args.warmup, brain, vector_memory, synapse_graph)
+    if event.type == "sleep_consolidation":
+        return _handle_sleep_consolidation(event, brain, vector_memory, synapse_graph)
+
     result = brain.handle(event)
     _merge_memory(
         result,
@@ -273,6 +285,57 @@ def _handle_event(event: Event, args: argparse.Namespace, state_dir: Path) -> di
             action="self_evaluation",
         )
         vector_memory.remember(event, result["self_evaluation"])
+    brain.plasticity.save()
+    return result
+
+
+def _handle_sleep_consolidation(
+    event: Event,
+    brain: Mark17Brain,
+    vector_memory: VectorMemory,
+    synapse_graph: SynapseGraph,
+) -> dict[str, Any]:
+    try:
+        limit = int(event.payload.get("limit", 50))
+    except (TypeError, ValueError):
+        limit = 50
+    engine = ConsolidationEngine(brain.memory, vector_memory, synapse_graph)
+    consolidation = engine.consolidate_recent(limit=limit)
+    patterns = consolidation.get("patterns") if isinstance(consolidation, dict) else []
+    strengths = [
+        float(pattern.get("strength", 0.0))
+        for pattern in patterns
+        if isinstance(pattern, dict) and isinstance(pattern.get("strength"), (int, float))
+    ]
+    confidence = sum(strengths) / len(strengths) if strengths else 0.0
+    result: dict[str, Any] = {
+        "ok": True,
+        "event_type": event.type,
+        "route": "consolidation",
+        "memory": {},
+        "plasticity": {
+            "confidence": confidence,
+            "action": "consolidated",
+            "learned": bool(patterns),
+        },
+        "llm": {
+            "status": "skipped",
+            "text": "LLM отключён для sleep_consolidation.",
+            "latency_ms": 0.0,
+        },
+        "consolidation": consolidation,
+        "next_adaptation": "Проверь один устойчивый паттерн через маленькое действие в реальности.",
+        "self_evaluation": {
+            "score": round(confidence, 4),
+            "reason": f"sleep consolidation created {len(patterns)} patterns",
+            "store_memory": False,
+            "reinforce": "sleep consolidation",
+        },
+    }
+    result["synapses"] = synapse_graph.update_from_event(event, result, result["self_evaluation"])
+    answer = compose_answer(event, result, result["self_evaluation"])
+    if answer:
+        result["answer"] = answer
     brain.plasticity.save()
     return result
 

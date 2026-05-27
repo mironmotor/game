@@ -48,6 +48,19 @@ export interface Max17Synapses {
   top?: Max17Synapse[];
 }
 
+export interface Max17Pattern {
+  pattern_id?: string;
+  summary?: string;
+  evidence_count?: number;
+  strength?: number;
+  source?: string;
+}
+
+export interface Max17Consolidation {
+  patterns_created?: number;
+  patterns?: Max17Pattern[];
+}
+
 export interface Max17Response {
   ok?: boolean;
   route: string;
@@ -58,6 +71,7 @@ export interface Max17Response {
   next_adaptation: string;
   answer?: Max17Answer;
   synapses?: Max17Synapses;
+  consolidation?: Max17Consolidation;
   self_evaluation?: Max17SelfEvaluation;
   raw?: Record<string, unknown>;
   error?: string;

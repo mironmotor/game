@@ -11,6 +11,7 @@ const ALLOWED_EVENTS = new Set([
   'deadline_failed',
   'terminal_error',
   'system_state',
+  'sleep_consolidation',
 ]);
 
 const DEFAULT_RESPONSE = {

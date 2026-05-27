@@ -134,6 +134,31 @@ class Hippocampus:
         hits.sort(key=lambda h: h.score, reverse=True)
         return hits[:limit]
 
+    def recent(self, *, limit: int = 50) -> list[MemoryHit]:
+        """Return recent memories without changing their score or hit counters."""
+        with self._conn() as c:
+            rows = c.execute(
+                """
+                SELECT *
+                FROM memories
+                ORDER BY last_used DESC, created_at DESC
+                LIMIT ?
+                """,
+                (limit,),
+            ).fetchall()
+
+        return [
+            MemoryHit(
+                id=row["id"],
+                event_type=row["event_type"],
+                signature=row["signature"],
+                content=json.loads(row["content"]),
+                importance=row["importance"],
+                score=row["importance"],
+            )
+            for row in rows
+        ]
+
     def decay_all(self) -> int:
         """Synaptic scaling: редкие воспоминания слабеют."""
         removed = 0

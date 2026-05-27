@@ -80,6 +80,27 @@ Responses can include:
 }
 ```
 
+### Sleep / Consolidation Mode
+
+Max17 can run a manual sleep pass with:
+
+```bash
+npm run max17:sleep
+```
+
+Sleep mode uses `mark17/consolidation.py` to read recent Hippocampus memories and strong SynapseGraph associations, group repeated themes, and write stable `consolidated_pattern` memories back into Hippocampus. It also mirrors those summaries into VectorMemory so future recall can find them semantically.
+
+This is a deterministic compression loop, not autonomous background AGI. The response includes:
+
+```json
+{
+  "consolidation": {
+    "patterns_created": 0,
+    "patterns": []
+  }
+}
+```
+
 ### Call `/api/max17` with curl
 
 Start the Next.js dev server:
@@ -105,6 +126,7 @@ task_completed
 deadline_failed
 terminal_error
 system_state
+sleep_consolidation
 ```
 
 ### Enable local LLM routing
