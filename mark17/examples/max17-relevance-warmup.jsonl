@@ -1,0 +1,2 @@
+{"type":"terminal_error","line":"ModuleNotFoundError: No module named 'torch'. Try pip install torch to resolve the dependency from the terminal.","source":"smoke"}
+{"type":"task_completed","task":{"id":"game-ux-001","desc":"Game HUD connected to Max17 answer policy and relevance gate","mgr":"MGR-2","xp":25,"status":"completed"},"source":"smoke"}

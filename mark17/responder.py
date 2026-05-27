@@ -6,6 +6,7 @@ It does not call external APIs and does not pretend to be a full LLM.
 
 from __future__ import annotations
 
+import re
 from typing import Any
 
 from mark17.events import Event
@@ -45,6 +46,76 @@ DEBUG_TRIGGERS = (
     "why did you answer",
 )
 
+TOKEN_RE = re.compile(r"[a-zA-Zа-яА-ЯёЁ0-9_]+")
+
+TECHNICAL_TERMS = (
+    "torch",
+    "numpy",
+    "pip",
+    "pip install",
+    "modulenotfounderror",
+    "module not found",
+    "module",
+    "dependency",
+    "dependencies",
+    "traceback",
+    "terminal",
+    "terminal_error",
+    "build",
+    "lint",
+    "npm",
+    "error",
+    "ошибка",
+    "модуль",
+    "зависимость",
+    "зависимости",
+    "терминал",
+    "сборка",
+)
+
+VAGUE_INPUTS = {
+    "game",
+    "привет",
+    "hello",
+    "hi",
+    "ок",
+    "окей",
+    "ok",
+    "что дальше",
+    "дальше",
+    "next",
+}
+
+RELEVANCE_STOPWORDS = {
+    "что",
+    "как",
+    "это",
+    "ты",
+    "мне",
+    "для",
+    "про",
+    "the",
+    "and",
+    "for",
+    "with",
+    "after",
+}
+
+RELEVANCE_CONCEPTS = {
+    "memory": {"memory", "recall", "remember", "память", "памяти", "помнишь", "вспомни"},
+    "pattern": {"pattern", "patterns", "consolidation", "sleep", "паттерн", "паттерны", "связь", "связи"},
+    "core": {"core", "kernel", "brain", "max17", "mark17", "ядро", "ядра", "мозг"},
+    "development": {"development", "learning", "adaptive", "развитие", "обучение", "адаптация"},
+    "task": {"task", "tasks", "задача", "задачи", "квест", "дедлайн"},
+    "technical": set(TECHNICAL_TERMS),
+}
+
+RELEVANCE_CONCEPT_INDEX = {
+    token: concept
+    for concept, tokens in RELEVANCE_CONCEPTS.items()
+    for token in tokens
+}
+
 CAPABILITY_ANSWER = (
     "Я Max17, когнитивное ядро Game в текущей v0.4. Сейчас я принимаю сообщения из HUD, "
     "маршрутизирую события через meta-controller, запоминаю важные события в SQLite memory, "
@@ -71,6 +142,75 @@ def _confidence(result: dict[str, Any]) -> float:
         return _clamp_confidence(decision.get("confidence"))
 
     return 0.0
+
+
+def normalize_text(text: Any) -> str:
+    """Normalize text for deterministic intent/relevance checks."""
+    raw = str(text or "").casefold().replace("ё", "е")
+    return " ".join(TOKEN_RE.findall(raw))
+
+
+def _relevance_tokens(text: Any) -> set[str]:
+    tokens: set[str] = set()
+    for token in normalize_text(text).split():
+        if len(token) < 2 or token in RELEVANCE_STOPWORDS:
+            continue
+        tokens.add(RELEVANCE_CONCEPT_INDEX.get(token, token))
+    return tokens
+
+
+def _has_technical_terms(text: Any) -> bool:
+    normalized = normalize_text(text)
+    compact = normalized.replace(" ", "")
+    return any(term in normalized or term.replace(" ", "") in compact for term in TECHNICAL_TERMS)
+
+
+def _is_vague_input(text: Any) -> bool:
+    normalized = normalize_text(text)
+    if not normalized:
+        return True
+    if _has_technical_terms(normalized):
+        return False
+    if normalized in VAGUE_INPUTS:
+        return True
+    tokens = normalized.split()
+    return len(tokens) == 1 and len(normalized) <= 12
+
+
+def is_memory_relevant(user_text: Any, memory_summary: Any) -> bool:
+    """Decide whether a memory is useful enough to mention in answer.text."""
+    summary = normalize_text(memory_summary)
+    if not summary:
+        return False
+
+    user_is_technical = _has_technical_terms(user_text)
+    memory_is_technical = _has_technical_terms(summary)
+    if memory_is_technical and not user_is_technical:
+        return False
+
+    if _is_vague_input(user_text):
+        return False
+
+    user_tokens = _relevance_tokens(user_text)
+    memory_tokens = _relevance_tokens(summary)
+    if not user_tokens or not memory_tokens:
+        return False
+
+    overlap = user_tokens & memory_tokens
+    if overlap:
+        return True
+
+    if user_is_technical and memory_is_technical:
+        technical_user = {token for token in user_tokens if token == "technical" or token in TECHNICAL_TERMS}
+        technical_memory = {token for token in memory_tokens if token == "technical" or token in TECHNICAL_TERMS}
+        return bool(technical_user and technical_memory)
+
+    return False
+
+
+def is_debug_request(user_text: Any) -> bool:
+    normalized = str(user_text or "").casefold()
+    return any(trigger in normalized for trigger in DEBUG_TRIGGERS)
 
 
 def _clean_public_text(value: Any, *, limit: int = 220) -> str:
@@ -101,6 +241,7 @@ def _clean_public_text(value: Any, *, limit: int = 220) -> str:
         "task_completed: ",
         "task_created: ",
         "deadline_failed: ",
+        "terminal_error: ",
         "user_message: ",
         "consolidated_pattern: ",
     ):
@@ -110,7 +251,17 @@ def _clean_public_text(value: Any, *, limit: int = 220) -> str:
     return " ".join(text.split()).rstrip(".")[:limit]
 
 
-def _first_recalled_summary(result: dict[str, Any]) -> str:
+def _public_memory_summary(row: dict[str, Any], user_text: str, *, limit: int = 220) -> str:
+    for key in ("summary", "reinforce", "text", "event_type"):
+        value = row.get(key)
+        if value and is_memory_relevant(user_text, value):
+            cleaned = _clean_public_text(value, limit=limit)
+            if cleaned:
+                return cleaned
+    return ""
+
+
+def _first_recalled_summary(result: dict[str, Any], user_text: str) -> str:
     memory = result.get("memory")
     if not isinstance(memory, dict):
         return ""
@@ -119,15 +270,15 @@ def _first_recalled_summary(result: dict[str, Any]) -> str:
     if not isinstance(recalled, list) or not recalled:
         return ""
 
-    first = recalled[0]
-    if not isinstance(first, dict):
-        return ""
+    for row in recalled:
+        if isinstance(row, dict):
+            summary = _public_memory_summary(row, user_text)
+            if summary:
+                return summary
+    return ""
 
-    summary = first.get("summary") or first.get("reinforce") or first.get("event_type")
-    return _clean_public_text(summary) if summary else ""
 
-
-def _first_semantic_summary(result: dict[str, Any]) -> str:
+def _first_semantic_summary(result: dict[str, Any], user_text: str) -> str:
     memory = result.get("memory")
     if not isinstance(memory, dict):
         return ""
@@ -136,15 +287,15 @@ def _first_semantic_summary(result: dict[str, Any]) -> str:
     if not isinstance(semantic, list) or not semantic:
         return ""
 
-    first = semantic[0]
-    if not isinstance(first, dict):
-        return ""
+    for row in semantic:
+        if isinstance(row, dict):
+            summary = _public_memory_summary(row, user_text)
+            if summary:
+                return summary
+    return ""
 
-    summary = first.get("summary") or first.get("reinforce") or first.get("text")
-    return _clean_public_text(summary) if summary else ""
 
-
-def _first_synapse_summary(result: dict[str, Any]) -> str:
+def _first_synapse_summary(result: dict[str, Any], user_text: str = "") -> str:
     synapses = result.get("synapses")
     if not isinstance(synapses, dict):
         return ""
@@ -156,11 +307,24 @@ def _first_synapse_summary(result: dict[str, Any]) -> str:
     first = None
     preferred_relations = {"similar_to", "recalled_with", "completed_after", "failed_after", "reinforces"}
     for candidate in top:
-        if isinstance(candidate, dict) and candidate.get("relation_type") in preferred_relations:
+        if not isinstance(candidate, dict) or candidate.get("relation_type") not in preferred_relations:
+            continue
+        summary = candidate.get("summary")
+        if user_text and not is_memory_relevant(user_text, summary):
+            continue
+        if _clean_public_text(summary, limit=180):
             first = candidate
             break
     if first is None:
-        first = top[0]
+        for candidate in top:
+            if not isinstance(candidate, dict):
+                continue
+            summary = candidate.get("summary")
+            if user_text and not is_memory_relevant(user_text, summary):
+                continue
+            if _clean_public_text(summary, limit=180):
+                first = candidate
+                break
 
     if not isinstance(first, dict):
         return ""
@@ -219,11 +383,16 @@ def _is_memory_question(user_text: str) -> bool:
 
 
 def _is_debug_question(user_text: str) -> bool:
-    normalized = user_text.casefold()
-    return any(trigger in normalized for trigger in DEBUG_TRIGGERS)
+    return is_debug_request(user_text)
 
 
-def _memory_entries(result: dict[str, Any], key: str, *, limit: int = 3) -> list[str]:
+def _memory_entries(
+    result: dict[str, Any],
+    key: str,
+    *,
+    limit: int = 3,
+    user_text: str = "",
+) -> list[str]:
     memory = result.get("memory")
     if not isinstance(memory, dict):
         return []
@@ -236,13 +405,16 @@ def _memory_entries(result: dict[str, Any], key: str, *, limit: int = 3) -> list
     for row in rows:
         if not isinstance(row, dict):
             continue
-        summary = (
-            row.get("summary")
-            or row.get("reinforce")
-            or row.get("text")
-            or row.get("event_type")
-        )
-        cleaned = _clean_public_text(summary)
+        if user_text:
+            cleaned = _public_memory_summary(row, user_text)
+        else:
+            summary = (
+                row.get("summary")
+                or row.get("reinforce")
+                or row.get("text")
+                or row.get("event_type")
+            )
+            cleaned = _clean_public_text(summary)
         if cleaned and cleaned not in entries:
             entries.append(cleaned)
         if len(entries) >= limit:
@@ -275,10 +447,11 @@ def _consolidation_patterns(result: dict[str, Any], *, limit: int = 4) -> list[s
 
 
 def _memory_question_answer(event: Event, result: dict[str, Any]) -> dict[str, Any]:
+    user_text = str(event.payload.get("text") or "")
     patterns = _consolidation_patterns(result)
-    semantic = _memory_entries(result, "semantic", limit=2)
-    recalled = _memory_entries(result, "recalled", limit=2)
-    synapse = _first_synapse_summary(result)
+    semantic = _memory_entries(result, "semantic", limit=2, user_text=user_text)
+    recalled = _memory_entries(result, "recalled", limit=2, user_text=user_text)
+    synapse = _first_synapse_summary(result, user_text)
     confidence = _confidence(result)
 
     parts: list[str] = []
@@ -333,6 +506,18 @@ def _debug_answer(result: dict[str, Any], self_evaluation: dict[str, Any] | None
         "text": text + ".",
         "source": "composer_debug",
         "confidence": round(_confidence(result), 4),
+    }
+
+
+def _vague_status_answer(confidence: float) -> dict[str, Any]:
+    return {
+        "text": (
+            "Я на связи в Game. Могу принять сообщение, вспомнить релевантную память, "
+            "обновить ассоциации и предложить следующий маленький шаг. "
+            "Сформулируй задачу или вопрос чуть конкретнее, и я отвечу по делу."
+        ),
+        "source": "composer",
+        "confidence": round(confidence, 4),
     }
 
 
@@ -414,8 +599,11 @@ def compose_answer(
     if _is_memory_question(user_text):
         return _memory_question_answer(event, response)
 
-    recalled = _first_recalled_summary(response)
-    semantic = _first_semantic_summary(response)
+    if _is_vague_input(user_text):
+        return _vague_status_answer(confidence)
+
+    recalled = _first_recalled_summary(response, user_text)
+    semantic = _first_semantic_summary(response, user_text)
     next_step = _next_adaptation(response, user_text)
 
     parts = ["Я понял запрос."]
