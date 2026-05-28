@@ -78,8 +78,36 @@ export interface Max17Response {
   details?: unknown;
 }
 
+const FALLBACK_BASE_PATH = '/game';
+
+function normalizeBasePath(basePath: string | undefined) {
+  if (!basePath || basePath === '/') {
+    return '';
+  }
+  return basePath.startsWith('/') ? basePath : `/${basePath}`;
+}
+
+function getMax17ApiPath() {
+  const envBasePath = normalizeBasePath(process.env.NEXT_PUBLIC_BASE_PATH);
+  if (envBasePath) {
+    return `${envBasePath}/api/max17`;
+  }
+
+  const fallbackBasePath = normalizeBasePath(FALLBACK_BASE_PATH);
+  if (
+    typeof window !== 'undefined' &&
+    fallbackBasePath &&
+    (window.location.pathname === fallbackBasePath ||
+      window.location.pathname.startsWith(`${fallbackBasePath}/`))
+  ) {
+    return `${fallbackBasePath}/api/max17`;
+  }
+
+  return '/api/max17';
+}
+
 export async function sendMax17Event(event: Record<string, unknown>): Promise<Max17Response> {
-  const response = await fetch('/api/max17', {
+  const response = await fetch(getMax17ApiPath(), {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
