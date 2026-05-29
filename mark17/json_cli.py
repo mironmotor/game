@@ -26,6 +26,7 @@ from mark17.vector_memory import VectorMemory
 from mark17.synapse_graph import SynapseGraph
 from mark17.consolidation import ConsolidationEngine
 from mark17.working_memory import WorkingMemory
+from mark17.planner import plan_next_actions
 
 ALLOWED_EVENTS = frozenset(
     {
@@ -235,6 +236,9 @@ def normalize(result: dict[str, Any]) -> dict[str, Any]:
     working_memory = result.get("working_memory")
     if isinstance(working_memory, dict):
         normalized["working_memory"] = working_memory
+    plan = result.get("plan")
+    if isinstance(plan, dict):
+        normalized["plan"] = plan
     return normalized
 
 
@@ -307,6 +311,12 @@ def _handle_event(event: Event, args: argparse.Namespace, state_dir: Path) -> di
     if event.type in {"user_message", "task_created", "task_completed", "deadline_failed", "terminal_error", "system_state"}:
         result["working_memory"] = working_memory.update_from_event(event, result, result["self_evaluation"])
     result["synapses"] = synapse_graph.update_from_event(event, result, result["self_evaluation"])
+    result["plan"] = plan_next_actions(
+        event,
+        result,
+        result.get("working_memory"),
+        result["self_evaluation"],
+    )
     answer = compose_answer(event, result, result["self_evaluation"])
     if answer:
         result["answer"] = answer
@@ -445,7 +455,13 @@ def _run_warmup(
         result["next_adaptation"] = _next_adaptation(result)
         if event.type in {"user_message", "task_created", "task_completed", "deadline_failed", "terminal_error", "system_state"}:
             result["working_memory"] = working_memory.update_from_event(event, result, result["self_evaluation"])
-        synapse_graph.update_from_event(event, result, result["self_evaluation"])
+        result["synapses"] = synapse_graph.update_from_event(event, result, result["self_evaluation"])
+        result["plan"] = plan_next_actions(
+            event,
+            result,
+            result.get("working_memory"),
+            result["self_evaluation"],
+        )
         answer = compose_answer(event, result, result["self_evaluation"])
         if answer:
             result["answer"] = answer

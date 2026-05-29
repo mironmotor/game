@@ -77,6 +77,20 @@ export interface Max17WorkingMemory {
   updated_at?: string;
 }
 
+export interface Max17PlanAction {
+  title?: string;
+  reason?: string;
+  priority?: number;
+  effort?: 'small' | 'medium' | 'large' | string;
+  expected_result?: string;
+}
+
+export interface Max17Plan {
+  mode?: string;
+  goal?: string;
+  actions?: Max17PlanAction[];
+}
+
 export interface Max17Response {
   ok?: boolean;
   route: string;
@@ -89,6 +103,7 @@ export interface Max17Response {
   synapses?: Max17Synapses;
   consolidation?: Max17Consolidation;
   working_memory?: Max17WorkingMemory;
+  plan?: Max17Plan;
   self_evaluation?: Max17SelfEvaluation;
   raw?: Record<string, unknown>;
   error?: string;

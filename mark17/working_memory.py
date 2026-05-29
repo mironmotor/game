@@ -83,7 +83,20 @@ def detect_intent(text: Any, event_type: str = "user_message") -> str:
         )
     ):
         return "development_request"
-    if any(term in normalized for term in ("что дальше", "дальше", "next step", "следующий шаг", "куда дальше")):
+    if any(
+        term in normalized
+        for term in (
+            "что дальше",
+            "давай дальше",
+            "что делать",
+            "дальше",
+            "next",
+            "next step",
+            "what should i do",
+            "следующий шаг",
+            "куда дальше",
+        )
+    ):
         return "asks_next_step"
     return "unknown"
 

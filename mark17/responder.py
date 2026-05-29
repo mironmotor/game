@@ -82,10 +82,12 @@ VAGUE_INPUTS = {
     "окей",
     "ok",
     "что дальше",
+    "что делать",
     "давай дальше",
     "дальше",
     "next",
     "next step",
+    "what should i do",
 }
 
 RELEVANCE_STOPWORDS = {
@@ -384,6 +386,21 @@ def _is_memory_question(user_text: str) -> bool:
     return "помн" in normalized and ("что" in normalized or "memory" in normalized)
 
 
+def _is_next_action_request(user_text: str) -> bool:
+    normalized = normalize_text(user_text)
+    triggers = (
+        "что дальше",
+        "давай дальше",
+        "что делать",
+        "следующий шаг",
+        "куда дальше",
+        "next",
+        "next step",
+        "what should i do",
+    )
+    return any(trigger in normalized for trigger in triggers)
+
+
 def _is_debug_question(user_text: str) -> bool:
     return is_debug_request(user_text)
 
@@ -514,6 +531,50 @@ def _debug_answer(result: dict[str, Any], self_evaluation: dict[str, Any] | None
 def _working_memory_context(result: dict[str, Any]) -> dict[str, Any]:
     context = result.get("working_memory")
     return context if isinstance(context, dict) else {}
+
+
+def _plan_answer(result: dict[str, Any], confidence: float) -> dict[str, Any] | None:
+    plan = result.get("plan")
+    if not isinstance(plan, dict):
+        return None
+    actions = plan.get("actions")
+    if not isinstance(actions, list) or not actions:
+        return None
+
+    goal = str(plan.get("goal") or "").strip()
+    mode = str(plan.get("mode") or "unknown").strip()
+    parts: list[str] = []
+    if goal:
+        parts.append(f"Дальше по цели «{goal}» я предлагаю:")
+    else:
+        parts.append("Дальше я предлагаю:")
+
+    for index, action in enumerate(actions[:3], start=1):
+        if not isinstance(action, dict):
+            continue
+        title = str(action.get("title") or "").strip()
+        expected = str(action.get("expected_result") or "").strip().rstrip(".")
+        effort = str(action.get("effort") or "").strip()
+        if not title:
+            continue
+        line = f"{index}. {title}"
+        details: list[str] = []
+        if effort:
+            details.append(f"усилие: {effort}")
+        if expected:
+            details.append(f"результат: {expected}")
+        if details:
+            line += " — " + "; ".join(details)
+        parts.append(line + ".")
+
+    if len(parts) == 1:
+        return None
+    parts.append(f"Режим: {mode}.")
+    return {
+        "text": " ".join(parts),
+        "source": "composer",
+        "confidence": round(confidence, 4),
+    }
 
 
 def _working_memory_next_answer(result: dict[str, Any], confidence: float) -> dict[str, Any] | None:
@@ -647,11 +708,19 @@ def compose_answer(
     if _is_memory_question(user_text):
         return _memory_question_answer(event, response)
 
+    if _is_next_action_request(user_text):
+        planned = _plan_answer(response, confidence)
+        if planned:
+            return planned
+
     if _is_vague_input(user_text):
         return _vague_status_answer(response, confidence)
 
     working_memory = _working_memory_context(response)
     if working_memory.get("last_user_intent") == "asks_next_step":
+        planned = _plan_answer(response, confidence)
+        if planned:
+            return planned
         contextual = _working_memory_next_answer(response, confidence)
         if contextual:
             return contextual

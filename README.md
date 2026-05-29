@@ -124,6 +124,32 @@ You can clear the short-term context with:
 }
 ```
 
+### Planner / Next Action Engine
+
+Max17 can produce a small deterministic action plan in `mark17/planner.py`.
+The planner reads the current event, WorkingMemory context, memory/synapse hints, and self-evaluation, then returns 1-3 practical next actions.
+It is a next-step helper, not autonomous task execution.
+
+Run the planner smoke check with:
+
+```bash
+npm run max17:plan
+```
+
+Responses can include:
+
+```json
+{
+  "plan": {
+    "mode": "planning",
+    "goal": "Делаем дальше Max17, улучшаем ядро",
+    "actions": []
+  }
+}
+```
+
+When the user asks `что дальше?`, the responder uses `plan.actions` to answer with concrete actions instead of generic memory text.
+
 ### Call `/api/max17` with curl
 
 Start the Next.js dev server:
