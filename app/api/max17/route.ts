@@ -12,6 +12,7 @@ const ALLOWED_EVENTS = new Set([
   'terminal_error',
   'system_state',
   'sleep_consolidation',
+  'working_memory_reset',
 ]);
 
 const DEFAULT_RESPONSE = {

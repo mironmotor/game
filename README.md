@@ -101,6 +101,29 @@ This is a deterministic compression loop, not autonomous background AGI. The res
 }
 ```
 
+### Working Memory
+
+Max17 keeps a small short-term session context in `mark17/working_memory.py`.
+This is not long-term memory and does not replace Hippocampus, VectorMemory, or SynapseGraph.
+It stores the current topic, active goal, current mode, last user intent, recent turns, and a suggested next step in `working_memory.json` under the selected state directory.
+
+Run the working-memory smoke check with:
+
+```bash
+npm run max17:working
+```
+
+The smoke check warms up a Max17 core-development message and then asks `что дальше?`.
+The expected behavior is a contextual answer that uses the current session state instead of a generic fallback.
+
+You can clear the short-term context with:
+
+```json
+{
+  "type": "working_memory_reset"
+}
+```
+
 ### Call `/api/max17` with curl
 
 Start the Next.js dev server:
@@ -127,6 +150,7 @@ deadline_failed
 terminal_error
 system_state
 sleep_consolidation
+working_memory_reset
 ```
 
 ### Enable local LLM routing

@@ -61,6 +61,22 @@ export interface Max17Consolidation {
   patterns?: Max17Pattern[];
 }
 
+export interface Max17WorkingMemoryTurn {
+  role?: string;
+  text?: string;
+  timestamp?: string;
+}
+
+export interface Max17WorkingMemory {
+  current_topic?: string;
+  active_goal?: string;
+  current_mode?: string;
+  last_user_intent?: string;
+  recent_turns?: Max17WorkingMemoryTurn[];
+  suggested_next_step?: string;
+  updated_at?: string;
+}
+
 export interface Max17Response {
   ok?: boolean;
   route: string;
@@ -72,6 +88,7 @@ export interface Max17Response {
   answer?: Max17Answer;
   synapses?: Max17Synapses;
   consolidation?: Max17Consolidation;
+  working_memory?: Max17WorkingMemory;
   self_evaluation?: Max17SelfEvaluation;
   raw?: Record<string, unknown>;
   error?: string;

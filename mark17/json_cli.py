@@ -25,6 +25,7 @@ from mark17.responder import compose_answer
 from mark17.vector_memory import VectorMemory
 from mark17.synapse_graph import SynapseGraph
 from mark17.consolidation import ConsolidationEngine
+from mark17.working_memory import WorkingMemory
 
 ALLOWED_EVENTS = frozenset(
     {
@@ -35,6 +36,7 @@ ALLOWED_EVENTS = frozenset(
         "terminal_error",
         "system_state",
         "sleep_consolidation",
+        "working_memory_reset",
     }
 )
 
@@ -230,6 +232,9 @@ def normalize(result: dict[str, Any]) -> dict[str, Any]:
     consolidation = result.get("consolidation")
     if isinstance(consolidation, dict):
         normalized["consolidation"] = consolidation
+    working_memory = result.get("working_memory")
+    if isinstance(working_memory, dict):
+        normalized["working_memory"] = working_memory
     return normalized
 
 
@@ -279,10 +284,15 @@ def _handle_event(event: Event, args: argparse.Namespace, state_dir: Path) -> di
     )
     vector_memory = VectorMemory(state_dir)
     synapse_graph = SynapseGraph(state_dir)
+    working_memory = WorkingMemory(state_dir)
     if args.warmup:
-        _run_warmup(args.warmup, brain, vector_memory, synapse_graph)
+        _run_warmup(args.warmup, brain, vector_memory, synapse_graph, working_memory)
+    if event.type == "working_memory_reset":
+        return _handle_working_memory_reset(working_memory)
     if event.type == "sleep_consolidation":
-        return _handle_sleep_consolidation(event, brain, vector_memory, synapse_graph)
+        result = _handle_sleep_consolidation(event, brain, vector_memory, synapse_graph)
+        result["working_memory"] = working_memory.get_context()
+        return result
 
     result = brain.handle(event)
     _merge_memory(
@@ -294,10 +304,14 @@ def _handle_event(event: Event, args: argparse.Namespace, state_dir: Path) -> di
     evaluation = evaluate_event(event, result)
     result["self_evaluation"] = evaluation.to_dict()
     result["next_adaptation"] = _next_adaptation(result)
+    if event.type in {"user_message", "task_created", "task_completed", "deadline_failed", "terminal_error", "system_state"}:
+        result["working_memory"] = working_memory.update_from_event(event, result, result["self_evaluation"])
     result["synapses"] = synapse_graph.update_from_event(event, result, result["self_evaluation"])
     answer = compose_answer(event, result, result["self_evaluation"])
     if answer:
         result["answer"] = answer
+        if event.type in {"user_message", "task_created", "task_completed", "deadline_failed", "terminal_error", "system_state"}:
+            result["working_memory"] = working_memory.update_from_event(event, result, result["self_evaluation"])
     if evaluation.store_memory:
         brain.memory.remember(
             Event(
@@ -317,6 +331,40 @@ def _handle_event(event: Event, args: argparse.Namespace, state_dir: Path) -> di
         vector_memory.remember(event, result["self_evaluation"])
     brain.plasticity.save()
     return result
+
+
+def _handle_working_memory_reset(working_memory: WorkingMemory) -> dict[str, Any]:
+    state = working_memory.reset()
+    return {
+        "ok": True,
+        "event_type": "working_memory_reset",
+        "route": "working_memory",
+        "memory": {},
+        "plasticity": {
+            "confidence": 1.0,
+            "action": "reset",
+            "learned": False,
+        },
+        "llm": {
+            "status": "skipped",
+            "text": "LLM отключён для working_memory_reset.",
+            "latency_ms": 0.0,
+        },
+        "confidence": 1.0,
+        "next_adaptation": "Оперативный контекст очищен.",
+        "self_evaluation": {
+            "score": 1.0,
+            "reason": "working memory reset",
+            "store_memory": False,
+            "reinforce": "clear session context",
+        },
+        "working_memory": state,
+        "answer": {
+            "text": "Я очистил оперативный контекст сессии.",
+            "source": "composer",
+            "confidence": 1.0,
+        },
+    }
 
 
 def _handle_sleep_consolidation(
@@ -375,6 +423,7 @@ def _run_warmup(
     brain: Mark17Brain,
     vector_memory: VectorMemory,
     synapse_graph: SynapseGraph,
+    working_memory: WorkingMemory,
 ) -> None:
     for line in path.read_text().splitlines():
         line = line.strip()
@@ -384,6 +433,9 @@ def _run_warmup(
         if not isinstance(raw, dict):
             continue
         event = _as_event(raw)
+        if event.type == "working_memory_reset":
+            working_memory.reset()
+            continue
         if event.type == "sleep_consolidation":
             _handle_sleep_consolidation(event, brain, vector_memory, synapse_graph)
             continue
@@ -391,7 +443,14 @@ def _run_warmup(
         evaluation = evaluate_event(event, result)
         result["self_evaluation"] = evaluation.to_dict()
         result["next_adaptation"] = _next_adaptation(result)
+        if event.type in {"user_message", "task_created", "task_completed", "deadline_failed", "terminal_error", "system_state"}:
+            result["working_memory"] = working_memory.update_from_event(event, result, result["self_evaluation"])
         synapse_graph.update_from_event(event, result, result["self_evaluation"])
+        answer = compose_answer(event, result, result["self_evaluation"])
+        if answer:
+            result["answer"] = answer
+            if event.type in {"user_message", "task_created", "task_completed", "deadline_failed", "terminal_error", "system_state"}:
+                working_memory.update_from_event(event, result, result["self_evaluation"])
         if evaluation.store_memory:
             brain.memory.remember(
                 Event(

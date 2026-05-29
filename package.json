@@ -9,6 +9,7 @@
     "lint": "eslint .",
     "max17:smoke": "python3 mark17/smoke.py",
     "max17:sleep": "python3 mark17/json_cli.py --no-llm --ephemeral --warmup mark17/examples/max17-recall-warmup.jsonl < mark17/examples/max17-sleep.json",
+    "max17:working": "python3 mark17/working_smoke.py",
     "clean": "next clean"
   },
   "dependencies": {

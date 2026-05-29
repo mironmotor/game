@@ -82,8 +82,10 @@ VAGUE_INPUTS = {
     "окей",
     "ok",
     "что дальше",
+    "давай дальше",
     "дальше",
     "next",
+    "next step",
 }
 
 RELEVANCE_STOPWORDS = {
@@ -509,7 +511,53 @@ def _debug_answer(result: dict[str, Any], self_evaluation: dict[str, Any] | None
     }
 
 
-def _vague_status_answer(confidence: float) -> dict[str, Any]:
+def _working_memory_context(result: dict[str, Any]) -> dict[str, Any]:
+    context = result.get("working_memory")
+    return context if isinstance(context, dict) else {}
+
+
+def _working_memory_next_answer(result: dict[str, Any], confidence: float) -> dict[str, Any] | None:
+    context = _working_memory_context(result)
+    topic = str(context.get("current_topic") or "").strip()
+    goal = str(context.get("active_goal") or "").strip()
+    next_step = str(context.get("suggested_next_step") or "").strip()
+    mode = str(context.get("current_mode") or "").strip()
+
+    if not any((topic, goal, next_step)):
+        return None
+
+    if topic == "Max17 core development":
+        step = (next_step or "закрепить Working Memory и проверить её на HUD-сообщениях").rstrip(".")
+        text = (
+            "Мы сейчас развиваем Max17 core. "
+            f"Текущий фокус: {goal or 'удерживать контекст сессии и улучшать ядро'}. "
+            f"Следующий логичный шаг — {step}."
+        )
+    elif topic:
+        step = (next_step or "сформулировать одно проверяемое действие").rstrip(".")
+        text = (
+            f"Сейчас контекст сессии: {topic}. "
+            f"Цель: {goal or 'уточнить ближайшее действие'}. "
+            f"Следующий шаг: {step}."
+        )
+    else:
+        step = (next_step or goal or "сформулировать одно проверяемое действие").rstrip(".")
+        text = (
+            f"Контекст сессии пока держится в режиме {mode or 'unknown'}. "
+            f"Следующий шаг: {step}."
+        )
+
+    return {
+        "text": text,
+        "source": "composer",
+        "confidence": round(confidence, 4),
+    }
+
+
+def _vague_status_answer(result: dict[str, Any], confidence: float) -> dict[str, Any]:
+    contextual = _working_memory_next_answer(result, confidence)
+    if contextual:
+        return contextual
     return {
         "text": (
             "Я на связи в Game. Могу принять сообщение, вспомнить релевантную память, "
@@ -600,7 +648,13 @@ def compose_answer(
         return _memory_question_answer(event, response)
 
     if _is_vague_input(user_text):
-        return _vague_status_answer(confidence)
+        return _vague_status_answer(response, confidence)
+
+    working_memory = _working_memory_context(response)
+    if working_memory.get("last_user_intent") == "asks_next_step":
+        contextual = _working_memory_next_answer(response, confidence)
+        if contextual:
+            return contextual
 
     recalled = _first_recalled_summary(response, user_text)
     semantic = _first_semantic_summary(response, user_text)
