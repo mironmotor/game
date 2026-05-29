@@ -91,6 +91,16 @@ export interface Max17Plan {
   actions?: Max17PlanAction[];
 }
 
+export interface Max17Outcome {
+  status?: 'success' | 'failure' | 'partial' | 'skipped' | 'unknown' | string;
+  score?: number;
+  reason?: string;
+  reinforce?: string;
+  weaken?: string;
+  related_goal?: string;
+  next_adjustment?: string;
+}
+
 export interface Max17Response {
   ok?: boolean;
   route: string;
@@ -104,6 +114,7 @@ export interface Max17Response {
   consolidation?: Max17Consolidation;
   working_memory?: Max17WorkingMemory;
   plan?: Max17Plan;
+  outcome?: Max17Outcome;
   self_evaluation?: Max17SelfEvaluation;
   raw?: Record<string, unknown>;
   error?: string;

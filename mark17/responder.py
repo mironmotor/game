@@ -675,6 +675,43 @@ def _consolidation_answer(response: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _outcome_answer(response: dict[str, Any]) -> dict[str, Any]:
+    outcome = response.get("outcome")
+    if not isinstance(outcome, dict):
+        return {
+            "text": "Я зафиксировал результат, но пока не смог оценить его связь с текущей целью.",
+            "source": "composer",
+            "confidence": 0.35,
+        }
+
+    status = str(outcome.get("status") or "unknown")
+    confidence = _clamp_confidence(outcome.get("score"))
+    adjustment = str(outcome.get("next_adjustment") or "").strip()
+
+    if status == "success":
+        text = (
+            "Отлично. Я зафиксировал успешный результат и усилил связь между целью, "
+            "действием и результатом."
+        )
+    elif status == "partial":
+        text = "Я зафиксировал частичный результат. Следующий шаг — сузить масштаб и проверить меньший вариант."
+    elif status == "failure":
+        text = "Я зафиксировал, что действие не сработало. Следующий шаг — уменьшить масштаб и проверить более простой вариант."
+    elif status == "skipped":
+        text = "Я зафиксировал, что действие было пропущено. Следующий шаг — выбрать меньший и более ясный вариант."
+    else:
+        text = "Я зафиксировал результат и свяжу его с текущей целью."
+
+    if adjustment and adjustment not in text:
+        text += f" Настройка: {adjustment}"
+
+    return {
+        "text": text,
+        "source": "composer",
+        "confidence": round(confidence, 4),
+    }
+
+
 def compose_answer(
     event: Event,
     response: dict[str, Any],
@@ -690,6 +727,9 @@ def compose_answer(
 
     if event.type == "sleep_consolidation":
         return _consolidation_answer(response)
+
+    if event.type in {"outcome_success", "outcome_failure", "outcome_partial", "action_done", "action_skipped"}:
+        return _outcome_answer(response)
 
     if event.type != "user_message":
         return None

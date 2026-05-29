@@ -13,6 +13,11 @@ const ALLOWED_EVENTS = new Set([
   'system_state',
   'sleep_consolidation',
   'working_memory_reset',
+  'outcome_success',
+  'outcome_failure',
+  'outcome_partial',
+  'action_done',
+  'action_skipped',
 ]);
 
 const DEFAULT_RESPONSE = {

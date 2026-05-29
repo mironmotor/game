@@ -150,6 +150,41 @@ Responses can include:
 
 When the user asks `что дальше?`, the responder uses `plan.actions` to answer with concrete actions instead of generic memory text.
 
+### Outcome Feedback Loop
+
+Max17 can receive lightweight feedback about whether a planned action helped, failed, partially worked, or was skipped.
+The loop lives in `mark17/outcome.py` and returns an `outcome` object while also writing an outcome summary into Hippocampus, VectorMemory, and SynapseGraph.
+
+Run the outcome smoke check with:
+
+```bash
+npm run max17:outcome
+```
+
+Supported outcome events:
+
+```text
+outcome_success
+outcome_failure
+outcome_partial
+action_done
+action_skipped
+```
+
+Responses can include:
+
+```json
+{
+  "outcome": {
+    "status": "success",
+    "score": 0.9,
+    "next_adjustment": "Продолжить этот паттерн и проверить следующий маленький шаг."
+  }
+}
+```
+
+This is feedback reinforcement, not autonomous execution: Max17 records the result and adjusts future next-step suggestions.
+
 ### Call `/api/max17` with curl
 
 Start the Next.js dev server:
@@ -177,6 +212,11 @@ terminal_error
 system_state
 sleep_consolidation
 working_memory_reset
+outcome_success
+outcome_failure
+outcome_partial
+action_done
+action_skipped
 ```
 
 ### Enable local LLM routing

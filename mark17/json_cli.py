@@ -27,6 +27,7 @@ from mark17.synapse_graph import SynapseGraph
 from mark17.consolidation import ConsolidationEngine
 from mark17.working_memory import WorkingMemory
 from mark17.planner import plan_next_actions
+from mark17.outcome import OUTCOME_EVENT_TYPES, evaluate_outcome, update_outcome_synapses
 
 ALLOWED_EVENTS = frozenset(
     {
@@ -38,6 +39,11 @@ ALLOWED_EVENTS = frozenset(
         "system_state",
         "sleep_consolidation",
         "working_memory_reset",
+        "outcome_success",
+        "outcome_failure",
+        "outcome_partial",
+        "action_done",
+        "action_skipped",
     }
 )
 
@@ -239,6 +245,9 @@ def normalize(result: dict[str, Any]) -> dict[str, Any]:
     plan = result.get("plan")
     if isinstance(plan, dict):
         normalized["plan"] = plan
+    outcome = result.get("outcome")
+    if isinstance(outcome, dict):
+        normalized["outcome"] = outcome
     return normalized
 
 
@@ -297,6 +306,8 @@ def _handle_event(event: Event, args: argparse.Namespace, state_dir: Path) -> di
         result = _handle_sleep_consolidation(event, brain, vector_memory, synapse_graph)
         result["working_memory"] = working_memory.get_context()
         return result
+    if event.type in OUTCOME_EVENT_TYPES:
+        return _handle_outcome_event(event, brain, vector_memory, synapse_graph, working_memory)
 
     result = brain.handle(event)
     _merge_memory(
@@ -339,6 +350,99 @@ def _handle_event(event: Event, args: argparse.Namespace, state_dir: Path) -> di
             action="self_evaluation",
         )
         vector_memory.remember(event, result["self_evaluation"])
+    brain.plasticity.save()
+    return result
+
+
+def _handle_outcome_event(
+    event: Event,
+    brain: Mark17Brain,
+    vector_memory: VectorMemory,
+    synapse_graph: SynapseGraph,
+    working_memory: WorkingMemory,
+) -> dict[str, Any]:
+    working_context = working_memory.get_context()
+    seed: dict[str, Any] = {
+        "ok": True,
+        "event_type": event.type,
+        "route": "outcome",
+        "memory": {},
+        "plasticity": {
+            "confidence": 0.5,
+            "action": "observe_outcome",
+            "learned": False,
+        },
+        "llm": {
+            "status": "skipped",
+            "text": "LLM отключён для outcome feedback.",
+            "latency_ms": 0.0,
+        },
+        "working_memory": working_context,
+    }
+    plan = plan_next_actions(event, seed, working_context)
+    outcome = evaluate_outcome(event, working_context, plan)
+    evaluation = {
+        "score": outcome["score"],
+        "reason": outcome["reason"],
+        "store_memory": True,
+        "reinforce": outcome.get("reinforce") or outcome.get("next_adjustment") or "",
+    }
+    result: dict[str, Any] = {
+        **seed,
+        "confidence": outcome["score"],
+        "plasticity": {
+            "confidence": outcome["score"],
+            "action": "reinforce" if outcome["status"] == "success" else "adjust",
+            "learned": True,
+        },
+        "next_adaptation": outcome["next_adjustment"],
+        "self_evaluation": evaluation,
+        "plan": plan,
+        "outcome": outcome,
+    }
+    result["synapses"] = update_outcome_synapses(
+        synapse_graph,
+        event=event,
+        outcome=outcome,
+        working_memory=working_context,
+        plan=plan,
+    )
+
+    summary = f"{outcome['status']}: {outcome['reason']} Next: {outcome['next_adjustment']}"
+    stored_id = brain.memory.remember(
+        Event(
+            type=event.type,
+            payload={
+                **event.payload,
+                "outcome": outcome,
+                "plan_action": (plan.get("actions") or [{}])[0] if isinstance(plan.get("actions"), list) else {},
+            },
+            source=event.source,
+        ),
+        hint=summary,
+        action="outcome_feedback",
+    )
+    vector_memory.remember(
+        Event(
+            type=event.type,
+            payload={
+                **event.payload,
+                "outcome": outcome,
+            },
+            source=event.source,
+        ),
+        evaluation,
+    )
+    result["memory"] = {
+        "outcome_stored_id": stored_id,
+        "outcome_summary": summary,
+        "recalled": [],
+        "semantic": [],
+    }
+
+    answer = compose_answer(event, result, evaluation)
+    if answer:
+        result["answer"] = answer
     brain.plasticity.save()
     return result
 
@@ -448,6 +552,9 @@ def _run_warmup(
             continue
         if event.type == "sleep_consolidation":
             _handle_sleep_consolidation(event, brain, vector_memory, synapse_graph)
+            continue
+        if event.type in OUTCOME_EVENT_TYPES:
+            _handle_outcome_event(event, brain, vector_memory, synapse_graph, working_memory)
             continue
         result = brain.handle(event)
         evaluation = evaluate_event(event, result)

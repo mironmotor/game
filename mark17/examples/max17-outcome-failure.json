@@ -1,0 +1,5 @@
+{
+  "type": "outcome_failure",
+  "text": "Planner smoke test не сработал с первого раза",
+  "source": "smoke"
+}

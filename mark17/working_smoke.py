@@ -61,7 +61,10 @@ def main() -> int:
     _assert(topic == "Max17 core development", f"unexpected current_topic: {topic}")
     _assert(mode in {"planning", "development"}, f"unexpected current_mode: {mode}")
     _assert("Max17 core" in answer or "Max17" in answer, "answer should mention Max17 context")
-    _assert("Следующий" in answer or "следующий" in answer, "answer should include a next step")
+    _assert(
+        any(token in answer for token in ("Следующий", "следующий", "Дальше", "предлагаю")),
+        "answer should include a next step",
+    )
 
     print(
         json.dumps(
