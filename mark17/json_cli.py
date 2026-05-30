@@ -37,6 +37,7 @@ ALLOWED_EVENTS = frozenset(
         "deadline_failed",
         "terminal_error",
         "system_state",
+        "environment_observation",
         "sleep_consolidation",
         "working_memory_reset",
         "outcome_success",
@@ -319,7 +320,7 @@ def _handle_event(event: Event, args: argparse.Namespace, state_dir: Path) -> di
     evaluation = evaluate_event(event, result)
     result["self_evaluation"] = evaluation.to_dict()
     result["next_adaptation"] = _next_adaptation(result)
-    if event.type in {"user_message", "task_created", "task_completed", "deadline_failed", "terminal_error", "system_state"}:
+    if event.type in {"user_message", "task_created", "task_completed", "deadline_failed", "terminal_error", "system_state", "environment_observation"}:
         result["working_memory"] = working_memory.update_from_event(event, result, result["self_evaluation"])
     result["synapses"] = synapse_graph.update_from_event(event, result, result["self_evaluation"])
     result["plan"] = plan_next_actions(
@@ -331,7 +332,7 @@ def _handle_event(event: Event, args: argparse.Namespace, state_dir: Path) -> di
     answer = compose_answer(event, result, result["self_evaluation"])
     if answer:
         result["answer"] = answer
-        if event.type in {"user_message", "task_created", "task_completed", "deadline_failed", "terminal_error", "system_state"}:
+        if event.type in {"user_message", "task_created", "task_completed", "deadline_failed", "terminal_error", "system_state", "environment_observation"}:
             result["working_memory"] = working_memory.update_from_event(event, result, result["self_evaluation"])
     if evaluation.store_memory:
         brain.memory.remember(
@@ -560,7 +561,7 @@ def _run_warmup(
         evaluation = evaluate_event(event, result)
         result["self_evaluation"] = evaluation.to_dict()
         result["next_adaptation"] = _next_adaptation(result)
-        if event.type in {"user_message", "task_created", "task_completed", "deadline_failed", "terminal_error", "system_state"}:
+        if event.type in {"user_message", "task_created", "task_completed", "deadline_failed", "terminal_error", "system_state", "environment_observation"}:
             result["working_memory"] = working_memory.update_from_event(event, result, result["self_evaluation"])
         result["synapses"] = synapse_graph.update_from_event(event, result, result["self_evaluation"])
         result["plan"] = plan_next_actions(
@@ -572,7 +573,7 @@ def _run_warmup(
         answer = compose_answer(event, result, result["self_evaluation"])
         if answer:
             result["answer"] = answer
-            if event.type in {"user_message", "task_created", "task_completed", "deadline_failed", "terminal_error", "system_state"}:
+            if event.type in {"user_message", "task_created", "task_completed", "deadline_failed", "terminal_error", "system_state", "environment_observation"}:
                 working_memory.update_from_event(event, result, result["self_evaluation"])
         if evaluation.store_memory:
             brain.memory.remember(

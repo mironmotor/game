@@ -185,6 +185,28 @@ Responses can include:
 
 This is feedback reinforcement, not autonomous execution: Max17 records the result and adjusts future next-step suggestions.
 
+### Voice and Camera Sensor
+
+The HUD can now act as a small local sensory shell around Max17:
+
+- microphone input still uses browser speech recognition;
+- speaker output uses browser `SpeechSynthesis` to read Max17 `answer.text`;
+- camera input uses `getUserMedia` locally and sends only lightweight frame statistics, not the image itself.
+
+Camera events use:
+
+```text
+environment_observation
+```
+
+The first version stores simple facts like light level, dominant tone, brightness, and frame size. It does not perform object recognition yet and does not upload image frames.
+
+Run a camera-sensor smoke event without a real camera:
+
+```bash
+npm run max17:sense
+```
+
 ### Call `/api/max17` with curl
 
 Start the Next.js dev server:
@@ -210,6 +232,7 @@ task_completed
 deadline_failed
 terminal_error
 system_state
+environment_observation
 sleep_consolidation
 working_memory_reset
 outcome_success

@@ -5,6 +5,7 @@ import {
   Briefcase,
   BookOpen,
   Globe,
+  Camera,
   MapPin,
   Menu,
   Mic,
@@ -14,6 +15,7 @@ import {
   Sun,
   Triangle,
   Users,
+  Volume2,
 } from 'lucide-react';
 import { HudPanel } from './HudPanel';
 import type { Task } from '@/hooks/use-game-state';
@@ -38,11 +40,15 @@ export interface GameHudProps {
   input: string;
   isListening: boolean;
   isLoading: boolean;
+  isCameraActive: boolean;
+  isSpeechEnabled: boolean;
   activeNav: HudNavId;
   friendsBadge?: number;
   onInputChange: (value: string) => void;
   onSend: () => void;
   onToggleListen: () => void;
+  onToggleCamera: () => void;
+  onToggleSpeech: () => void;
   onNavChange: (id: HudNavId) => void;
   onMissionToggle: (taskId: string) => void;
   onKeyDown?: (e: KeyboardEvent) => void;
@@ -133,11 +139,15 @@ export function GameHud({
   input,
   isListening,
   isLoading,
+  isCameraActive,
+  isSpeechEnabled,
   activeNav,
   friendsBadge = 2,
   onInputChange,
   onSend,
   onToggleListen,
+  onToggleCamera,
+  onToggleSpeech,
   onNavChange,
   onMissionToggle,
   onKeyDown,
@@ -308,6 +318,22 @@ export function GameHud({
           <div className={`hud-orb ${isListening ? 'listening' : ''}`} />
           <p className="hud-prompt">{promptText}</p>
           <div className="hud-input-bar">
+            <button
+              type="button"
+              className={`hud-icon-btn ${isCameraActive ? 'active' : ''}`}
+              onClick={onToggleCamera}
+              aria-label={isCameraActive ? 'Отключить камеру' : 'Включить камеру'}
+            >
+              <Camera size={18} />
+            </button>
+            <button
+              type="button"
+              className={`hud-icon-btn ${isSpeechEnabled ? 'active' : ''}`}
+              onClick={onToggleSpeech}
+              aria-label={isSpeechEnabled ? 'Отключить голос Max17' : 'Включить голос Max17'}
+            >
+              <Volume2 size={18} />
+            </button>
             <button
               type="button"
               className={`hud-icon-btn ${isListening ? 'active' : ''}`}

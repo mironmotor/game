@@ -15,6 +15,7 @@ STORE_EVENT_TYPES = frozenset(
         "deadline_failed",
         "terminal_error",
         "system_state",
+        "environment_observation",
     }
 )
 
@@ -48,6 +49,21 @@ def _confidence(result: dict[str, Any]) -> float:
 
 
 def _reinforce(event: Event, result: dict[str, Any]) -> str:
+    if event.type == "environment_observation":
+        camera = event.payload.get("camera")
+        camera = camera if isinstance(camera, dict) else event.payload
+        light = camera.get("light_level") or camera.get("light")
+        tone = camera.get("dominant_tone") or camera.get("tone")
+        brightness = camera.get("brightness")
+        parts = ["camera observation"]
+        if light:
+            parts.append(f"light={light}")
+        if tone:
+            parts.append(f"tone={tone}")
+        if isinstance(brightness, (int, float)):
+            parts.append(f"brightness={round(float(brightness), 3)}")
+        return ", ".join(parts)
+
     task = event.payload.get("task")
     if isinstance(task, dict) and task.get("desc"):
         return str(task["desc"])
@@ -118,6 +134,10 @@ def evaluate_event(event: Event, result: dict[str, Any]) -> SelfEvaluation:
         store_memory = True
         score = max(score, 0.55)
         reason = "system state snapshot captured for context"
+    elif event.type == "environment_observation":
+        store_memory = True
+        score = max(score, 0.62)
+        reason = "environment observation captured from local camera sensor"
 
     return SelfEvaluation(
         score=max(0.0, min(1.0, score)),

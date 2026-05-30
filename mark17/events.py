@@ -18,6 +18,7 @@ KNOWN_TYPES = frozenset(
         "recall",
         "search_memory",
         "remember",
+        "environment_observation",
     }
 )
 

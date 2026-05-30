@@ -10,6 +10,20 @@ const AGI_INTRO =
   'Цифровой агент нового поколения, созданный помогать вам достигать целей и решать сложные задачи. GAME анализирует контекст, предлагает квесты и ведёт вас к результату.';
 
 type Max17HudEvent = Record<string, unknown>;
+type CameraStatus = 'off' | 'starting' | 'active' | 'error';
+
+interface CameraObservation {
+  width: number;
+  height: number;
+  brightness: number;
+  dominant_color: {
+    r: number;
+    g: number;
+    b: number;
+  };
+  dominant_tone: string;
+  light_level: string;
+}
 
 class FirestoreErrorBoundary extends Component<{ children: ReactNode }, { hasError: boolean; errorInfo: unknown }> {
   constructor(props: { children: ReactNode }) {
@@ -106,6 +120,68 @@ function formatMax17HudReply(response: Max17Response) {
   return [routeLine, formatRecalledMemory(response), adaptationLine, reason].filter(Boolean).join(' ');
 }
 
+function toneFromRgb(r: number, g: number, b: number) {
+  const max = Math.max(r, g, b);
+  const min = Math.min(r, g, b);
+  if (max - min < 18) return 'neutral';
+  if (r >= g && r >= b) return g > b ? 'warm' : 'red';
+  if (g >= r && g >= b) return r > b ? 'yellow-green' : 'green';
+  return r > g ? 'violet-blue' : 'cool-blue';
+}
+
+function lightLevelFromBrightness(brightness: number) {
+  if (brightness < 0.22) return 'low';
+  if (brightness < 0.58) return 'medium';
+  return 'high';
+}
+
+function analyzeCameraFrame(video: HTMLVideoElement, canvas: HTMLCanvasElement): CameraObservation | null {
+  const sourceWidth = video.videoWidth;
+  const sourceHeight = video.videoHeight;
+  if (!sourceWidth || !sourceHeight) return null;
+
+  const sampleWidth = 64;
+  const sampleHeight = Math.max(1, Math.round((sourceHeight / sourceWidth) * sampleWidth));
+  canvas.width = sampleWidth;
+  canvas.height = sampleHeight;
+
+  const ctx = canvas.getContext('2d', { willReadFrequently: true });
+  if (!ctx) return null;
+
+  ctx.drawImage(video, 0, 0, sampleWidth, sampleHeight);
+  const data = ctx.getImageData(0, 0, sampleWidth, sampleHeight).data;
+  let r = 0;
+  let g = 0;
+  let b = 0;
+  let brightness = 0;
+  const pixels = data.length / 4;
+
+  for (let i = 0; i < data.length; i += 4) {
+    r += data[i];
+    g += data[i + 1];
+    b += data[i + 2];
+    brightness += (data[i] * 0.2126 + data[i + 1] * 0.7152 + data[i + 2] * 0.0722) / 255;
+  }
+
+  const avgR = Math.round(r / pixels);
+  const avgG = Math.round(g / pixels);
+  const avgB = Math.round(b / pixels);
+  const normalizedBrightness = brightness / pixels;
+
+  return {
+    width: sourceWidth,
+    height: sourceHeight,
+    brightness: Number(normalizedBrightness.toFixed(3)),
+    dominant_color: {
+      r: avgR,
+      g: avgG,
+      b: avgB,
+    },
+    dominant_tone: toneFromRgb(avgR, avgG, avgB),
+    light_level: lightLevelFromBrightness(normalizedBrightness),
+  };
+}
+
 function HudContent() {
   const {
     xp,
@@ -123,10 +199,16 @@ function HudContent() {
   const [agiMessage, setAgiMessage] = useState(AGI_INTRO);
   const [isListening, setIsListening] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
+  const [isSpeechEnabled, setIsSpeechEnabled] = useState(false);
+  const [isSpeaking, setIsSpeaking] = useState(false);
+  const [cameraStatus, setCameraStatus] = useState<CameraStatus>('off');
   const [activeNav, setActiveNav] = useState<HudNavId>('codex');
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [max17State, setMax17State] = useState<Pick<Max17Response, 'route' | 'confidence' | 'next_adaptation'> | null>(null);
   const recognitionRef = useRef<SpeechRecognition | null>(null);
+  const cameraVideoRef = useRef<HTMLVideoElement | null>(null);
+  const cameraCanvasRef = useRef<HTMLCanvasElement | null>(null);
+  const cameraStreamRef = useRef<MediaStream | null>(null);
   const systemStateSentRef = useRef(false);
   const knownTaskIdsRef = useRef<Set<string>>(new Set());
   const emittedFailedTaskIdsRef = useRef<Set<string>>(new Set());
@@ -175,6 +257,36 @@ function HudContent() {
     }
   }, [isListening]);
 
+  const speakMax17 = useCallback(
+    (text: string) => {
+      if (!isSpeechEnabled || typeof window === 'undefined' || !window.speechSynthesis) return;
+      const cleanText = text.replace(/\s+/g, ' ').trim();
+      if (!cleanText) return;
+
+      window.speechSynthesis.cancel();
+      const utterance = new SpeechSynthesisUtterance(cleanText);
+      utterance.lang = 'ru-RU';
+      utterance.rate = 0.95;
+      utterance.pitch = 0.92;
+      utterance.onstart = () => setIsSpeaking(true);
+      utterance.onend = () => setIsSpeaking(false);
+      utterance.onerror = () => setIsSpeaking(false);
+      window.speechSynthesis.speak(utterance);
+    },
+    [isSpeechEnabled],
+  );
+
+  const toggleSpeech = useCallback(() => {
+    setIsSpeechEnabled((enabled) => {
+      const next = !enabled;
+      if (enabled && typeof window !== 'undefined' && window.speechSynthesis) {
+        window.speechSynthesis.cancel();
+        setIsSpeaking(false);
+      }
+      return next;
+    });
+  }, []);
+
   const emitMax17HudEvent = useCallback(
     async (event: Max17HudEvent, surfaceState = false) => {
       try {
@@ -207,6 +319,109 @@ function HudContent() {
     },
     [],
   );
+
+  const captureEnvironmentObservation = useCallback(async () => {
+    const video = cameraVideoRef.current;
+    const canvas = cameraCanvasRef.current;
+    if (!video || !canvas) return null;
+
+    const observation = analyzeCameraFrame(video, canvas);
+    if (!observation) return null;
+
+    const max17 = await emitMax17HudEvent(
+      {
+        type: 'environment_observation',
+        text: `Camera observation: light ${observation.light_level}, tone ${observation.dominant_tone}, brightness ${observation.brightness}`,
+        source: 'hud_camera',
+        timestamp: new Date().toISOString(),
+        camera: {
+          active: true,
+          ...observation,
+          privacy: 'no_image_uploaded',
+        },
+      },
+      true,
+    );
+
+    if (max17?.answer?.text) {
+      const reply = formatMax17HudReply(max17);
+      setAgiMessage(`MAX17: ${reply}`);
+      speakMax17(reply);
+    }
+
+    return observation;
+  }, [emitMax17HudEvent, speakMax17]);
+
+  const stopCamera = useCallback(() => {
+    cameraStreamRef.current?.getTracks().forEach((track) => track.stop());
+    cameraStreamRef.current = null;
+    setCameraStatus('off');
+    void emitMax17HudEvent({
+      type: 'environment_observation',
+      text: 'Camera sensor disabled',
+      source: 'hud_camera',
+      timestamp: new Date().toISOString(),
+      camera: {
+        active: false,
+        privacy: 'no_image_uploaded',
+      },
+    });
+  }, [emitMax17HudEvent]);
+
+  const toggleCamera = useCallback(async () => {
+    if (cameraStatus === 'active' || cameraStatus === 'starting') {
+      stopCamera();
+      return;
+    }
+
+    if (typeof navigator === 'undefined' || !navigator.mediaDevices?.getUserMedia) {
+      setCameraStatus('error');
+      setAgiMessage('MAX17: камера недоступна в этом браузере.');
+      window.setTimeout(() => setCameraStatus('off'), 1600);
+      return;
+    }
+
+    try {
+      setCameraStatus('starting');
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: {
+          facingMode: { ideal: 'environment' },
+        },
+        audio: false,
+      });
+      cameraStreamRef.current = stream;
+      setCameraStatus('active');
+    } catch (error) {
+      console.error('Camera start failed:', error);
+      setCameraStatus('error');
+      setAgiMessage('MAX17: не смог получить доступ к камере. Разреши доступ в браузере и попробуй ещё раз.');
+      window.setTimeout(() => setCameraStatus('off'), 2200);
+    }
+  }, [cameraStatus, stopCamera]);
+
+  useEffect(() => {
+    if (cameraStatus !== 'active') return;
+    const video = cameraVideoRef.current;
+    const stream = cameraStreamRef.current;
+    if (!video || !stream) return;
+
+    video.srcObject = stream;
+    void video.play().catch(() => undefined);
+    const timer = window.setTimeout(() => {
+      void captureEnvironmentObservation();
+    }, 900);
+
+    return () => window.clearTimeout(timer);
+  }, [cameraStatus, captureEnvironmentObservation]);
+
+  useEffect(() => {
+    return () => {
+      if (typeof window !== 'undefined' && window.speechSynthesis) {
+        window.speechSynthesis.cancel();
+      }
+      cameraStreamRef.current?.getTracks().forEach((track) => track.stop());
+    };
+  }, []);
 
   const handleSend = async () => {
     if (!input.trim() || isLoading) return;
@@ -245,6 +460,7 @@ function HudContent() {
         : 'Локальный Max17-мост сейчас недоступен. Сообщение принято, основной HUD продолжает работать.';
 
       setAgiMessage(`Вы: ${userMsg} MAX17: ${fullResponse}`);
+      speakMax17(fullResponse);
       await saveMessage('model', fullResponse, sid);
     } catch (e) {
       console.error(e);
@@ -348,7 +564,11 @@ function HudContent() {
     }
   }, [balance, emitMax17HudEvent, energy, focus, isLoaded, pendingTasks.length, reputationLevel, tasks]);
 
-  const promptText = isListening
+  const promptText = cameraStatus === 'starting'
+    ? 'Камера подключается...'
+    : isSpeaking
+      ? 'MAX17 говорит...'
+      : isListening
     ? 'Слушаю вас...'
     : isLoading
       ? 'Думаю над ответом...'
@@ -379,11 +599,15 @@ function HudContent() {
         input={input}
         isListening={isListening}
         isLoading={isLoading}
+        isCameraActive={cameraStatus === 'active' || cameraStatus === 'starting'}
+        isSpeechEnabled={isSpeechEnabled}
         activeNav={activeNav}
         friendsBadge={2}
         onInputChange={setInput}
         onSend={handleSend}
         onToggleListen={toggleListen}
+        onToggleCamera={toggleCamera}
+        onToggleSpeech={toggleSpeech}
         onNavChange={setActiveNav}
         onMissionToggle={handleMissionToggle}
         onKeyDown={(e) => {
@@ -393,6 +617,28 @@ function HudContent() {
           }
         }}
       />
+      {cameraStatus !== 'off' && (
+        <div className="fixed bottom-[172px] left-1/2 z-10 w-[min(220px,calc(100vw-32px))] -translate-x-1/2 overflow-hidden rounded-md border border-cyan-300/25 bg-black/50 shadow-[0_0_22px_rgba(0,242,255,0.14)] backdrop-blur-md">
+          {cameraStatus === 'active' ? (
+            <video
+              ref={cameraVideoRef}
+              className="aspect-video w-full bg-black object-cover opacity-80"
+              muted
+              playsInline
+              autoPlay
+            />
+          ) : (
+            <div className="flex aspect-video w-full items-center justify-center bg-black/70 text-[9px] uppercase tracking-[0.24em] text-cyan-100/60">
+              {cameraStatus === 'starting' ? 'camera boot' : 'camera error'}
+            </div>
+          )}
+          <canvas ref={cameraCanvasRef} className="hidden" />
+          <div className="flex items-center justify-between border-t border-cyan-300/15 px-2 py-1 text-[8px] uppercase tracking-[0.2em] text-cyan-100/55">
+            <span>sensor</span>
+            <span>{cameraStatus}</span>
+          </div>
+        </div>
+      )}
       {max17State && (
         <div
           className="pointer-events-none fixed bottom-[112px] left-1/2 z-10 max-w-[min(520px,calc(100vw-32px))] -translate-x-1/2 truncate border border-cyan-300/20 bg-black/40 px-3 py-1 text-[9px] uppercase tracking-[0.22em] text-cyan-100/70 shadow-[0_0_18px_rgba(0,242,255,0.12)] backdrop-blur-md"

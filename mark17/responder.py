@@ -124,7 +124,8 @@ CAPABILITY_ANSWER = (
     "Я Max17, когнитивное ядро Game в текущей v0.4. Сейчас я принимаю сообщения из HUD, "
     "маршрутизирую события через meta-controller, запоминаю важные события в SQLite memory, "
     "вспоминаю похожие события, оцениваю свои реакции через critic/self-evaluation, "
-    "отслеживаю задачи created/completed/failed и показываю когнитивный статус в HUD. "
+    "отслеживаю задачи created/completed/failed, принимаю первые camera-observation события "
+    "и показываю когнитивный статус в HUD. "
     "Gemini без ключа не использую; этот ответ собран deterministic composer. "
     f"{REALITY_CONTACT_HINT}"
 )
@@ -712,6 +713,46 @@ def _outcome_answer(response: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _environment_observation_answer(event: Event, response: dict[str, Any]) -> dict[str, Any]:
+    camera = event.payload.get("camera")
+    camera = camera if isinstance(camera, dict) else event.payload
+    light_map = {
+        "low": "слабый",
+        "medium": "средний",
+        "high": "яркий",
+        "unknown": "неизвестный",
+    }
+    tone_map = {
+        "neutral": "нейтральный",
+        "warm": "тёплый",
+        "red": "красный",
+        "yellow-green": "жёлто-зелёный",
+        "green": "зелёный",
+        "violet-blue": "сине-фиолетовый",
+        "cool-blue": "холодный синий",
+        "unknown": "неизвестный",
+    }
+    raw_light = str(camera.get("light_level") or "unknown")
+    raw_tone = str(camera.get("dominant_tone") or "unknown")
+    light = light_map.get(raw_light, raw_light)
+    tone = tone_map.get(raw_tone, raw_tone)
+    brightness = camera.get("brightness")
+    brightness_text = ""
+    if isinstance(brightness, (int, float)):
+        brightness_text = f" Яркость кадра примерно {round(float(brightness) * 100)}%."
+
+    text = (
+        f"Я получил сенсорное наблюдение с камеры: свет — {light}, общий тон — {tone}."
+        f"{brightness_text} Пока я не распознаю объекты как vision-модель, "
+        "но уже могу сохранять такие наблюдения в память и связывать их с контекстом."
+    )
+    return {
+        "text": text,
+        "source": "composer",
+        "confidence": round(_confidence(response), 4),
+    }
+
+
 def compose_answer(
     event: Event,
     response: dict[str, Any],
@@ -730,6 +771,9 @@ def compose_answer(
 
     if event.type in {"outcome_success", "outcome_failure", "outcome_partial", "action_done", "action_skipped"}:
         return _outcome_answer(response)
+
+    if event.type == "environment_observation":
+        return _environment_observation_answer(event, response)
 
     if event.type != "user_message":
         return None

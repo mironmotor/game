@@ -11,6 +11,7 @@ const ALLOWED_EVENTS = new Set([
   'deadline_failed',
   'terminal_error',
   'system_state',
+  'environment_observation',
   'sleep_consolidation',
   'working_memory_reset',
   'outcome_success',

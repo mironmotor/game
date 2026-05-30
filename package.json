@@ -12,6 +12,7 @@
     "max17:working": "python3 mark17/working_smoke.py",
     "max17:plan": "python3 mark17/plan_smoke.py",
     "max17:outcome": "python3 mark17/outcome_smoke.py",
+    "max17:sense": "python3 mark17/json_cli.py --no-llm --ephemeral < mark17/examples/max17-environment-observation.json",
     "clean": "next clean"
   },
   "dependencies": {

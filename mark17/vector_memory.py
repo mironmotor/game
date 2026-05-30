@@ -156,6 +156,7 @@ def importance_for_event(event: Event, evaluation: dict[str, Any] | None = None)
         "terminal_error": 0.62,
         "user_message": 0.55,
         "system_state": 0.25,
+        "environment_observation": 0.5,
         "consolidated_pattern": 0.88,
         "outcome_success": 0.86,
         "action_done": 0.84,
@@ -196,6 +197,13 @@ def text_from_event(event: Event, evaluation: dict[str, Any] | None = None) -> s
             value = task.get(key)
             if value:
                 chunks.append(str(value))
+
+    camera = payload.get("camera")
+    if isinstance(camera, dict):
+        for key in ("light_level", "dominant_tone", "brightness", "width", "height"):
+            value = camera.get(key)
+            if value is not None:
+                chunks.append(f"{key}:{value}")
 
     if isinstance(evaluation, dict):
         for key in ("reason", "reinforce"):

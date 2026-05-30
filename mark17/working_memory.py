@@ -56,7 +56,7 @@ def detect_intent(text: Any, event_type: str = "user_message") -> str:
     normalized = _normalize(text)
     if event_type in {"terminal_error", "deadline_failed"}:
         return "reports_error"
-    if event_type in {"task_created", "task_completed", "system_state"}:
+    if event_type in {"task_created", "task_completed", "system_state", "environment_observation"}:
         return "development_request"
     if not normalized:
         return "unknown"
@@ -103,6 +103,8 @@ def detect_intent(text: Any, event_type: str = "user_message") -> str:
 
 def detect_topic(text: Any) -> str:
     normalized = _normalize(text)
+    if any(term in normalized for term in ("camera", "камера", "сенсор", "environment", "среда", "наблюдение")):
+        return "Environment sensing"
     if any(term in normalized for term in ("max17", "mark17", "ядро", "память", "синап", "sleep", "consolidation")):
         return "Max17 core development"
     if any(term in normalized for term in ("game", "hud", "интерфейс")):
@@ -145,6 +147,8 @@ def _next_step(state: dict[str, Any]) -> str:
         return "Проверить, что Game UI отправляет события в Max17 и показывает полезный ответ."
     if topic == "Git workflow":
         return "Проверить статус, зафиксировать нужные файлы и не смешивать лишние изменения."
+    if topic == "Environment sensing":
+        return "Сохранить только полезный сенсорный факт и связать его с текущим контекстом."
     if mode == "debugging":
         return "Сузить ошибку до одного воспроизводимого симптома и проверить минимальный фикс."
     if goal:
@@ -222,7 +226,7 @@ class WorkingMemory:
 
         if event.type == "user_message" and not has_answer:
             _append_turn(state, role="user", text=text)
-        elif event.type in {"task_created", "task_completed", "deadline_failed", "terminal_error", "system_state"} and not has_answer:
+        elif event.type in {"task_created", "task_completed", "deadline_failed", "terminal_error", "system_state", "environment_observation"} and not has_answer:
             _append_turn(state, role="event", text=f"{event.type}: {text}")
 
         if isinstance(response, dict):
