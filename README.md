@@ -199,7 +199,14 @@ Camera events use:
 environment_observation
 ```
 
-The first version stores simple facts like light level, dominant tone, brightness, and frame size. It does not perform object recognition yet and does not upload image frames.
+Vision Summary v0.1 adds a conservative local summary on top of the raw camera metrics:
+
+- `scene_mode`: `dark`, `desk`, `screen-facing`, `bright-room`, `active-room`, or `room`;
+- `brightness`, `contrast`, `dominant_tone`;
+- `motion_score`, `motion_level`, and `stability`;
+- a short `summary` string for memory/responder use.
+
+This is not object recognition. It does not perform face/object detection and does not upload image frames. It only lets Max17 remember rough environmental context such as light, motion, and whether the frame looks like a stable desk/screen-facing setup.
 
 Run a camera-sensor smoke event without a real camera:
 

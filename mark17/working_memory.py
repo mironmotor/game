@@ -116,6 +116,12 @@ def detect_topic(text: Any) -> str:
     return ""
 
 
+def topic_for_event(event_type: str, text: Any) -> str:
+    if event_type == "environment_observation":
+        return "Environment sensing"
+    return detect_topic(text)
+
+
 def mode_for_intent(intent: str) -> str:
     if intent == "reports_error":
         return "debugging"
@@ -202,7 +208,7 @@ class WorkingMemory:
         state = self.load()
         text = _event_text(event)
         intent = detect_intent(text, event.type)
-        topic = detect_topic(text)
+        topic = topic_for_event(event.type, text)
         mode = mode_for_intent(intent)
 
         if topic:

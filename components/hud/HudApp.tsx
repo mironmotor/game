@@ -16,6 +16,9 @@ interface CameraObservation {
   width: number;
   height: number;
   brightness: number;
+  contrast: number;
+  motion_score: number;
+  stability: number;
   dominant_color: {
     r: number;
     g: number;
@@ -23,6 +26,14 @@ interface CameraObservation {
   };
   dominant_tone: string;
   light_level: string;
+  motion_level: string;
+  scene_mode: string;
+  summary: string;
+}
+
+interface CameraFrameAnalysis {
+  observation: CameraObservation;
+  luminance: number[];
 }
 
 class FirestoreErrorBoundary extends Component<{ children: ReactNode }, { hasError: boolean; errorInfo: unknown }> {
@@ -135,7 +146,68 @@ function lightLevelFromBrightness(brightness: number) {
   return 'high';
 }
 
-function analyzeCameraFrame(video: HTMLVideoElement, canvas: HTMLCanvasElement): CameraObservation | null {
+function motionLevelFromScore(score: number) {
+  if (score < 0.035) return 'still';
+  if (score < 0.12) return 'subtle';
+  return 'moving';
+}
+
+function sceneModeFromVision({
+  brightness,
+  contrast,
+  dominantTone,
+  motionScore,
+}: {
+  brightness: number;
+  contrast: number;
+  dominantTone: string;
+  motionScore: number;
+}) {
+  if (brightness < 0.2) return 'dark';
+  if (brightness > 0.72) return 'bright-room';
+  if (
+    contrast > 0.24 &&
+    ['cool-blue', 'violet-blue', 'neutral'].includes(dominantTone)
+  ) {
+    return 'screen-facing';
+  }
+  if (motionScore > 0.16) return 'active-room';
+  if (brightness >= 0.25 && brightness <= 0.68 && motionScore < 0.08) return 'desk';
+  return 'room';
+}
+
+function visionSummaryText(observation: Omit<CameraObservation, 'summary'>) {
+  const modeText: Record<string, string> = {
+    dark: 'тёмная среда',
+    'bright-room': 'яркая комната',
+    'screen-facing': 'похоже на экран или рабочее место',
+    'active-room': 'в кадре есть движение',
+    desk: 'стабильное рабочее место',
+    room: 'обычная комната',
+  };
+  const lightText: Record<string, string> = {
+    low: 'слабый свет',
+    medium: 'средний свет',
+    high: 'яркий свет',
+  };
+  const motionText: Record<string, string> = {
+    still: 'кадр почти неподвижен',
+    subtle: 'есть небольшое движение',
+    moving: 'заметное движение',
+  };
+
+  return [
+    modeText[observation.scene_mode] ?? observation.scene_mode,
+    lightText[observation.light_level] ?? observation.light_level,
+    motionText[observation.motion_level] ?? observation.motion_level,
+  ].join('; ');
+}
+
+function analyzeCameraFrame(
+  video: HTMLVideoElement,
+  canvas: HTMLCanvasElement,
+  previousLuminance: number[] | null,
+): CameraFrameAnalysis | null {
   const sourceWidth = video.videoWidth;
   const sourceHeight = video.videoHeight;
   if (!sourceWidth || !sourceHeight) return null;
@@ -154,31 +226,63 @@ function analyzeCameraFrame(video: HTMLVideoElement, canvas: HTMLCanvasElement):
   let g = 0;
   let b = 0;
   let brightness = 0;
+  const luminance: number[] = [];
   const pixels = data.length / 4;
 
   for (let i = 0; i < data.length; i += 4) {
     r += data[i];
     g += data[i + 1];
     b += data[i + 2];
-    brightness += (data[i] * 0.2126 + data[i + 1] * 0.7152 + data[i + 2] * 0.0722) / 255;
+    const y = (data[i] * 0.2126 + data[i + 1] * 0.7152 + data[i + 2] * 0.0722) / 255;
+    brightness += y;
+    luminance.push(y);
   }
 
   const avgR = Math.round(r / pixels);
   const avgG = Math.round(g / pixels);
   const avgB = Math.round(b / pixels);
   const normalizedBrightness = brightness / pixels;
-
-  return {
+  const variance =
+    luminance.reduce((sum, value) => sum + (value - normalizedBrightness) ** 2, 0) / pixels;
+  const contrast = Math.sqrt(variance);
+  const motionScore =
+    previousLuminance && previousLuminance.length === luminance.length
+      ? luminance.reduce((sum, value, index) => sum + Math.abs(value - previousLuminance[index]), 0) /
+        luminance.length
+      : 0;
+  const dominantTone = toneFromRgb(avgR, avgG, avgB);
+  const lightLevel = lightLevelFromBrightness(normalizedBrightness);
+  const motionLevel = motionLevelFromScore(motionScore);
+  const sceneMode = sceneModeFromVision({
+    brightness: normalizedBrightness,
+    contrast,
+    dominantTone,
+    motionScore,
+  });
+  const observationWithoutSummary = {
     width: sourceWidth,
     height: sourceHeight,
     brightness: Number(normalizedBrightness.toFixed(3)),
+    contrast: Number(contrast.toFixed(3)),
+    motion_score: Number(motionScore.toFixed(3)),
+    stability: Number((1 - Math.min(1, motionScore * 4)).toFixed(3)),
     dominant_color: {
       r: avgR,
       g: avgG,
       b: avgB,
     },
-    dominant_tone: toneFromRgb(avgR, avgG, avgB),
-    light_level: lightLevelFromBrightness(normalizedBrightness),
+    dominant_tone: dominantTone,
+    light_level: lightLevel,
+    motion_level: motionLevel,
+    scene_mode: sceneMode,
+  };
+
+  return {
+    observation: {
+      ...observationWithoutSummary,
+      summary: visionSummaryText(observationWithoutSummary),
+    },
+    luminance,
   };
 }
 
@@ -209,6 +313,7 @@ function HudContent() {
   const cameraVideoRef = useRef<HTMLVideoElement | null>(null);
   const cameraCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const cameraStreamRef = useRef<MediaStream | null>(null);
+  const previousCameraLuminanceRef = useRef<number[] | null>(null);
   const systemStateSentRef = useRef(false);
   const knownTaskIdsRef = useRef<Set<string>>(new Set());
   const emittedFailedTaskIdsRef = useRef<Set<string>>(new Set());
@@ -320,30 +425,42 @@ function HudContent() {
     [],
   );
 
-  const captureEnvironmentObservation = useCallback(async () => {
+  const captureEnvironmentObservation = useCallback(async (announce = true) => {
     const video = cameraVideoRef.current;
     const canvas = cameraCanvasRef.current;
     if (!video || !canvas) return null;
 
-    const observation = analyzeCameraFrame(video, canvas);
-    if (!observation) return null;
+    const analysis = analyzeCameraFrame(video, canvas, previousCameraLuminanceRef.current);
+    if (!analysis) return null;
+
+    previousCameraLuminanceRef.current = analysis.luminance;
+    const observation = analysis.observation;
 
     const max17 = await emitMax17HudEvent(
       {
         type: 'environment_observation',
-        text: `Camera observation: light ${observation.light_level}, tone ${observation.dominant_tone}, brightness ${observation.brightness}`,
+        text: `Vision summary: ${observation.summary}. Scene mode ${observation.scene_mode}, brightness ${observation.brightness}, motion ${observation.motion_level}`,
         source: 'hud_camera',
         timestamp: new Date().toISOString(),
         camera: {
           active: true,
           ...observation,
+          vision_summary: {
+            scene_mode: observation.scene_mode,
+            summary: observation.summary,
+            light_level: observation.light_level,
+            motion_level: observation.motion_level,
+            stability: observation.stability,
+            confidence: 0.42,
+            method: 'local_frame_statistics_v0',
+          },
           privacy: 'no_image_uploaded',
         },
       },
       true,
     );
 
-    if (max17?.answer?.text) {
+    if (announce && max17?.answer?.text) {
       const reply = formatMax17HudReply(max17);
       setAgiMessage(`MAX17: ${reply}`);
       speakMax17(reply);
@@ -355,6 +472,7 @@ function HudContent() {
   const stopCamera = useCallback(() => {
     cameraStreamRef.current?.getTracks().forEach((track) => track.stop());
     cameraStreamRef.current = null;
+    previousCameraLuminanceRef.current = null;
     setCameraStatus('off');
     void emitMax17HudEvent({
       type: 'environment_observation',
@@ -408,10 +526,16 @@ function HudContent() {
     video.srcObject = stream;
     void video.play().catch(() => undefined);
     const timer = window.setTimeout(() => {
-      void captureEnvironmentObservation();
+      void captureEnvironmentObservation(true);
     }, 900);
+    const interval = window.setInterval(() => {
+      void captureEnvironmentObservation(false);
+    }, 15000);
 
-    return () => window.clearTimeout(timer);
+    return () => {
+      window.clearTimeout(timer);
+      window.clearInterval(interval);
+    };
   }, [cameraStatus, captureEnvironmentObservation]);
 
   useEffect(() => {

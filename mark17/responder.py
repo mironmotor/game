@@ -716,6 +716,8 @@ def _outcome_answer(response: dict[str, Any]) -> dict[str, Any]:
 def _environment_observation_answer(event: Event, response: dict[str, Any]) -> dict[str, Any]:
     camera = event.payload.get("camera")
     camera = camera if isinstance(camera, dict) else event.payload
+    vision_summary = camera.get("vision_summary")
+    vision_summary = vision_summary if isinstance(vision_summary, dict) else {}
     light_map = {
         "low": "слабый",
         "medium": "средний",
@@ -732,18 +734,44 @@ def _environment_observation_answer(event: Event, response: dict[str, Any]) -> d
         "cool-blue": "холодный синий",
         "unknown": "неизвестный",
     }
-    raw_light = str(camera.get("light_level") or "unknown")
+    motion_map = {
+        "still": "почти неподвижно",
+        "subtle": "небольшое движение",
+        "moving": "заметное движение",
+        "unknown": "неизвестно",
+    }
+    scene_map = {
+        "dark": "тёмная среда",
+        "desk": "стабильное рабочее место",
+        "screen-facing": "похоже на экран или рабочее место",
+        "bright-room": "яркая комната",
+        "active-room": "активная среда с движением",
+        "room": "обычная комната",
+        "unknown": "неизвестная среда",
+    }
+    raw_scene = str(camera.get("scene_mode") or vision_summary.get("scene_mode") or "unknown")
+    raw_light = str(camera.get("light_level") or vision_summary.get("light_level") or "unknown")
     raw_tone = str(camera.get("dominant_tone") or "unknown")
+    raw_motion = str(camera.get("motion_level") or vision_summary.get("motion_level") or "unknown")
     light = light_map.get(raw_light, raw_light)
     tone = tone_map.get(raw_tone, raw_tone)
+    motion = motion_map.get(raw_motion, raw_motion)
+    scene = scene_map.get(raw_scene, raw_scene)
     brightness = camera.get("brightness")
+    stability = camera.get("stability") or vision_summary.get("stability")
+    summary = str(camera.get("summary") or vision_summary.get("summary") or "").strip()
     brightness_text = ""
     if isinstance(brightness, (int, float)):
         brightness_text = f" Яркость кадра примерно {round(float(brightness) * 100)}%."
+    stability_text = ""
+    if isinstance(stability, (int, float)):
+        stability_text = f" Стабильность около {round(float(stability) * 100)}%, движение: {motion}."
 
     text = (
-        f"Я получил сенсорное наблюдение с камеры: свет — {light}, общий тон — {tone}."
-        f"{brightness_text} Пока я не распознаю объекты как vision-модель, "
+        f"Vision Summary v0.1: {scene}. Свет — {light}, общий тон — {tone}."
+        f"{brightness_text}{stability_text}"
+        f"{f' Сводка: {summary}.' if summary else ''} "
+        "Пока я не распознаю объекты как vision-модель, "
         "но уже могу сохранять такие наблюдения в память и связывать их с контекстом."
     )
     return {

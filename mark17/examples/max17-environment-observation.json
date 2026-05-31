@@ -1,12 +1,15 @@
 {
   "type": "environment_observation",
-  "text": "Camera observation: light medium, tone cool-blue, brightness 0.46",
+  "text": "Vision summary: похоже на экран или рабочее место; средний свет; кадр почти неподвижен",
   "source": "smoke_camera",
   "camera": {
     "active": true,
     "width": 1280,
     "height": 720,
     "brightness": 0.46,
+    "contrast": 0.31,
+    "motion_score": 0.02,
+    "stability": 0.92,
     "dominant_color": {
       "r": 74,
       "g": 95,
@@ -14,6 +17,18 @@
     },
     "dominant_tone": "cool-blue",
     "light_level": "medium",
+    "motion_level": "still",
+    "scene_mode": "screen-facing",
+    "summary": "похоже на экран или рабочее место; средний свет; кадр почти неподвижен",
+    "vision_summary": {
+      "scene_mode": "screen-facing",
+      "summary": "похоже на экран или рабочее место; средний свет; кадр почти неподвижен",
+      "light_level": "medium",
+      "motion_level": "still",
+      "stability": 0.92,
+      "confidence": 0.42,
+      "method": "local_frame_statistics_v0"
+    },
     "privacy": "no_image_uploaded"
   }
 }

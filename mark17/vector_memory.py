@@ -200,7 +200,24 @@ def text_from_event(event: Event, evaluation: dict[str, Any] | None = None) -> s
 
     camera = payload.get("camera")
     if isinstance(camera, dict):
-        for key in ("light_level", "dominant_tone", "brightness", "width", "height"):
+        vision_summary = camera.get("vision_summary")
+        if isinstance(vision_summary, dict):
+            for key in ("scene_mode", "summary", "motion_level", "stability", "method"):
+                value = vision_summary.get(key)
+                if value is not None:
+                    chunks.append(f"{key}:{value}")
+        for key in (
+            "scene_mode",
+            "summary",
+            "light_level",
+            "dominant_tone",
+            "brightness",
+            "contrast",
+            "motion_score",
+            "stability",
+            "width",
+            "height",
+        ):
             value = camera.get(key)
             if value is not None:
                 chunks.append(f"{key}:{value}")

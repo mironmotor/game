@@ -52,10 +52,18 @@ def _reinforce(event: Event, result: dict[str, Any]) -> str:
     if event.type == "environment_observation":
         camera = event.payload.get("camera")
         camera = camera if isinstance(camera, dict) else event.payload
+        vision_summary = camera.get("vision_summary")
+        vision_summary = vision_summary if isinstance(vision_summary, dict) else {}
+        scene_mode = camera.get("scene_mode") or vision_summary.get("scene_mode")
+        summary = vision_summary.get("summary") or camera.get("summary")
         light = camera.get("light_level") or camera.get("light")
         tone = camera.get("dominant_tone") or camera.get("tone")
         brightness = camera.get("brightness")
         parts = ["camera observation"]
+        if scene_mode:
+            parts.append(f"scene={scene_mode}")
+        if summary:
+            parts.append(str(summary)[:120])
         if light:
             parts.append(f"light={light}")
         if tone:
