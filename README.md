@@ -216,6 +216,42 @@ Responses can include:
 }
 ```
 
+### Concept Grounding
+
+Max17 has a local deterministic concept map in `mark17/concepts.py`.
+It is the first small grounding layer for basic concepts such as `мама`,
+`папа`, `солнце`, `свет`, `тело`, `голос`, `память`, `рост`, and `забота`.
+
+This is not an external LLM and not a claim of human understanding. It stores
+concepts in SQLite and links each concept to:
+
+- aliases / surface words;
+- a short practical summary;
+- sensory channels such as light, warmth, touch, voice, body, camera, rhythm;
+- related concepts for SynapseGraph growth.
+
+For concept-rich `user_message` events the response can include:
+
+```json
+{
+  "concepts": {
+    "count": 3,
+    "summary": "мать / мама, отец / папа, солнце",
+    "sensory_channels": ["warmth", "voice", "touch", "vision_light"],
+    "matches": []
+  }
+}
+```
+
+Run the concept grounding smoke check with:
+
+```bash
+npm run max17:concepts
+```
+
+The goal is to give Max17 a growing map of grounded meaning before heavier
+perception or language models are added.
+
 ### Voice and Camera Sensor
 
 The HUD can now act as a small local sensory shell around Max17:

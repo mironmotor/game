@@ -100,6 +100,16 @@ def _top_memory_summaries(response: dict[str, Any], *, limit: int = 2) -> list[t
     return found
 
 
+def _concept_matches(response: dict[str, Any], *, limit: int = 6) -> list[dict[str, Any]]:
+    concepts = response.get("concepts")
+    if not isinstance(concepts, dict):
+        return []
+    matches = concepts.get("matches")
+    if not isinstance(matches, list):
+        return []
+    return [item for item in matches[:limit] if isinstance(item, dict)]
+
+
 def _vision_context(event: Event) -> dict[str, Any]:
     camera = event.payload.get("camera")
     if not isinstance(camera, dict):
@@ -208,6 +218,34 @@ def grow_synapses(
             touch(memory_type, memory_id, "goal", goal_id, "related_to", base * 0.78, f"memory supports goal: {summary}")
         if topic:
             touch(memory_type, memory_id, "topic", _stable_id("topic", topic), "related_to", base * 0.76, f"memory belongs near topic: {topic}")
+
+    for concept in _concept_matches(response):
+        concept_id = _text(concept.get("id"), 80)
+        label = _text(concept.get("label") or concept_id, 120)
+        summary = _text(concept.get("summary"), 180)
+        if not concept_id:
+            continue
+        touch("event", event_id, "concept", concept_id, "related_to", base * 0.9, f"event grounded in concept: {label}")
+        if topic:
+            touch("concept", concept_id, "topic", _stable_id("topic", topic), "related_to", base * 0.82, f"{label} supports topic: {topic}")
+        if goal_id:
+            touch("concept", concept_id, "goal", goal_id, "related_to", base * 0.82, f"{label} supports goal: {goal}")
+        if summary and answer:
+            touch("concept", concept_id, "answer", _stable_id("answer", answer), "reinforces", base * 0.72, f"{label}: {summary}")
+
+        channels = concept.get("sensory_grounding")
+        if isinstance(channels, list):
+            for channel in channels[:4]:
+                channel_id = _text(channel, 80)
+                if channel_id:
+                    touch("concept", concept_id, "sensory_channel", channel_id, "related_to", base * 0.86, f"{label} is grounded by {channel_id}")
+
+        relations = concept.get("relations")
+        if isinstance(relations, list):
+            for relation in relations[:4]:
+                relation_id = _text(relation, 80)
+                if relation_id:
+                    touch("concept", concept_id, "concept", relation_id, "related_to", base * 0.68, f"{label} relates to {relation_id}")
 
     vision = _vision_context(event)
     if vision:

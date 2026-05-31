@@ -107,6 +107,26 @@ export interface Max17Growth {
   top?: Max17Synapse[];
 }
 
+export interface Max17ConceptMatch {
+  id?: string;
+  label?: string;
+  category?: string;
+  summary?: string;
+  sensory_grounding?: string[];
+  relations?: string[];
+  matched_aliases?: string[];
+  score?: number;
+  position?: number;
+}
+
+export interface Max17Concepts {
+  matches?: Max17ConceptMatch[];
+  sensory_channels?: string[];
+  summary?: string;
+  count?: number;
+  source?: string;
+}
+
 export interface Max17Response {
   ok?: boolean;
   route: string;
@@ -122,6 +142,7 @@ export interface Max17Response {
   plan?: Max17Plan;
   outcome?: Max17Outcome;
   growth?: Max17Growth;
+  concepts?: Max17Concepts;
   self_evaluation?: Max17SelfEvaluation;
   raw?: Record<string, unknown>;
   error?: string;

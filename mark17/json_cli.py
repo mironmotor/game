@@ -29,6 +29,7 @@ from mark17.working_memory import WorkingMemory
 from mark17.planner import plan_next_actions
 from mark17.outcome import OUTCOME_EVENT_TYPES, evaluate_outcome, update_outcome_synapses
 from mark17.growth import grow_synapses
+from mark17.concepts import ConceptGrounding
 
 ALLOWED_EVENTS = frozenset(
     {
@@ -253,6 +254,9 @@ def normalize(result: dict[str, Any]) -> dict[str, Any]:
     growth = result.get("growth")
     if isinstance(growth, dict):
         normalized["growth"] = growth
+    concepts = result.get("concepts")
+    if isinstance(concepts, dict):
+        normalized["concepts"] = concepts
     return normalized
 
 
@@ -356,8 +360,9 @@ def _handle_event(event: Event, args: argparse.Namespace, state_dir: Path) -> di
     vector_memory = VectorMemory(state_dir)
     synapse_graph = SynapseGraph(state_dir)
     working_memory = WorkingMemory(state_dir)
+    concept_grounding = ConceptGrounding(state_dir)
     if args.warmup:
-        _run_warmup(args.warmup, brain, vector_memory, synapse_graph, working_memory)
+        _run_warmup(args.warmup, brain, vector_memory, synapse_graph, working_memory, concept_grounding)
     if event.type == "working_memory_reset":
         return _handle_working_memory_reset(working_memory)
     if event.type == "sleep_consolidation":
@@ -374,6 +379,7 @@ def _handle_event(event: Event, args: argparse.Namespace, state_dir: Path) -> di
         semantic=_semantic_memories(event, vector_memory),
         consolidated_patterns=_recent_consolidated_patterns(brain) if event.type == "user_message" else [],
     )
+    result["concepts"] = concept_grounding.match_event(event)
     evaluation = evaluate_event(event, result)
     result["self_evaluation"] = evaluation.to_dict()
     result["next_adaptation"] = _next_adaptation(result)
@@ -599,6 +605,7 @@ def _run_warmup(
     vector_memory: VectorMemory,
     synapse_graph: SynapseGraph,
     working_memory: WorkingMemory,
+    concept_grounding: ConceptGrounding,
 ) -> None:
     for line in path.read_text().splitlines():
         line = line.strip()
@@ -618,6 +625,7 @@ def _run_warmup(
             _handle_outcome_event(event, brain, vector_memory, synapse_graph, working_memory)
             continue
         result = brain.handle(event)
+        result["concepts"] = concept_grounding.match_event(event)
         evaluation = evaluate_event(event, result)
         result["self_evaluation"] = evaluation.to_dict()
         result["next_adaptation"] = _next_adaptation(result)

@@ -125,7 +125,7 @@ CAPABILITY_ANSWER = (
     "маршрутизирую события через meta-controller, запоминаю важные события в SQLite memory, "
     "вспоминаю похожие события, оцениваю свои реакции через critic/self-evaluation, "
     "отслеживаю задачи created/completed/failed, принимаю первые camera-observation события "
-    "и показываю когнитивный статус в HUD. "
+    "и строю первый локальный concept-grounding слой для базовых смыслов и сенсорных опор. "
     "Gemini без ключа не использую; этот ответ собран deterministic composer. "
     f"{REALITY_CONTACT_HINT}"
 )
@@ -440,6 +440,58 @@ def _memory_entries(
         if len(entries) >= limit:
             break
     return entries
+
+
+def _concept_matches(result: dict[str, Any], *, limit: int = 5) -> list[dict[str, Any]]:
+    concepts = result.get("concepts")
+    if not isinstance(concepts, dict):
+        return []
+    matches = concepts.get("matches")
+    if not isinstance(matches, list):
+        return []
+    return [item for item in matches[:limit] if isinstance(item, dict)]
+
+
+def _concept_grounding_answer(event: Event, result: dict[str, Any]) -> dict[str, Any] | None:
+    matches = _concept_matches(result)
+    if not matches:
+        return None
+
+    confidence = _confidence(result)
+    phrases: list[str] = []
+    channels: list[str] = []
+    for concept in matches[:4]:
+        label = str(concept.get("label") or concept.get("id") or "").strip()
+        summary = str(concept.get("summary") or "").strip().rstrip(".")
+        if label and summary:
+            phrases.append(f"{label} — {summary}")
+        sensory = concept.get("sensory_grounding")
+        if isinstance(sensory, list):
+            for channel in sensory:
+                channel_text = str(channel)
+                if channel_text and channel_text not in channels:
+                    channels.append(channel_text)
+
+    if not phrases:
+        return None
+
+    text = (
+        "Я не чувствую это как человек, но теперь держу эти слова как заземлённые понятия, "
+        "а не просто строки текста. "
+        + "; ".join(phrases[:4])
+        + "."
+    )
+    if channels:
+        text += " Сенсорные опоры: " + ", ".join(channels[:6]) + "."
+    text += (
+        " Я буду связывать такие понятия с памятью, действиями, результатами и будущими наблюдениями среды."
+    )
+
+    return {
+        "text": text,
+        "source": "composer",
+        "confidence": round(max(confidence, 0.62), 4),
+    }
 
 
 def _consolidation_patterns(result: dict[str, Any], *, limit: int = 4) -> list[str]:
@@ -824,6 +876,10 @@ def compose_answer(
         planned = _plan_answer(response, confidence)
         if planned:
             return planned
+
+    concept_answer = _concept_grounding_answer(event, response)
+    if concept_answer:
+        return concept_answer
 
     if _is_vague_input(user_text):
         return _vague_status_answer(response, confidence)

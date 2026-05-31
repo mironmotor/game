@@ -83,6 +83,10 @@ def detect_intent(text: Any, event_type: str = "user_message") -> str:
             "растим",
             "расти",
             "свяжи",
+            "связать",
+            "обучаем",
+            "обучить",
+            "заземлить",
             "fix",
             "исправь",
             "refactor",
@@ -109,6 +113,8 @@ def detect_intent(text: Any, event_type: str = "user_message") -> str:
 
 def detect_topic(text: Any) -> str:
     normalized = _normalize(text)
+    if any(term in normalized for term in ("мама", "мать", "папа", "отец", "батя", "солнце", "свет", "тело", "голос", "любовь", "забота")):
+        return "Concept grounding"
     if any(term in normalized for term in ("camera", "камера", "сенсор", "environment", "среда", "наблюдение")):
         return "Environment sensing"
     if any(term in normalized for term in ("max17", "mark17", "ядро", "память", "синап", "sleep", "consolidation")):
@@ -161,6 +167,8 @@ def _next_step(state: dict[str, Any]) -> str:
         return "Проверить статус, зафиксировать нужные файлы и не смешивать лишние изменения."
     if topic == "Environment sensing":
         return "Сохранить только полезный сенсорный факт и связать его с текущим контекстом."
+    if topic == "Concept grounding":
+        return "Связать базовые понятия с сенсорными опорами, памятью и действиями."
     if mode == "debugging":
         return "Сузить ошибку до одного воспроизводимого симптома и проверить минимальный фикс."
     if goal:
