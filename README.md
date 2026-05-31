@@ -185,6 +185,37 @@ Responses can include:
 
 This is feedback reinforcement, not autonomous execution: Max17 records the result and adjusts future next-step suggestions.
 
+### Synapse Growth Loop
+
+Max17 has a deterministic growth loop in `mark17/growth.py`.
+After normal event handling it adds extra useful associations between:
+
+- event, intent, topic, mode, and active goal;
+- goal, plan, and concrete actions;
+- answer, goal, and next adaptation;
+- recalled/semantic memories and the current goal/topic;
+- vision summary scene context and the current goal/topic.
+
+This is the path toward `1000+` practical graph synapses. The loop does not create random edges and does not claim biological scale; it only densifies associations that can affect future recall, planning, and answer style.
+
+Run the growth smoke check with:
+
+```bash
+npm run max17:growth
+```
+
+Responses can include:
+
+```json
+{
+  "growth": {
+    "updated": 12,
+    "target_synapses": 1000,
+    "top": []
+  }
+}
+```
+
 ### Voice and Camera Sensor
 
 The HUD can now act as a small local sensory shell around Max17:

@@ -13,6 +13,7 @@
     "max17:plan": "python3 mark17/plan_smoke.py",
     "max17:outcome": "python3 mark17/outcome_smoke.py",
     "max17:sense": "python3 mark17/json_cli.py --no-llm --ephemeral < mark17/examples/max17-environment-observation.json",
+    "max17:growth": "python3 mark17/growth_smoke.py",
     "clean": "next clean"
   },
   "dependencies": {

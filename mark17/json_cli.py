@@ -28,6 +28,7 @@ from mark17.consolidation import ConsolidationEngine
 from mark17.working_memory import WorkingMemory
 from mark17.planner import plan_next_actions
 from mark17.outcome import OUTCOME_EVENT_TYPES, evaluate_outcome, update_outcome_synapses
+from mark17.growth import grow_synapses
 
 ALLOWED_EVENTS = frozenset(
     {
@@ -249,7 +250,63 @@ def normalize(result: dict[str, Any]) -> dict[str, Any]:
     outcome = result.get("outcome")
     if isinstance(outcome, dict):
         normalized["outcome"] = outcome
+    growth = result.get("growth")
+    if isinstance(growth, dict):
+        normalized["growth"] = growth
     return normalized
+
+
+def _merge_synapse_summaries(
+    base_synapses: dict[str, Any] | None,
+    growth: dict[str, Any],
+) -> dict[str, Any]:
+    base = base_synapses if isinstance(base_synapses, dict) else {"updated": 0, "top": []}
+    base_top = base.get("top") if isinstance(base.get("top"), list) else []
+    growth_top = growth.get("top") if isinstance(growth.get("top"), list) else []
+    merged_top: list[dict[str, Any]] = []
+    seen: set[Any] = set()
+    for item in [*growth_top, *base_top]:
+        if not isinstance(item, dict):
+            continue
+        key = item.get("id") or (
+            item.get("source_type"),
+            item.get("source_id"),
+            item.get("target_type"),
+            item.get("target_id"),
+            item.get("relation_type"),
+        )
+        if key in seen:
+            continue
+        seen.add(key)
+        merged_top.append(item)
+        if len(merged_top) >= 3:
+            break
+
+    return {
+        **base,
+        "updated": int(base.get("updated") or 0) + int(growth.get("updated") or 0),
+        "top": merged_top,
+    }
+
+
+def _apply_growth(
+    synapse_graph: SynapseGraph,
+    event: Event,
+    result: dict[str, Any],
+    self_evaluation: dict[str, Any] | None,
+) -> None:
+    growth = grow_synapses(
+        synapse_graph,
+        event=event,
+        response=result,
+        working_memory=result.get("working_memory") if isinstance(result.get("working_memory"), dict) else None,
+        self_evaluation=self_evaluation,
+    )
+    result["growth"] = growth
+    result["synapses"] = _merge_synapse_summaries(
+        result.get("synapses") if isinstance(result.get("synapses"), dict) else None,
+        growth,
+    )
 
 
 def main() -> int:
@@ -334,6 +391,7 @@ def _handle_event(event: Event, args: argparse.Namespace, state_dir: Path) -> di
         result["answer"] = answer
         if event.type in {"user_message", "task_created", "task_completed", "deadline_failed", "terminal_error", "system_state", "environment_observation"}:
             result["working_memory"] = working_memory.update_from_event(event, result, result["self_evaluation"])
+    _apply_growth(synapse_graph, event, result, result["self_evaluation"])
     if evaluation.store_memory:
         brain.memory.remember(
             Event(
@@ -444,6 +502,7 @@ def _handle_outcome_event(
     answer = compose_answer(event, result, evaluation)
     if answer:
         result["answer"] = answer
+    _apply_growth(synapse_graph, event, result, evaluation)
     brain.plasticity.save()
     return result
 
@@ -529,6 +588,7 @@ def _handle_sleep_consolidation(
     answer = compose_answer(event, result, result["self_evaluation"])
     if answer:
         result["answer"] = answer
+    _apply_growth(synapse_graph, event, result, result["self_evaluation"])
     brain.plasticity.save()
     return result
 
@@ -575,6 +635,7 @@ def _run_warmup(
             result["answer"] = answer
             if event.type in {"user_message", "task_created", "task_completed", "deadline_failed", "terminal_error", "system_state", "environment_observation"}:
                 working_memory.update_from_event(event, result, result["self_evaluation"])
+        _apply_growth(synapse_graph, event, result, result["self_evaluation"])
         if evaluation.store_memory:
             brain.memory.remember(
                 Event(

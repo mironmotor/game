@@ -56,8 +56,10 @@ def detect_intent(text: Any, event_type: str = "user_message") -> str:
     normalized = _normalize(text)
     if event_type in {"terminal_error", "deadline_failed"}:
         return "reports_error"
-    if event_type in {"task_created", "task_completed", "system_state", "environment_observation"}:
+    if event_type in {"task_created", "task_completed", "environment_observation"}:
         return "development_request"
+    if event_type == "system_state":
+        return "system_snapshot"
     if not normalized:
         return "unknown"
     if any(term in normalized for term in ("что умеешь", "что можешь", "what can you do", "who are you")):
@@ -75,8 +77,12 @@ def detect_intent(text: Any, event_type: str = "user_message") -> str:
             "добавь",
             "сделай",
             "делаем",
+            "начинаем",
             "улучшаем",
             "развиваем",
+            "растим",
+            "расти",
+            "свяжи",
             "fix",
             "исправь",
             "refactor",
@@ -217,7 +223,7 @@ class WorkingMemory:
             state["current_mode"] = mode
         state["last_user_intent"] = intent
 
-        if intent in {"development_request", "reports_error"} and text:
+        if intent in {"development_request", "reports_error"} and text and event.type != "system_state":
             state["active_goal"] = _goal_from_text(text, str(state.get("current_topic") or ""))
 
         next_adaptation = ""

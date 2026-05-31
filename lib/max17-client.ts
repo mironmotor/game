@@ -101,6 +101,12 @@ export interface Max17Outcome {
   next_adjustment?: string;
 }
 
+export interface Max17Growth {
+  updated?: number;
+  target_synapses?: number;
+  top?: Max17Synapse[];
+}
+
 export interface Max17Response {
   ok?: boolean;
   route: string;
@@ -115,6 +121,7 @@ export interface Max17Response {
   working_memory?: Max17WorkingMemory;
   plan?: Max17Plan;
   outcome?: Max17Outcome;
+  growth?: Max17Growth;
   self_evaluation?: Max17SelfEvaluation;
   raw?: Record<string, unknown>;
   error?: string;
