@@ -286,6 +286,39 @@ function analyzeCameraFrame(
   };
 }
 
+async function requestCameraStream() {
+  try {
+    return await navigator.mediaDevices.getUserMedia({
+      video: {
+        facingMode: { ideal: 'environment' },
+      },
+      audio: false,
+    });
+  } catch (firstError) {
+    if (process.env.NODE_ENV === 'development') {
+      console.debug('[Max17 HUD] environment camera unavailable, trying default camera', firstError);
+    }
+  }
+
+  try {
+    return await navigator.mediaDevices.getUserMedia({
+      video: {
+        facingMode: { ideal: 'user' },
+      },
+      audio: false,
+    });
+  } catch (secondError) {
+    if (process.env.NODE_ENV === 'development') {
+      console.debug('[Max17 HUD] user camera unavailable, trying generic camera', secondError);
+    }
+  }
+
+  return navigator.mediaDevices.getUserMedia({
+    video: true,
+    audio: false,
+  });
+}
+
 function HudContent() {
   const {
     xp,
@@ -306,6 +339,7 @@ function HudContent() {
   const [isSpeechEnabled, setIsSpeechEnabled] = useState(false);
   const [isSpeaking, setIsSpeaking] = useState(false);
   const [cameraStatus, setCameraStatus] = useState<CameraStatus>('off');
+  const [cameraError, setCameraError] = useState('');
   const [activeNav, setActiveNav] = useState<HudNavId>('codex');
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [max17State, setMax17State] = useState<Pick<Max17Response, 'route' | 'confidence' | 'next_adaptation'> | null>(null);
@@ -473,6 +507,7 @@ function HudContent() {
     cameraStreamRef.current?.getTracks().forEach((track) => track.stop());
     cameraStreamRef.current = null;
     previousCameraLuminanceRef.current = null;
+    setCameraError('');
     setCameraStatus('off');
     void emitMax17HudEvent({
       type: 'environment_observation',
@@ -493,27 +528,39 @@ function HudContent() {
     }
 
     if (typeof navigator === 'undefined' || !navigator.mediaDevices?.getUserMedia) {
+      const secureHint =
+        typeof window !== 'undefined' && !window.isSecureContext
+          ? ' Камера требует HTTPS или localhost; HTTP по Wi-Fi на телефоне не подойдёт.'
+          : '';
+      setCameraError(`getUserMedia недоступен.${secureHint}`);
       setCameraStatus('error');
-      setAgiMessage('MAX17: камера недоступна в этом браузере.');
+      setAgiMessage(`MAX17: камера недоступна в этом браузере.${secureHint}`);
       window.setTimeout(() => setCameraStatus('off'), 1600);
       return;
     }
 
     try {
+      setCameraError('');
       setCameraStatus('starting');
-      const stream = await navigator.mediaDevices.getUserMedia({
-        video: {
-          facingMode: { ideal: 'environment' },
-        },
-        audio: false,
-      });
+      const stream = await requestCameraStream();
       cameraStreamRef.current = stream;
       setCameraStatus('active');
     } catch (error) {
       console.error('Camera start failed:', error);
+      const reason =
+        error instanceof DOMException
+          ? `${error.name}: ${error.message}`
+          : error instanceof Error
+            ? error.message
+            : 'unknown camera error';
+      const secureHint =
+        typeof window !== 'undefined' && !window.isSecureContext
+          ? ' Камера требует HTTPS или localhost.'
+          : '';
+      setCameraError(`${reason}.${secureHint}`);
       setCameraStatus('error');
-      setAgiMessage('MAX17: не смог получить доступ к камере. Разреши доступ в браузере и попробуй ещё раз.');
-      window.setTimeout(() => setCameraStatus('off'), 2200);
+      setAgiMessage(`MAX17: не смог получить доступ к камере: ${reason}.${secureHint}`);
+      window.setTimeout(() => setCameraStatus('off'), 4200);
     }
   }, [cameraStatus, stopCamera]);
 
@@ -688,7 +735,9 @@ function HudContent() {
     }
   }, [balance, emitMax17HudEvent, energy, focus, isLoaded, pendingTasks.length, reputationLevel, tasks]);
 
-  const promptText = cameraStatus === 'starting'
+  const promptText = cameraStatus === 'error'
+    ? 'Камера недоступна...'
+    : cameraStatus === 'starting'
     ? 'Камера подключается...'
     : isSpeaking
       ? 'MAX17 говорит...'
@@ -752,8 +801,8 @@ function HudContent() {
               autoPlay
             />
           ) : (
-            <div className="flex aspect-video w-full items-center justify-center bg-black/70 text-[9px] uppercase tracking-[0.24em] text-cyan-100/60">
-              {cameraStatus === 'starting' ? 'camera boot' : 'camera error'}
+            <div className="flex aspect-video w-full items-center justify-center bg-black/70 px-3 text-center text-[9px] uppercase tracking-[0.18em] text-cyan-100/60">
+              {cameraStatus === 'starting' ? 'camera boot' : cameraError || 'camera error'}
             </div>
           )}
           <canvas ref={cameraCanvasRef} className="hidden" />
