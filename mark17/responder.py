@@ -406,6 +406,56 @@ def _is_debug_question(user_text: str) -> bool:
     return is_debug_request(user_text)
 
 
+def _is_family_identity_question(user_text: str) -> bool:
+    normalized = normalize_text(user_text)
+    has_family = (
+        ("отец" in normalized or "папа" in normalized or "father" in normalized)
+        and ("мать" in normalized or "мама" in normalized or "mother" in normalized)
+    )
+    return has_family or "родители" in normalized or "parents" in normalized
+
+
+def _raw_memory_rows(result: dict[str, Any]) -> list[dict[str, Any]]:
+    memory = result.get("memory")
+    if not isinstance(memory, dict):
+        return []
+    rows: list[dict[str, Any]] = []
+    for key in ("recalled", "semantic", "consolidated_patterns"):
+        value = memory.get(key)
+        if isinstance(value, list):
+            rows.extend(row for row in value if isinstance(row, dict))
+    return rows
+
+
+def _family_identity_answer(result: dict[str, Any]) -> dict[str, Any] | None:
+    rows = _raw_memory_rows(result)
+    blob_parts: list[str] = []
+    for row in rows:
+        for key in ("summary", "reinforce", "text"):
+            value = row.get(key)
+            if value:
+                blob_parts.append(str(value))
+    blob = " ".join(blob_parts)
+    normalized = normalize_text(blob)
+
+    father = "Мирон" if "мирон" in normalized else ""
+    mother = "Сиджи" if "сиджи" in normalized else ""
+    if not father and not mother:
+        return None
+
+    if father and mother:
+        text = f"В текущей памяти Max17: отец — {father}, мать — {mother}."
+    elif father:
+        text = f"В текущей памяти Max17: отец — {father}. Мать пока не выделена в найденной памяти."
+    else:
+        text = f"В текущей памяти Max17: мать — {mother}. Отец пока не выделен в найденной памяти."
+    return {
+        "text": text,
+        "source": "composer",
+        "confidence": round(max(_confidence(result), 0.82), 4),
+    }
+
+
 def _memory_entries(
     result: dict[str, Any],
     key: str,
@@ -940,6 +990,11 @@ def compose_answer(
 
     if _is_memory_question(user_text):
         return _memory_question_answer(event, response)
+
+    if _is_family_identity_question(user_text):
+        family = _family_identity_answer(response)
+        if family:
+            return family
 
     if _is_next_action_request(user_text):
         planned = _plan_answer(response, confidence)
