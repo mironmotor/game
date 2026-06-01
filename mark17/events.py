@@ -21,6 +21,8 @@ KNOWN_TYPES = frozenset(
         "environment_observation",
         "compress_memory",
         "graph_stats",
+        "neural_seed",
+        "neural_walk",
     }
 )
 

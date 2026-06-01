@@ -21,6 +21,8 @@ const ALLOWED_EVENTS = new Set([
   'action_skipped',
   'compress_memory',
   'graph_stats',
+  'neural_seed',
+  'neural_walk',
 ]);
 
 const DEFAULT_RESPONSE = {

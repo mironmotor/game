@@ -1,4 +1,4 @@
-"""Graph statistics and 10k synapse growth tracker for Max17."""
+"""Graph statistics and 100k synapse growth tracker for Max17."""
 
 from __future__ import annotations
 
@@ -8,7 +8,7 @@ from typing import Any
 
 from mark17.synapse_graph import SynapseGraph
 
-TARGET_SYNAPSES = 10_000
+TARGET_SYNAPSES = 100_000
 
 
 def _round(value: Any, digits: int = 4) -> float:

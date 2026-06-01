@@ -1,0 +1,5 @@
+{
+  "type": "neural_seed",
+  "source": "manual",
+  "target_synapses": 100000
+}

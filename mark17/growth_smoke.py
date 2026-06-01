@@ -49,7 +49,7 @@ def main() -> int:
     plan = result.get("plan")
 
     _assert(isinstance(growth, dict), "growth field missing")
-    _assert(growth.get("target_synapses") == 1000, "target_synapses should be 1000")
+    _assert(growth.get("target_synapses") == 100_000, "target_synapses should be 100000")
     _assert(int(growth.get("updated") or 0) >= 8, "growth should update at least 8 synapses")
     _assert(isinstance(synapses, dict), "synapses field missing")
     _assert(int(synapses.get("updated") or 0) >= int(growth.get("updated") or 0), "synapses should include growth updates")

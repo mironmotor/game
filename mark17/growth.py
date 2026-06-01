@@ -15,7 +15,7 @@ from mark17.events import Event
 from mark17.synapse_graph import SynapseGraph
 from mark17.working_memory import detect_intent, topic_for_event
 
-TARGET_GRAPH_SYNAPSES = 1000
+TARGET_GRAPH_SYNAPSES = 100_000
 
 
 def _stable_id(*parts: Any) -> str:

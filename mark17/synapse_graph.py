@@ -30,6 +30,10 @@ RELATION_TYPES = frozenset(
         "failed_after",
         "adapted_by",
         "compressed_as",
+        "contains",
+        "bridges_to",
+        "grounds",
+        "activates",
     }
 )
 

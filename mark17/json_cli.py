@@ -33,6 +33,7 @@ from mark17.growth import grow_synapses
 from mark17.concepts import ConceptGrounding
 from mark17.concept_compression import compress_to_concept
 from mark17.graph_stats import GraphStats, collect_store_counts
+from mark17.neural_graph import ClusteredNeuralGraph, TARGET_NEURAL_SYNAPSES
 
 ALLOWED_EVENTS = frozenset(
     {
@@ -52,6 +53,8 @@ ALLOWED_EVENTS = frozenset(
         "action_skipped",
         "compress_memory",
         "graph_stats",
+        "neural_seed",
+        "neural_walk",
     }
 )
 
@@ -319,6 +322,9 @@ def normalize(result: dict[str, Any]) -> dict[str, Any]:
     graph_stats = result.get("graph_stats")
     if isinstance(graph_stats, dict):
         normalized["graph_stats"] = graph_stats
+    neural_graph = result.get("neural_graph")
+    if isinstance(neural_graph, dict):
+        normalized["neural_graph"] = neural_graph
     return normalized
 
 
@@ -518,6 +524,10 @@ def _handle_event(event: Event, args: argparse.Namespace, state_dir: Path) -> di
     working_memory = WorkingMemory(state_dir)
     if event.type == "graph_stats" and not args.warmup:
         return _handle_graph_stats(event, state_dir, synapse_graph)
+    if event.type == "neural_seed" and not args.warmup:
+        return _handle_neural_seed(event, state_dir, synapse_graph)
+    if event.type == "neural_walk" and not args.warmup:
+        return _handle_neural_walk(event, state_dir, synapse_graph)
     concept_grounding = ConceptGrounding(state_dir)
     if args.warmup:
         _run_warmup(args.warmup, brain, vector_memory, synapse_graph, working_memory, concept_grounding)
@@ -525,6 +535,10 @@ def _handle_event(event: Event, args: argparse.Namespace, state_dir: Path) -> di
         return _handle_working_memory_reset(working_memory)
     if event.type == "graph_stats":
         return _handle_graph_stats(event, state_dir, synapse_graph)
+    if event.type == "neural_seed":
+        return _handle_neural_seed(event, state_dir, synapse_graph)
+    if event.type == "neural_walk":
+        return _handle_neural_walk(event, state_dir, synapse_graph)
     if event.type == "compress_memory":
         return _handle_compress_memory(event, brain, vector_memory, synapse_graph, working_memory)
     if event.type == "sleep_consolidation":
@@ -686,8 +700,13 @@ def _handle_graph_stats(
     state_dir: Path,
     synapse_graph: SynapseGraph,
 ) -> dict[str, Any]:
-    stats = GraphStats(synapse_graph).collect(limit=5)
+    try:
+        target_synapses = int(event.payload.get("target_synapses") or TARGET_NEURAL_SYNAPSES)
+    except (TypeError, ValueError):
+        target_synapses = TARGET_NEURAL_SYNAPSES
+    stats = GraphStats(synapse_graph, target_synapses=target_synapses).collect(limit=5)
     stats["stores"] = collect_store_counts(state_dir)
+    stats["neural_graph"] = ClusteredNeuralGraph(synapse_graph).snapshot(limit=5)
     result: dict[str, Any] = {
         "ok": True,
         "event_type": event.type,
@@ -704,7 +723,7 @@ def _handle_graph_stats(
             "latency_ms": 0.0,
         },
         "confidence": 1.0,
-        "next_adaptation": "Рост к 10 000 граф-синапсов измерен. Следующий шаг — добавлять только полезные связи.",
+        "next_adaptation": "Рост к 100 000 граф-синапсов измерен. Следующий шаг — растить кластеры и межкластерные мосты.",
         "self_evaluation": {
             "score": 1.0,
             "reason": "graph stats collected",
@@ -712,6 +731,109 @@ def _handle_graph_stats(
             "reinforce": "measure synapse growth",
         },
         "graph_stats": stats,
+    }
+    answer = compose_answer(event, result, result["self_evaluation"])
+    if answer:
+        result["answer"] = answer
+    return result
+
+
+def _handle_neural_seed(
+    event: Event,
+    state_dir: Path,
+    synapse_graph: SynapseGraph,
+) -> dict[str, Any]:
+    try:
+        target_synapses = int(event.payload.get("target_synapses") or TARGET_NEURAL_SYNAPSES)
+    except (TypeError, ValueError):
+        target_synapses = TARGET_NEURAL_SYNAPSES
+    max_new_raw = event.payload.get("max_new")
+    try:
+        max_new = int(max_new_raw) if max_new_raw is not None else None
+    except (TypeError, ValueError):
+        max_new = None
+
+    neural_graph = ClusteredNeuralGraph(synapse_graph)
+    seed = neural_graph.seed(target_synapses=target_synapses, max_new=max_new)
+    stats = GraphStats(synapse_graph, target_synapses=target_synapses).collect(limit=5)
+    stats["stores"] = collect_store_counts(state_dir)
+    result: dict[str, Any] = {
+        "ok": True,
+        "event_type": event.type,
+        "route": "neural_graph",
+        "memory": {},
+        "plasticity": {
+            "confidence": 1.0,
+            "action": "seed_neural_graph",
+            "learned": bool(seed.get("created_or_updated")),
+        },
+        "llm": {
+            "status": "skipped",
+            "text": "LLM отключён для neural_seed.",
+            "latency_ms": 0.0,
+        },
+        "confidence": 1.0,
+        "next_adaptation": "Используй neural_walk, чтобы проверять путь активации между кластерами.",
+        "self_evaluation": {
+            "score": 1.0,
+            "reason": "clustered neural graph seeded",
+            "store_memory": False,
+            "reinforce": "clustered neural graph",
+        },
+        "graph_stats": stats,
+        "neural_graph": {
+            "seed": seed,
+            "snapshot": neural_graph.snapshot(limit=6),
+        },
+    }
+    answer = compose_answer(event, result, result["self_evaluation"])
+    if answer:
+        result["answer"] = answer
+    return result
+
+
+def _handle_neural_walk(
+    event: Event,
+    state_dir: Path,
+    synapse_graph: SynapseGraph,
+) -> dict[str, Any]:
+    query = str(event.payload.get("query") or event.payload.get("text") or "Max17").strip()
+    try:
+        steps = int(event.payload.get("steps") or 8)
+    except (TypeError, ValueError):
+        steps = 8
+    neural_graph = ClusteredNeuralGraph(synapse_graph)
+    walk = neural_graph.walk(query, steps=steps)
+    stats = GraphStats(synapse_graph).collect(limit=3)
+    stats["stores"] = collect_store_counts(state_dir)
+    result: dict[str, Any] = {
+        "ok": True,
+        "event_type": event.type,
+        "route": "neural_graph",
+        "memory": {},
+        "plasticity": {
+            "confidence": 0.9 if walk.get("steps") else 0.35,
+            "action": "walk_neural_graph",
+            "learned": False,
+        },
+        "llm": {
+            "status": "skipped",
+            "text": "LLM отключён для neural_walk.",
+            "latency_ms": 0.0,
+        },
+        "confidence": 0.9 if walk.get("steps") else 0.35,
+        "next_adaptation": "Если путь пустой, сначала запусти neural_seed для заполнения кластеров.",
+        "self_evaluation": {
+            "score": 0.9 if walk.get("steps") else 0.35,
+            "reason": "neural graph activation path collected",
+            "store_memory": False,
+            "reinforce": "cluster traversal",
+        },
+        "graph_stats": stats,
+        "neural_graph": {
+            "walk": walk,
+            "snapshot": neural_graph.snapshot(limit=4),
+        },
     }
     answer = compose_answer(event, result, result["self_evaluation"])
     if answer:
@@ -898,6 +1020,12 @@ def _run_warmup(
             continue
         if event.type == "graph_stats":
             _handle_graph_stats(event, brain.memory.db_path.parent, synapse_graph)
+            continue
+        if event.type == "neural_seed":
+            _handle_neural_seed(event, brain.memory.db_path.parent, synapse_graph)
+            continue
+        if event.type == "neural_walk":
+            _handle_neural_walk(event, brain.memory.db_path.parent, synapse_graph)
             continue
         if event.type == "compress_memory":
             _handle_compress_memory(event, brain, vector_memory, synapse_graph, working_memory)

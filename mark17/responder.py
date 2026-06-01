@@ -841,6 +841,82 @@ def _graph_stats_answer(response: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _neural_graph_seed_answer(response: dict[str, Any]) -> dict[str, Any]:
+    neural = response.get("neural_graph")
+    neural = neural if isinstance(neural, dict) else {}
+    seed = neural.get("seed")
+    seed = seed if isinstance(seed, dict) else {}
+    snapshot = neural.get("snapshot")
+    snapshot = snapshot if isinstance(snapshot, dict) else {}
+    target = int(seed.get("target_synapses") or snapshot.get("target_synapses") or 100_000)
+    before = int(seed.get("before") or 0)
+    after = int(seed.get("after") or 0)
+    added = int(seed.get("added_synapses") or seed.get("created_or_updated") or 0)
+    clusters = int(seed.get("clusters") or snapshot.get("clusters") or 0)
+    nodes = int(seed.get("cluster_nodes") or snapshot.get("cluster_nodes") or 0)
+    status = str(seed.get("status") or "seeded")
+    return {
+        "text": (
+            f"Я развернул кластерный neural graph для Max17: {clusters} кластеров, "
+            f"{nodes} базовых узлов и {after} граф-синапсов из цели {target}. "
+            f"За этот проход добавлено {added} связей; до прохода было {before}. "
+            "Теперь можно проверять межкластерные маршруты через neural_walk: например мама -> тело -> память -> действие. "
+            f"Статус: {status}."
+        ),
+        "source": "composer",
+        "confidence": 1.0,
+    }
+
+
+def _neural_graph_walk_answer(response: dict[str, Any]) -> dict[str, Any]:
+    neural = response.get("neural_graph")
+    neural = neural if isinstance(neural, dict) else {}
+    walk = neural.get("walk")
+    walk = walk if isinstance(walk, dict) else {}
+    steps = walk.get("steps")
+    steps = steps if isinstance(steps, list) else []
+    query = str(walk.get("query") or "").strip()
+    if not steps:
+        return {
+            "text": (
+                "Путь активации в neural graph пока не найден. "
+                "Сначала нужно заполнить кластерные связи командой neural_seed."
+            ),
+            "source": "composer",
+            "confidence": 0.35,
+        }
+
+    route_parts: list[str] = []
+    start = walk.get("start")
+    if isinstance(start, dict):
+        label = str(start.get("label") or start.get("id") or "").strip()
+        if label:
+            route_parts.append(label)
+    for step in steps[:6]:
+        if isinstance(step, dict):
+            label = str(step.get("to_label") or step.get("target_id") or "").strip()
+            if label and label not in route_parts:
+                route_parts.append(label)
+    clusters = walk.get("visited_clusters")
+    cluster_labels: list[str] = []
+    if isinstance(clusters, list):
+        for cluster in clusters[:5]:
+            if isinstance(cluster, dict) and cluster.get("label"):
+                cluster_labels.append(str(cluster["label"]))
+    cluster_text = f" Кластеры: {', '.join(cluster_labels)}." if cluster_labels else ""
+    return {
+        "text": (
+            f"Я прошёл путь активации по neural graph для запроса «{query or 'контекст'}»: "
+            + " -> ".join(route_parts[:7])
+            + "."
+            + cluster_text
+            + " Это не сознание, а проверяемый маршрут связей между смысловыми кластерами."
+        ),
+        "source": "composer",
+        "confidence": round(_confidence(response) or 0.9, 4),
+    }
+
+
 def _outcome_answer(response: dict[str, Any]) -> dict[str, Any]:
     outcome = response.get("outcome")
     if not isinstance(outcome, dict):
@@ -961,6 +1037,12 @@ def compose_answer(
 
     if event.type == "graph_stats":
         return _graph_stats_answer(response)
+
+    if event.type == "neural_seed":
+        return _neural_graph_seed_answer(response)
+
+    if event.type == "neural_walk":
+        return _neural_graph_walk_answer(response)
 
     if event.type == "compress_memory":
         return _compression_answer(response)

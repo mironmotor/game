@@ -17,6 +17,8 @@
     "max17:concepts": "python3 mark17/concepts_smoke.py",
     "max17:stats": "python3 mark17/json_cli.py --no-llm < mark17/examples/max17-graph-stats.json",
     "max17:compress": "python3 mark17/json_cli.py --no-llm --ephemeral < mark17/examples/max17-compress-memory.json",
+    "max17:neural": "python3 mark17/json_cli.py --no-llm < mark17/examples/max17-neural-seed.json",
+    "max17:walk": "python3 mark17/json_cli.py --no-llm < mark17/examples/max17-neural-walk.json",
     "clean": "next clean"
   },
   "dependencies": {

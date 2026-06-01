@@ -169,6 +169,10 @@ outcome_failure
 outcome_partial
 action_done
 action_skipped
+compress_memory
+graph_stats
+neural_seed
+neural_walk
 ```
 
 Responses can include:
@@ -196,7 +200,7 @@ After normal event handling it adds extra useful associations between:
 - recalled/semantic memories and the current goal/topic;
 - vision summary scene context and the current goal/topic.
 
-This is the path toward `1000+` practical graph synapses. The loop does not create random edges and does not claim biological scale; it only densifies associations that can affect future recall, planning, and answer style.
+This is the path toward `100 000+` practical graph synapses. The loop does not create random edges and does not claim biological scale; it only densifies associations that can affect future recall, planning, and answer style.
 
 Run the growth smoke check with:
 
@@ -210,7 +214,7 @@ Responses can include:
 {
   "growth": {
     "updated": 12,
-    "target_synapses": 1000,
+    "target_synapses": 100000,
     "top": []
   }
 }
@@ -315,14 +319,14 @@ npm run max17:compress
 npm run max17:concepts
 ```
 
-### Graph Stats / 10k Tracker
+### Graph Stats / 100k Tracker
 
-Step 15 adds a graph growth tracker for the path to `10 000` useful
+Step 15 adds a graph growth tracker for the path to `100 000` useful
 graph-synapses. It measures:
 
 - total synapses and evidence count;
 - unique graph nodes;
-- progress toward `10 000`;
+- progress toward `100 000`;
 - strongest relation types;
 - active concept nodes;
 - top weighted synapses;
@@ -342,6 +346,62 @@ Run:
 ```bash
 npm run max17:stats
 ```
+
+### Clustered Neural Graph / 100k Seed
+
+Max17 can now seed a larger deterministic cluster graph on top of SynapseGraph.
+This is the first practical approximation of "neural clusters": not a huge
+biological network, but a local mesh of meaning nodes that can route activation
+between domains.
+
+The implementation lives in `mark17/neural_graph.py` and creates:
+
+- `neural_cluster` nodes for identity, family/social meaning, natural world,
+  body/senses, environment observation, memory, synapses, planning, outcomes,
+  language, Game UI, debugging, time, emotion, values, work/economy, and safety;
+- `neural_node` entries inside those clusters, including grounded words such as
+  `отец`, `мать`, `солнце`, `тело`, `голос`, `камера`, `память`, `действие`;
+- `contains`, `similar_to`, `related_to`, and `bridges_to` synapses;
+- low-weight cross-cluster bridges so Max17 can walk from one domain to another
+  instead of treating each word as an isolated string.
+
+Seed the local graph toward `100 000` synapses:
+
+```bash
+npm run max17:neural
+```
+
+Inspect a route of activation through clusters:
+
+```bash
+npm run max17:walk
+```
+
+Manual event:
+
+```json
+{
+  "type": "neural_walk",
+  "query": "мама солнце тело память действие",
+  "steps": 8
+}
+```
+
+Responses include:
+
+```json
+{
+  "neural_graph": {
+    "seed": {},
+    "walk": {},
+    "snapshot": {}
+  }
+}
+```
+
+Internet ingestion should be added as a curated importer later. The current
+layer deliberately starts from local, explainable, deterministic concept data so
+the graph does not fill itself with uncontrolled noise.
 
 ### Voice and Camera Sensor
 

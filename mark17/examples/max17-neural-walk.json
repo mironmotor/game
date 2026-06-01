@@ -1,0 +1,6 @@
+{
+  "type": "neural_walk",
+  "source": "manual",
+  "query": "мама солнце тело память действие",
+  "steps": 8
+}
