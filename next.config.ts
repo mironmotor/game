@@ -1,5 +1,7 @@
 import type {NextConfig} from 'next';
 
+const staticExport = process.env.NEXT_OUTPUT === 'export';
+
 const nextConfig: NextConfig = {
   reactStrictMode: true,
   eslint: {
@@ -16,7 +18,7 @@ const nextConfig: NextConfig = {
       { protocol: 'https', hostname: 'images.unsplash.com', port: '', pathname: '/**' },
     ],
   },
-  output: 'export',
+  ...(staticExport ? { output: 'export' as const } : {}),
   basePath: '/game',
   assetPrefix: '/game',
   transpilePackages: ['motion'],
