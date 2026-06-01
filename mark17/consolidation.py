@@ -13,6 +13,7 @@ from collections import defaultdict
 from typing import Any
 
 from mark17.events import Event
+from mark17.concept_compression import compress_to_concept
 
 TOKEN_RE = re.compile(r"[a-zA-Zа-яА-ЯёЁ0-9_]+")
 STOPWORDS = {
@@ -200,12 +201,18 @@ class ConsolidationEngine:
         strength = min(1.0, avg_importance * 0.7 + min(evidence_count / 8, 1.0) * 0.3)
         examples = [item["text"] for item in evidence[:3]]
         summary = self._summary(theme, evidence_count, examples)
+        compressed = compress_to_concept(" ".join([theme, summary, *examples]))
+        primary = compressed.get("primary") if isinstance(compressed, dict) else {}
+        primary = primary if isinstance(primary, dict) else {}
         return {
             "pattern_id": f"pattern:{_stable_id(theme + summary)}",
             "summary": summary,
             "evidence_count": evidence_count,
             "strength": round(strength, 4),
             "source": "consolidation",
+            "concept": primary.get("concept"),
+            "label": primary.get("label"),
+            "concept_confidence": primary.get("confidence"),
         }
 
     def _summary(self, theme: str, evidence_count: int, examples: list[str]) -> str:
@@ -240,3 +247,28 @@ class ConsolidationEngine:
                 "reinforce": pattern["summary"],
             },
         )
+        if pattern.get("concept") and pattern.get("label"):
+            concept_event = Event(
+                type="compressed_concept",
+                payload={
+                    "concept": pattern.get("concept"),
+                    "label": pattern.get("label"),
+                    "pattern_id": pattern.get("pattern_id"),
+                    "summary": pattern.get("summary"),
+                    "source": "consolidation",
+                },
+                source="consolidation",
+            )
+            self.hippocampus.remember(
+                concept_event,
+                hint=f"{pattern.get('label')}: {pattern.get('summary')}",
+                action="concept_crystallization",
+            )
+            self.vector_memory.remember(
+                concept_event,
+                {
+                    "score": pattern["strength"],
+                    "reason": "concept crystallized during sleep consolidation",
+                    "reinforce": str(pattern.get("label") or ""),
+                },
+            )

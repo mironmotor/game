@@ -19,6 +19,8 @@ const ALLOWED_EVENTS = new Set([
   'outcome_partial',
   'action_done',
   'action_skipped',
+  'compress_memory',
+  'graph_stats',
 ]);
 
 const DEFAULT_RESPONSE = {

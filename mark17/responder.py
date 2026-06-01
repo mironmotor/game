@@ -708,11 +708,21 @@ def _consolidation_answer(response: dict[str, Any]) -> dict[str, Any]:
         for pattern in patterns[:2]
         if isinstance(pattern, dict) and pattern.get("summary")
     ]
+    labels: list[str] = []
+    for pattern in patterns:
+        if isinstance(pattern, dict) and pattern.get("label"):
+            label = str(pattern["label"])
+            if label not in labels:
+                labels.append(label)
+        if len(labels) >= 3:
+            break
     text = (
         f"Я обработал последние события и выделил {len(patterns)} устойчивых паттернов. "
         f"Главное: {'; '.join(summaries)}. "
-        f"{REALITY_CONTACT_HINT}"
     )
+    if labels:
+        text += f"Я сжал их в смысловые узлы: {', '.join(labels)}. "
+    text += REALITY_CONTACT_HINT
     confidence = 0.0
     strengths = [
         float(pattern.get("strength", 0.0))
@@ -725,6 +735,59 @@ def _consolidation_answer(response: dict[str, Any]) -> dict[str, Any]:
         "text": text,
         "source": "composer",
         "confidence": round(confidence, 4),
+    }
+
+
+def _compression_answer(response: dict[str, Any]) -> dict[str, Any]:
+    concepts = response.get("concepts")
+    concepts = concepts if isinstance(concepts, dict) else {}
+    primary = concepts.get("primary")
+    primary = primary if isinstance(primary, dict) else {}
+    label = str(primary.get("label") or primary.get("concept") or "контекст")
+    reason = str(primary.get("reason") or "").strip()
+    confidence = _clamp_confidence(primary.get("confidence")) or _confidence(response)
+    text = f"Я сжал этот фрагмент в смысловой узел: {label}."
+    if reason:
+        text += f" Причина: {reason}"
+    text += " Теперь этот узел можно связывать с памятью, планами, действиями и результатами."
+    return {
+        "text": text,
+        "source": "composer",
+        "confidence": round(confidence, 4),
+    }
+
+
+def _graph_stats_answer(response: dict[str, Any]) -> dict[str, Any]:
+    stats = response.get("graph_stats")
+    if not isinstance(stats, dict):
+        return {
+            "text": "Я попытался измерить SynapseGraph, но статистика пока недоступна.",
+            "source": "composer",
+            "confidence": 0.2,
+        }
+    total = int(stats.get("total_synapses") or 0)
+    target = int(stats.get("target_synapses") or 10_000)
+    percent = float(stats.get("progress_percent") or 0.0)
+    nodes = int(stats.get("unique_nodes") or 0)
+    evidence = int(stats.get("total_evidence") or 0)
+    top_concepts = stats.get("top_concepts")
+    concept_text = ""
+    if isinstance(top_concepts, list) and top_concepts:
+        names = [
+            str(item.get("concept"))
+            for item in top_concepts[:3]
+            if isinstance(item, dict) and item.get("concept")
+        ]
+        if names:
+            concept_text = f" Самые активные узлы: {', '.join(names)}."
+    return {
+        "text": (
+            f"Сейчас в SynapseGraph {total} связей из цели {target} ({percent:.2f}%). "
+            f"Уникальных узлов: {nodes}, evidence-счётчик: {evidence}."
+            f"{concept_text} Следующий шаг — растить только полезные связи, которые влияют на recall, план и outcome."
+        ),
+        "source": "composer",
+        "confidence": 1.0,
     }
 
 
@@ -845,6 +908,12 @@ def compose_answer(
     """
 
     confidence = _confidence(response)
+
+    if event.type == "graph_stats":
+        return _graph_stats_answer(response)
+
+    if event.type == "compress_memory":
+        return _compression_answer(response)
 
     if event.type == "sleep_consolidation":
         return _consolidation_answer(response)

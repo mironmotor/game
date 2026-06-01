@@ -12,13 +12,16 @@ ROOT = Path(__file__).resolve().parent.parent
 
 
 def _run(event_path: str) -> dict:
+    return _run_payload(Path(event_path).read_text())
+
+
+def _run_payload(data: str) -> dict:
     cmd = [
         sys.executable,
         "mark17/json_cli.py",
         "--no-llm",
         "--ephemeral",
     ]
-    data = Path(event_path).read_text()
     proc = subprocess.run(
         cmd,
         cwd=ROOT,
@@ -57,6 +60,30 @@ def main() -> int:
     _assert(int(synapses.get("updated") or 0) >= int(growth.get("updated") or 0), "synapses should include growth updates")
     _assert("заземл" in answer.casefold() or "сенсор" in answer.casefold(), "answer should explain concept grounding")
 
+    compression_cases = [
+        ("memory", "Several memories about recall, semantic vector search and hippocampus.", {"memory"}),
+        ("consolidation", "Sleep consolidation compresses repeated patterns into stable insight tokens.", {"consolidation"}),
+        ("action", "Goal, next action, plan, execution, result and outcome feedback.", {"action", "outcome", "action-outcome", "outcome-action"}),
+        ("interface", "Game HUD basePath API route localhost interface bridge.", {"interface"}),
+    ]
+    compression_seen: dict[str, str] = {}
+    for name, text, expected in compression_cases:
+        payload = json.dumps(
+            {
+                "type": "compress_memory",
+                "text": text,
+                "source": "concept_smoke",
+            },
+            ensure_ascii=False,
+        )
+        compressed = _run_payload(payload)
+        primary = ((compressed.get("concepts") or {}).get("primary") or {})
+        concept = str(primary.get("concept") or "")
+        label = str(primary.get("label") or "")
+        compression_seen[name] = label or concept
+        _assert(concept in expected, f"{name} compressed to {concept}, expected one of {sorted(expected)}")
+        _assert("смысловой узел" in compressed.get("answer", {}).get("text", ""), "compression answer should mention semantic node")
+
     print(
         json.dumps(
             {
@@ -65,6 +92,7 @@ def main() -> int:
                 "sensory_channels": concepts.get("sensory_channels", [])[:8],
                 "growth_updated": growth.get("updated"),
                 "synapses_updated": synapses.get("updated"),
+                "compression": compression_seen,
                 "answer": answer,
             },
             ensure_ascii=False,

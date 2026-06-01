@@ -119,12 +119,43 @@ export interface Max17ConceptMatch {
   position?: number;
 }
 
+export interface Max17CompressedConcept {
+  concept?: string;
+  label?: string;
+  source_text?: string;
+  confidence?: number;
+  reason?: string;
+  aliases?: string[];
+  related_terms?: string[];
+}
+
 export interface Max17Concepts {
   matches?: Max17ConceptMatch[];
   sensory_channels?: string[];
   summary?: string;
   count?: number;
   source?: string;
+  primary?: Max17CompressedConcept;
+  related?: Max17CompressedConcept[];
+  keywords?: string[];
+  compression_source?: string;
+}
+
+export interface Max17GraphStats {
+  target_synapses?: number;
+  total_synapses?: number;
+  remaining_to_target?: number;
+  progress?: number;
+  progress_percent?: number;
+  unique_nodes?: number;
+  total_evidence?: number;
+  avg_weight?: number;
+  max_weight?: number;
+  top_relations?: Array<Record<string, unknown>>;
+  top_node_types?: Array<Record<string, unknown>>;
+  top_concepts?: Array<Record<string, unknown>>;
+  top_synapses?: Max17Synapse[];
+  stores?: Record<string, number>;
 }
 
 export interface Max17Response {
@@ -143,6 +174,7 @@ export interface Max17Response {
   outcome?: Max17Outcome;
   growth?: Max17Growth;
   concepts?: Max17Concepts;
+  graph_stats?: Max17GraphStats;
   self_evaluation?: Max17SelfEvaluation;
   raw?: Record<string, unknown>;
   error?: string;

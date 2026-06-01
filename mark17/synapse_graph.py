@@ -29,6 +29,7 @@ RELATION_TYPES = frozenset(
         "completed_after",
         "failed_after",
         "adapted_by",
+        "compressed_as",
     }
 )
 

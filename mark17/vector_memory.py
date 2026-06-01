@@ -163,6 +163,7 @@ def importance_for_event(event: Event, evaluation: dict[str, Any] | None = None)
         "outcome_partial": 0.66,
         "outcome_failure": 0.74,
         "action_skipped": 0.52,
+        "compressed_concept": 0.82,
     }.get(event.type, 0.45)
 
     if event.type == "system_state":

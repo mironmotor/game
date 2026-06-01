@@ -252,6 +252,97 @@ npm run max17:concepts
 The goal is to give Max17 a growing map of grounded meaning before heavier
 perception or language models are added.
 
+### Memory Compression / Concept Crystallization
+
+Max17 can compress long phrases, repeated events, and sleep patterns into short
+semantic concept labels. This is the first "experience -> pattern -> concept"
+step:
+
+```text
+We are building Max17 memory, synapses, sleep mode, planner and outcome feedback.
+-> ядро
+```
+
+The implementation lives in `mark17/concept_compression.py`. It is deterministic
+and explainable: trigger hits are counted per concept, then the strongest concept
+becomes `concepts.primary`.
+
+Supported compressed nodes include:
+
+- `core` / `ядро`
+- `memory` / `память`
+- `synapse` / `связь`
+- `consolidation` / `сжатие`
+- `action` / `действие`
+- `outcome` / `результат`
+- `planning` / `план`
+- `interface` / `интерфейс`
+- `debugging` / `отладка`
+- `agency` / `агентность`
+
+Manual compression event:
+
+```json
+{
+  "type": "compress_memory",
+  "text": "Several memories about recall, semantic search, and consolidation.",
+  "source": "manual"
+}
+```
+
+Response includes:
+
+```json
+{
+  "concepts": {
+    "primary": {
+      "concept": "memory",
+      "label": "память",
+      "confidence": 0.82
+    }
+  }
+}
+```
+
+Sleep consolidation now adds optional `concept` and `label` fields to patterns
+and stores compressed concept memories back into Hippocampus and VectorMemory.
+SynapseGraph can create `compressed_as` relations such as `pattern -> память`.
+
+Run:
+
+```bash
+npm run max17:compress
+npm run max17:concepts
+```
+
+### Graph Stats / 10k Tracker
+
+Step 15 adds a graph growth tracker for the path to `10 000` useful
+graph-synapses. It measures:
+
+- total synapses and evidence count;
+- unique graph nodes;
+- progress toward `10 000`;
+- strongest relation types;
+- active concept nodes;
+- top weighted synapses;
+- related store counts for SQLite memory, vector memory, and concepts.
+
+Manual stats event:
+
+```json
+{
+  "type": "graph_stats",
+  "source": "manual"
+}
+```
+
+Run:
+
+```bash
+npm run max17:stats
+```
+
 ### Voice and Camera Sensor
 
 The HUD can now act as a small local sensory shell around Max17:

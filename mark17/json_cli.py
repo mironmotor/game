@@ -7,6 +7,7 @@ mark17 is the internal package name for the Max17 core.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import sys
 import tempfile
@@ -30,6 +31,8 @@ from mark17.planner import plan_next_actions
 from mark17.outcome import OUTCOME_EVENT_TYPES, evaluate_outcome, update_outcome_synapses
 from mark17.growth import grow_synapses
 from mark17.concepts import ConceptGrounding
+from mark17.concept_compression import compress_to_concept
+from mark17.graph_stats import GraphStats, collect_store_counts
 
 ALLOWED_EVENTS = frozenset(
     {
@@ -47,6 +50,8 @@ ALLOWED_EVENTS = frozenset(
         "outcome_partial",
         "action_done",
         "action_skipped",
+        "compress_memory",
+        "graph_stats",
     }
 )
 
@@ -73,7 +78,7 @@ def _as_event(data: dict[str, Any]) -> Event:
         if key not in {"type", "event", "source", "ts"}
     }
 
-    if event_type == "user_message":
+    if event_type in {"user_message", "compress_memory"}:
         text = data.get("message") or data.get("text") or data.get("content") or ""
         payload["text"] = str(text)
     elif event_type == "terminal_error":
@@ -188,6 +193,8 @@ def _recent_consolidated_patterns(brain: Mark17Brain, *, limit: int = 5) -> list
                 "pattern_id": payload.get("pattern_id"),
                 "evidence_count": payload.get("evidence_count"),
                 "strength": payload.get("strength"),
+                "concept": payload.get("concept"),
+                "label": payload.get("label"),
                 "source": payload.get("source") or hit.content.get("source"),
             }
         )
@@ -209,6 +216,58 @@ def _merge_memory(
     if consolidated_patterns is not None:
         memory["consolidated_patterns"] = consolidated_patterns
     result["memory"] = memory
+
+
+def _stable_id(*parts: Any) -> str:
+    raw = json.dumps(parts, ensure_ascii=False, sort_keys=True, default=str)
+    return hashlib.blake2b(raw.encode("utf-8"), digest_size=8).hexdigest()
+
+
+def _event_text(event: Event) -> str:
+    if isinstance(event.payload.get("text"), str):
+        return str(event.payload["text"]).strip()
+    if isinstance(event.payload.get("line"), str):
+        return str(event.payload["line"]).strip()
+    task = event.payload.get("task")
+    if isinstance(task, dict) and task.get("desc"):
+        return str(task["desc"]).strip()
+    if event.payload:
+        return json.dumps(event.payload, ensure_ascii=False, sort_keys=True)[:500]
+    return event.type
+
+
+def _merge_concept_payload(
+    result: dict[str, Any],
+    *,
+    grounding: dict[str, Any] | None = None,
+    compression: dict[str, Any] | None = None,
+) -> None:
+    concepts = result.get("concepts")
+    concepts = concepts if isinstance(concepts, dict) else {}
+    if isinstance(grounding, dict):
+        concepts.update(grounding)
+    if isinstance(compression, dict):
+        primary = compression.get("primary")
+        if isinstance(primary, dict):
+            concepts["primary"] = primary
+        related = compression.get("related")
+        if isinstance(related, list):
+            concepts["related"] = related
+        keywords = compression.get("keywords")
+        if isinstance(keywords, list):
+            concepts["keywords"] = keywords
+        concepts["compression_source"] = compression.get("source", "concept_compression_v0")
+    result["concepts"] = concepts
+
+
+def _apply_event_compression(
+    result: dict[str, Any],
+    event: Event,
+    working_memory: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    compression = compress_to_concept(_event_text(event), working_memory)
+    _merge_concept_payload(result, compression=compression)
+    return compression
 
 
 def normalize(result: dict[str, Any]) -> dict[str, Any]:
@@ -257,6 +316,9 @@ def normalize(result: dict[str, Any]) -> dict[str, Any]:
     concepts = result.get("concepts")
     if isinstance(concepts, dict):
         normalized["concepts"] = concepts
+    graph_stats = result.get("graph_stats")
+    if isinstance(graph_stats, dict):
+        normalized["graph_stats"] = graph_stats
     return normalized
 
 
@@ -313,6 +375,100 @@ def _apply_growth(
     )
 
 
+def _apply_compression_synapses(
+    synapse_graph: SynapseGraph,
+    event: Event,
+    result: dict[str, Any],
+    *,
+    memory_id: int | None = None,
+) -> None:
+    concepts = result.get("concepts")
+    if not isinstance(concepts, dict):
+        return
+    primary = concepts.get("primary")
+    if not isinstance(primary, dict):
+        return
+    concept_id = str(primary.get("concept") or "").strip()
+    if not concept_id:
+        return
+
+    event_id = _stable_id("event", event.type, event.signature())
+    confidence = primary.get("confidence")
+    weight = float(confidence) if isinstance(confidence, (int, float)) else 0.45
+    if concept_id == "context" and weight < 0.3 and event.type != "compress_memory":
+        return
+    touched: list[int] = []
+
+    def touch(source_type: str, source_id: str, target_type: str, target_id: str, weight_scale: float, summary: str) -> None:
+        if not source_id or not target_id:
+            return
+        touched.append(
+            synapse_graph.upsert(
+                source_type=source_type,
+                source_id=source_id,
+                target_type=target_type,
+                target_id=target_id,
+                relation_type="compressed_as",
+                weight=max(0.05, min(1.0, weight * weight_scale)),
+                metadata={
+                    "summary": summary[:180],
+                    "source": "concept_compression_v0",
+                    "event_type": event.type,
+                },
+            )
+        )
+
+    label = str(primary.get("label") or concept_id)
+    touch("event", event_id, "compressed_concept", concept_id, 1.0, f"{event.type} compressed as {label}")
+    if memory_id is not None:
+        touch("memory", str(memory_id), "compressed_concept", concept_id, 0.95, f"memory compressed as {label}")
+
+    memory = result.get("memory")
+    if isinstance(memory, dict):
+        for key, source_type in (("recalled", "memory"), ("semantic", "semantic_memory")):
+            rows = memory.get(key)
+            if not isinstance(rows, list):
+                continue
+            for row in rows[:3]:
+                if isinstance(row, dict) and row.get("id") is not None:
+                    touch(source_type, str(row["id"]), "compressed_concept", concept_id, 0.72, f"{source_type} compressed as {label}")
+
+    consolidation = result.get("consolidation")
+    if isinstance(consolidation, dict):
+        patterns = consolidation.get("patterns")
+        if isinstance(patterns, list):
+            for pattern in patterns[:5]:
+                if not isinstance(pattern, dict):
+                    continue
+                pattern_id = str(pattern.get("pattern_id") or "")
+                pattern_concept = str(pattern.get("concept") or concept_id)
+                pattern_label = str(pattern.get("label") or label)
+                touch("pattern", pattern_id, "compressed_concept", pattern_concept, 0.9, f"pattern compressed as {pattern_label}")
+
+    related = concepts.get("related")
+    if isinstance(related, list):
+        for item in related[:3]:
+            if isinstance(item, dict) and item.get("concept"):
+                touch(
+                    "compressed_concept",
+                    concept_id,
+                    "compressed_concept",
+                    str(item["concept"]),
+                    0.62,
+                    f"{label} relates to {item.get('label') or item['concept']}",
+                )
+
+    if touched:
+        summary = {
+            "updated": len(touched),
+            "top": synapse_graph._fetch_synapses(touched, limit=3),
+        }
+        result["synapses"] = _merge_synapse_summaries(
+            result.get("synapses") if isinstance(result.get("synapses"), dict) else None,
+            summary,
+        )
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Max17 JSON bridge over mark17 core")
     parser.add_argument("--state-dir", type=Path, default=Path(__file__).resolve().parent / "state")
@@ -360,11 +516,17 @@ def _handle_event(event: Event, args: argparse.Namespace, state_dir: Path) -> di
     vector_memory = VectorMemory(state_dir)
     synapse_graph = SynapseGraph(state_dir)
     working_memory = WorkingMemory(state_dir)
+    if event.type == "graph_stats" and not args.warmup:
+        return _handle_graph_stats(event, state_dir, synapse_graph)
     concept_grounding = ConceptGrounding(state_dir)
     if args.warmup:
         _run_warmup(args.warmup, brain, vector_memory, synapse_graph, working_memory, concept_grounding)
     if event.type == "working_memory_reset":
         return _handle_working_memory_reset(working_memory)
+    if event.type == "graph_stats":
+        return _handle_graph_stats(event, state_dir, synapse_graph)
+    if event.type == "compress_memory":
+        return _handle_compress_memory(event, brain, vector_memory, synapse_graph, working_memory)
     if event.type == "sleep_consolidation":
         result = _handle_sleep_consolidation(event, brain, vector_memory, synapse_graph)
         result["working_memory"] = working_memory.get_context()
@@ -379,12 +541,17 @@ def _handle_event(event: Event, args: argparse.Namespace, state_dir: Path) -> di
         semantic=_semantic_memories(event, vector_memory),
         consolidated_patterns=_recent_consolidated_patterns(brain) if event.type == "user_message" else [],
     )
-    result["concepts"] = concept_grounding.match_event(event)
+    _merge_concept_payload(result, grounding=concept_grounding.match_event(event))
     evaluation = evaluate_event(event, result)
     result["self_evaluation"] = evaluation.to_dict()
     result["next_adaptation"] = _next_adaptation(result)
     if event.type in {"user_message", "task_created", "task_completed", "deadline_failed", "terminal_error", "system_state", "environment_observation"}:
         result["working_memory"] = working_memory.update_from_event(event, result, result["self_evaluation"])
+    _apply_event_compression(
+        result,
+        event,
+        result.get("working_memory") if isinstance(result.get("working_memory"), dict) else None,
+    )
     result["synapses"] = synapse_graph.update_from_event(event, result, result["self_evaluation"])
     result["plan"] = plan_next_actions(
         event,
@@ -397,6 +564,7 @@ def _handle_event(event: Event, args: argparse.Namespace, state_dir: Path) -> di
         result["answer"] = answer
         if event.type in {"user_message", "task_created", "task_completed", "deadline_failed", "terminal_error", "system_state", "environment_observation"}:
             result["working_memory"] = working_memory.update_from_event(event, result, result["self_evaluation"])
+    _apply_compression_synapses(synapse_graph, event, result)
     _apply_growth(synapse_graph, event, result, result["self_evaluation"])
     if evaluation.store_memory:
         brain.memory.remember(
@@ -513,6 +681,110 @@ def _handle_outcome_event(
     return result
 
 
+def _handle_graph_stats(
+    event: Event,
+    state_dir: Path,
+    synapse_graph: SynapseGraph,
+) -> dict[str, Any]:
+    stats = GraphStats(synapse_graph).collect(limit=5)
+    stats["stores"] = collect_store_counts(state_dir)
+    result: dict[str, Any] = {
+        "ok": True,
+        "event_type": event.type,
+        "route": "graph_stats",
+        "memory": {},
+        "plasticity": {
+            "confidence": 1.0,
+            "action": "measure_graph",
+            "learned": False,
+        },
+        "llm": {
+            "status": "skipped",
+            "text": "LLM отключён для graph_stats.",
+            "latency_ms": 0.0,
+        },
+        "confidence": 1.0,
+        "next_adaptation": "Рост к 10 000 граф-синапсов измерен. Следующий шаг — добавлять только полезные связи.",
+        "self_evaluation": {
+            "score": 1.0,
+            "reason": "graph stats collected",
+            "store_memory": False,
+            "reinforce": "measure synapse growth",
+        },
+        "graph_stats": stats,
+    }
+    answer = compose_answer(event, result, result["self_evaluation"])
+    if answer:
+        result["answer"] = answer
+    return result
+
+
+def _handle_compress_memory(
+    event: Event,
+    brain: Mark17Brain,
+    vector_memory: VectorMemory,
+    synapse_graph: SynapseGraph,
+    working_memory: WorkingMemory,
+) -> dict[str, Any]:
+    working_context = working_memory.get_context()
+    compression = compress_to_concept(_event_text(event), working_context)
+    primary = compression.get("primary") if isinstance(compression, dict) else {}
+    primary = primary if isinstance(primary, dict) else {}
+    confidence = float(primary.get("confidence")) if isinstance(primary.get("confidence"), (int, float)) else 0.35
+    evaluation = {
+        "score": confidence,
+        "reason": f"compressed memory as {primary.get('label') or primary.get('concept') or 'context'}",
+        "store_memory": True,
+        "reinforce": str(primary.get("label") or primary.get("concept") or ""),
+    }
+    result: dict[str, Any] = {
+        "ok": True,
+        "event_type": event.type,
+        "route": "compression",
+        "memory": {
+            "recalled": [],
+            "semantic": [],
+        },
+        "plasticity": {
+            "confidence": confidence,
+            "action": "compress_memory",
+            "learned": True,
+        },
+        "llm": {
+            "status": "skipped",
+            "text": "LLM отключён для compress_memory.",
+            "latency_ms": 0.0,
+        },
+        "confidence": confidence,
+        "next_adaptation": "Используй сжатый смысловой узел как будущую точку recall и планирования.",
+        "self_evaluation": evaluation,
+        "working_memory": working_context,
+    }
+    _merge_concept_payload(result, compression=compression)
+    concept_event = Event(
+        type="compressed_concept",
+        payload={
+            "text": _event_text(event),
+            "compression": compression,
+            "source_event": event.type,
+        },
+        source=event.source,
+    )
+    memory_id = brain.memory.remember(
+        concept_event,
+        hint=f"{primary.get('label') or primary.get('concept')}: {_event_text(event)[:160]}",
+        action="concept_crystallization",
+    )
+    vector_memory.remember(concept_event, evaluation)
+    result["memory"]["compressed_stored_id"] = memory_id
+    _apply_compression_synapses(synapse_graph, event, result, memory_id=memory_id)
+    answer = compose_answer(event, result, evaluation)
+    if answer:
+        result["answer"] = answer
+    brain.plasticity.save()
+    return result
+
+
 def _handle_working_memory_reset(working_memory: WorkingMemory) -> dict[str, Any]:
     state = working_memory.reset()
     return {
@@ -590,7 +862,13 @@ def _handle_sleep_consolidation(
             "reinforce": "sleep consolidation",
         },
     }
+    if patterns:
+        compression = compress_to_concept(
+            " ".join(str(pattern.get("summary") or "") for pattern in patterns if isinstance(pattern, dict))
+        )
+        _merge_concept_payload(result, compression=compression)
     result["synapses"] = synapse_graph.update_from_event(event, result, result["self_evaluation"])
+    _apply_compression_synapses(synapse_graph, event, result)
     answer = compose_answer(event, result, result["self_evaluation"])
     if answer:
         result["answer"] = answer
@@ -618,6 +896,12 @@ def _run_warmup(
         if event.type == "working_memory_reset":
             working_memory.reset()
             continue
+        if event.type == "graph_stats":
+            _handle_graph_stats(event, brain.memory.db_path.parent, synapse_graph)
+            continue
+        if event.type == "compress_memory":
+            _handle_compress_memory(event, brain, vector_memory, synapse_graph, working_memory)
+            continue
         if event.type == "sleep_consolidation":
             _handle_sleep_consolidation(event, brain, vector_memory, synapse_graph)
             continue
@@ -625,12 +909,17 @@ def _run_warmup(
             _handle_outcome_event(event, brain, vector_memory, synapse_graph, working_memory)
             continue
         result = brain.handle(event)
-        result["concepts"] = concept_grounding.match_event(event)
+        _merge_concept_payload(result, grounding=concept_grounding.match_event(event))
         evaluation = evaluate_event(event, result)
         result["self_evaluation"] = evaluation.to_dict()
         result["next_adaptation"] = _next_adaptation(result)
         if event.type in {"user_message", "task_created", "task_completed", "deadline_failed", "terminal_error", "system_state", "environment_observation"}:
             result["working_memory"] = working_memory.update_from_event(event, result, result["self_evaluation"])
+        _apply_event_compression(
+            result,
+            event,
+            result.get("working_memory") if isinstance(result.get("working_memory"), dict) else None,
+        )
         result["synapses"] = synapse_graph.update_from_event(event, result, result["self_evaluation"])
         result["plan"] = plan_next_actions(
             event,
@@ -643,6 +932,7 @@ def _run_warmup(
             result["answer"] = answer
             if event.type in {"user_message", "task_created", "task_completed", "deadline_failed", "terminal_error", "system_state", "environment_observation"}:
                 working_memory.update_from_event(event, result, result["self_evaluation"])
+        _apply_compression_synapses(synapse_graph, event, result)
         _apply_growth(synapse_graph, event, result, result["self_evaluation"])
         if evaluation.store_memory:
             brain.memory.remember(
