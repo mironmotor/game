@@ -25,6 +25,7 @@ from mark17.responder import compose_answer
 from mark17.vector_memory import VectorMemory
 from mark17.synapse_graph import SynapseGraph
 from mark17.consolidation import ConsolidationEngine
+from mark17.voice_state import VoiceProfiles, process_voice_event
 
 ALLOWED_EVENTS = frozenset(
     {
@@ -35,6 +36,7 @@ ALLOWED_EVENTS = frozenset(
         "terminal_error",
         "system_state",
         "sleep_consolidation",
+        "voice_state",
     }
 )
 
@@ -67,6 +69,9 @@ def _as_event(data: dict[str, Any]) -> Event:
     elif event_type == "terminal_error":
         line = data.get("line") or data.get("message") or data.get("text") or ""
         payload["line"] = str(line)
+    elif event_type == "voice_state":
+        payload["user_id"] = str(data.get("user_id") or data.get("user") or "anon")
+        payload["context"] = str(data.get("context") or data.get("text") or "")
 
     return Event(
         type=event_type,
@@ -230,6 +235,9 @@ def normalize(result: dict[str, Any]) -> dict[str, Any]:
     consolidation = result.get("consolidation")
     if isinstance(consolidation, dict):
         normalized["consolidation"] = consolidation
+    voice = result.get("voice")
+    if isinstance(voice, dict):
+        normalized["voice"] = voice
     return normalized
 
 
@@ -283,6 +291,8 @@ def _handle_event(event: Event, args: argparse.Namespace, state_dir: Path) -> di
         _run_warmup(args.warmup, brain, vector_memory, synapse_graph)
     if event.type == "sleep_consolidation":
         return _handle_sleep_consolidation(event, brain, vector_memory, synapse_graph)
+    if event.type == "voice_state":
+        return _handle_voice_state(event, brain, vector_memory, synapse_graph, state_dir)
 
     result = brain.handle(event)
     _merge_memory(
@@ -317,6 +327,73 @@ def _handle_event(event: Event, args: argparse.Namespace, state_dir: Path) -> di
         vector_memory.remember(event, result["self_evaluation"])
     brain.plasticity.save()
     return result
+
+
+def _handle_voice_state(
+    event: Event,
+    brain: Mark17Brain,
+    vector_memory: VectorMemory,
+    synapse_graph: SynapseGraph,
+    state_dir: Path,
+) -> dict[str, Any]:
+    """Read the speaker's state from voice acoustics + context, remember it."""
+    profiles = VoiceProfiles(state_dir)
+    user_id = str(event.payload.get("user_id") or "anon")
+    context = str(event.payload.get("context") or "")
+    voice = process_voice_event(user_id, event.payload, profiles, context=context)
+
+    hint = f"{user_id}: {voice['label']} (F0 {voice['acoustics']['f0']} Гц / {voice['note']})"
+    result: dict[str, Any] = {
+        "ok": True,
+        "event_type": event.type,
+        "route": "voice_state",
+        "voice": voice,
+        "memory": {"hint": hint},
+        "plasticity": {
+            "confidence": round(max(voice["arousal"], voice["tension"]), 3),
+            "action": "voice_state_read",
+            "learned": not voice["baseline"]["warming_up"],
+        },
+        "llm": {},
+        "decision": {"reason": hint, "confidence": round(voice["arousal"], 3)},
+        "next_adaptation": _voice_adaptation(voice),
+    }
+
+    # Remember this reading so Max17 builds a history of the person.
+    brain.memory.remember(
+        Event(
+            type="remember",
+            payload={
+                "note": hint,
+                "user_id": user_id,
+                "arousal": voice["arousal"],
+                "valence": voice["valence"],
+                "tension": voice["tension"],
+                "context": context,
+            },
+            source="voice",
+        ),
+        hint=hint,
+        action="voice_state",
+    )
+    # Link the voice state to the dialogue context in the synapse graph.
+    evaluation = {"score": voice["arousal"], "reason": hint, "reinforce": voice["label"]}
+    result["synapses"] = synapse_graph.update_from_event(event, result, evaluation)
+    brain.plasticity.save()
+    return result
+
+
+def _voice_adaptation(voice: dict[str, Any]) -> str:
+    """Suggest how Max17 should adapt its tone to the detected state."""
+    if voice["baseline"]["warming_up"]:
+        return f"Учу голос пользователя ({voice['baseline']['obs']} набл.) — пока строю норму."
+    if voice["tension"] > 0.66:
+        return "Человек напряжён — отвечай мягче, короче, снизь темп."
+    if voice["arousal"] > 0.66 and voice["valence"] > 0.55:
+        return "Человек воодушевлён — поддержи энергию, можно глубже в тему."
+    if voice["arousal"] < 0.35 and voice["valence"] < 0.45:
+        return "Человек подавлен — добавь поддержки, не дави фактами."
+    return "Состояние ровное — продолжай в текущем тоне."
 
 
 def _handle_sleep_consolidation(
