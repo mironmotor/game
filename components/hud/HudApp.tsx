@@ -2,6 +2,7 @@
 
 import React, { useState, useRef, useEffect, useCallback, Component, type ReactNode, type ErrorInfo } from 'react';
 import { GameHud, type HudNavId } from './GameHud';
+import VoiceSignature from './VoiceSignature';
 import { useGameState } from '@/hooks/use-game-state';
 import { sendMax17Event, type Max17Response } from '@/lib/max17-client';
 import './hud.css';
@@ -126,6 +127,8 @@ function HudContent() {
   const [activeNav, setActiveNav] = useState<HudNavId>('codex');
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [max17State, setMax17State] = useState<Pick<Max17Response, 'route' | 'confidence' | 'next_adaptation'> | null>(null);
+  const [voiceOpen, setVoiceOpen] = useState(false);
+  const [conversationContext, setConversationContext] = useState('');
   const recognitionRef = useRef<SpeechRecognition | null>(null);
   const systemStateSentRef = useRef(false);
   const knownTaskIdsRef = useRef<Set<string>>(new Set());
@@ -212,6 +215,7 @@ function HudContent() {
     if (!input.trim() || isLoading) return;
     const userMsg = input.trim();
     setInput('');
+    setConversationContext(userMsg);
     setIsLoading(true);
     setAgiMessage(`Вы: ${userMsg} MAX17: обрабатываю событие...`);
 
@@ -392,6 +396,21 @@ function HudContent() {
             handleSend();
           }
         }}
+      />
+      <button
+        type="button"
+        onClick={() => setVoiceOpen(true)}
+        className="fixed bottom-[72px] right-4 z-20 flex h-12 w-12 items-center justify-center rounded-full border border-cyan-300/30 bg-[#0a0818]/80 text-lg shadow-[0_0_22px_rgba(0,242,255,0.2)] backdrop-blur-md transition hover:scale-105 hover:border-cyan-300/60"
+        title="Звуковая сигнатура — Max17 читает состояние по голосу"
+        aria-label="Открыть звуковую сигнатуру"
+      >
+        ◉
+      </button>
+      <VoiceSignature
+        open={voiceOpen}
+        onClose={() => setVoiceOpen(false)}
+        context={conversationContext}
+        userId="miron"
       />
       {max17State && (
         <div

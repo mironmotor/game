@@ -1,0 +1,13 @@
+{
+  "type": "voice_state",
+  "user_id": "miron",
+  "context": "опять не работает, бесит",
+  "acoustics": {
+    "f0": 150,
+    "register": 0.55,
+    "brightness": 0.7,
+    "jitter": 0.35,
+    "energy": 0.8,
+    "voiced": true
+  }
+}

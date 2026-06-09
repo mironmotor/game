@@ -12,6 +12,7 @@ const ALLOWED_EVENTS = new Set([
   'terminal_error',
   'system_state',
   'sleep_consolidation',
+  'voice_state',
 ]);
 
 const DEFAULT_RESPONSE = {

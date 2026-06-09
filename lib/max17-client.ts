@@ -61,6 +61,36 @@ export interface Max17Consolidation {
   patterns?: Max17Pattern[];
 }
 
+export interface Max17VoiceState {
+  user_id?: string;
+  note?: string;
+  arousal?: number;
+  valence?: number;
+  tension?: number;
+  label?: string;
+  deviation?: Record<string, number>;
+  baseline_obs?: number;
+  context?: string;
+  acoustics?: {
+    f0?: number;
+    register?: number;
+    brightness?: number;
+    jitter?: number;
+    energy?: number;
+    voiced?: boolean;
+  };
+  baseline?: { obs?: number; f0?: number; note?: string; warming_up?: boolean };
+  recent?: Array<{
+    ts?: number;
+    arousal?: number;
+    valence?: number;
+    tension?: number;
+    label?: string;
+    context?: string;
+    f0?: number;
+  }>;
+}
+
 export interface Max17Response {
   ok?: boolean;
   route: string;
@@ -73,6 +103,7 @@ export interface Max17Response {
   synapses?: Max17Synapses;
   consolidation?: Max17Consolidation;
   self_evaluation?: Max17SelfEvaluation;
+  voice?: Max17VoiceState;
   raw?: Record<string, unknown>;
   error?: string;
   details?: unknown;
