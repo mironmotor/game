@@ -465,6 +465,8 @@ outcome_failure
 outcome_partial
 action_done
 action_skipped
+internal_dream
+generate_synergies
 ```
 
 ### Enable local LLM routing
@@ -483,3 +485,88 @@ Optional environment variables:
 PYTHON_BIN=python3
 MAX17_STATE_DIR=/absolute/path/to/state
 ```
+
+## Concept-Synapse model
+
+Max17 treats stored meaning like a small brain: concepts are "neurons" and the
+weighted relations in SynapseGraph are "synapses". On a `user_message` Max17 no
+longer answers from a generic template — it reads the already-loaded result
+(top synapses, semantic memory, working memory) and runs a lightweight,
+deterministic hot path. No external APIs, no extra database scans per request.
+
+### Concept codec
+
+`mark17/concept_codec.py` compresses raw text into a short list of concept nodes
+(`core`, `memory`, `synapse`, `planning`, `action`, `outcome`, `intuition`,
+`subconscious`, `dream`, `performance`, …) with a confidence and the source
+terms that triggered each one. It extends the rules already used by
+`concept_compression.py` so the vocabulary stays consistent.
+
+### Active graph (hot path)
+
+`mark17/active_graph.py` builds the *currently active subgraph* from fields that
+were already loaded for the request: activated concepts, the top synapses, and
+the semantic memory echoes. Vague input is resolved against working-memory
+context, and "what next?" phrasing injects `planning → action → outcome`. The
+block reports `cold_reads: 0` to make the no-new-scan guarantee visible.
+
+### Causal decoder
+
+`mark17/causal_decoder.py` turns the active subgraph into short Russian causal
+phrases ("ядро → память → план → действие") plus an `answer_hint` for the next
+verifiable step. It explains the active wiring; it does not claim understanding.
+
+### Intuitive memory
+
+`mark17/intuitive_memory.py` is the fast, associative counterpart to deliberate
+recall: a "felt sense" reading built only from the active subgraph, with a
+confidence derived from concept strength and supporting echoes.
+
+```bash
+npm run max17:intuition
+```
+
+This warms up a session and asks a vague "что дальше?" — the answer should be
+grounded in active concepts and the causal summary, with `cold_reads: 0`.
+
+### Internal dreaming
+
+`mark17/dreamer.py` recombines concepts that already co-occur in recent
+experience into small synergy patterns (`memory → planning → outcome`, …). It is
+a manual pass triggered by an `internal_dream` (or `generate_synergies`) event —
+there is no autonomous background loop. The orchestrator persists each synergy
+into Hippocampus, VectorMemory, and SynapseGraph (`synergy_with` relations).
+
+```bash
+npm run max17:dream
+```
+
+### Environment reasoning (camera over time)
+
+`mark17/environment.py` turns the stream of camera `environment_observation`
+events into a small, persistent *environment model*. Instead of treating each
+frame in isolation, it compares the current frame to a rolling history (kept in
+working memory, on disk) and reasons across time:
+
+- **думает над окружением** — detects transitions: light up/down, motion
+  appeared/stopped, scene changed (`desk → active-room`), stable streaks;
+- **делает выводы** — short Russian conclusions ("стало темнее", "появилось
+  движение — ты вернулся", "движение стихло — возможно, ты отошёл") plus a
+  presence inference (`present` / `away` / `uncertain`);
+- **вливает в память** — the most useful conclusion is written to Hippocampus and
+  VectorMemory;
+- **изучает** — it reinforces concept→concept synapses (`environment → vision`,
+  `vision → memory`, and `environment → agency` when you are present) so the
+  associations strengthen the more it observes.
+
+It still does **no** object/face recognition and uploads no images — it reasons
+only over the local frame statistics the HUD computes, so it stays on the hot
+path (no extra database scans per frame).
+
+```bash
+npm run max17:env
+```
+
+This feeds two frames in sequence (stable desk → darker room with movement) and
+checks that the second frame detects the light/scene transitions, infers
+presence, and proposes associations to learn.

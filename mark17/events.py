@@ -23,6 +23,8 @@ KNOWN_TYPES = frozenset(
         "graph_stats",
         "neural_seed",
         "neural_walk",
+        "web_research",
+        "web_ingest",
     }
 )
 

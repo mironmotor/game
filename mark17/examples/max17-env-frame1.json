@@ -1,0 +1,20 @@
+{
+  "type": "environment_observation",
+  "text": "Vision summary: стабильное рабочее место; средний свет; кадр почти неподвижен",
+  "source": "smoke_camera",
+  "camera": {
+    "active": true,
+    "width": 1280,
+    "height": 720,
+    "brightness": 0.62,
+    "contrast": 0.3,
+    "motion_score": 0.02,
+    "stability": 0.95,
+    "dominant_tone": "neutral",
+    "light_level": "medium",
+    "motion_level": "still",
+    "scene_mode": "desk",
+    "summary": "стабильное рабочее место; средний свет; кадр почти неподвижен",
+    "privacy": "no_image_uploaded"
+  }
+}

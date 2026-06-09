@@ -275,3 +275,33 @@ class WorkingMemory:
         state["updated_at"] = _now()
         self.save(state)
         return self.get_context()
+
+    def get_env_history(self, *, limit: int = 8) -> list[dict[str, Any]]:
+        """Rolling buffer of recent environment observations.
+
+        Stored alongside the working-memory state on disk so it survives
+        across one-shot invocations, but intentionally kept out of
+        ``get_context`` so the public JSON contract stays small.
+        """
+
+        state = self.load()
+        history = state.get("env_history")
+        if not isinstance(history, list):
+            return []
+        clean = [item for item in history if isinstance(item, dict)]
+        return clean[-limit:]
+
+    def push_env_observation(self, observation: dict[str, Any], *, limit: int = 8) -> list[dict[str, Any]]:
+        if not isinstance(observation, dict):
+            return self.get_env_history(limit=limit)
+        state = self.load()
+        history = state.get("env_history")
+        if not isinstance(history, list):
+            history = []
+        history = [item for item in history if isinstance(item, dict)]
+        entry = dict(observation)
+        entry["observed_at"] = _now()
+        history.append(entry)
+        state["env_history"] = history[-limit:]
+        self.save(state)
+        return state["env_history"]

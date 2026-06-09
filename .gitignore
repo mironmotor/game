@@ -14,4 +14,7 @@ mark17/output/
 mark17/state/
 mark17/state/*.db
 
+# Code-agent scratch workspace (agent-generated files).
+code-workspace/
+
 out/

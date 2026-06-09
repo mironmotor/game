@@ -1,0 +1,20 @@
+{
+  "type": "environment_observation",
+  "text": "Vision summary: активная среда с движением; слабый свет; заметное движение",
+  "source": "smoke_camera",
+  "camera": {
+    "active": true,
+    "width": 1280,
+    "height": 720,
+    "brightness": 0.18,
+    "contrast": 0.22,
+    "motion_score": 0.21,
+    "stability": 0.4,
+    "dominant_tone": "warm",
+    "light_level": "low",
+    "motion_level": "moving",
+    "scene_mode": "active-room",
+    "summary": "активная среда с движением; слабый свет; заметное движение",
+    "privacy": "no_image_uploaded"
+  }
+}

@@ -129,6 +129,8 @@ def collect_store_counts(state_dir: Path) -> dict[str, int]:
         "memories": ("memory.db", "memories"),
         "vector_memories": ("vector_memory.db", "vector_memories"),
         "concepts": ("concepts.db", "concepts"),
+        "web_sources": ("source_memory.db", "web_sources"),
+        "web_facts": ("source_memory.db", "web_facts"),
     }
     counts: dict[str, int] = {}
     for key, (db_name, table) in tables.items():

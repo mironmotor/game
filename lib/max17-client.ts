@@ -177,6 +177,8 @@ export interface Max17Response {
   graph_stats?: Max17GraphStats;
   self_evaluation?: Max17SelfEvaluation;
   raw?: Record<string, unknown>;
+  route_intent?: { route?: string; confidence?: number; reason?: string };
+  dispatch?: { route?: string; instruction?: string };
   error?: string;
   details?: unknown;
 }
@@ -190,10 +192,10 @@ function normalizeBasePath(basePath: string | undefined) {
   return basePath.startsWith('/') ? basePath : `/${basePath}`;
 }
 
-function getMax17ApiPath() {
+function getApiPath(endpoint: string) {
   const envBasePath = normalizeBasePath(process.env.NEXT_PUBLIC_BASE_PATH);
   if (envBasePath) {
-    return `${envBasePath}/api/max17`;
+    return `${envBasePath}/api/${endpoint}`;
   }
 
   const fallbackBasePath = normalizeBasePath(FALLBACK_BASE_PATH);
@@ -203,10 +205,23 @@ function getMax17ApiPath() {
     (window.location.pathname === fallbackBasePath ||
       window.location.pathname.startsWith(`${fallbackBasePath}/`))
   ) {
-    return `${fallbackBasePath}/api/max17`;
+    return `${fallbackBasePath}/api/${endpoint}`;
   }
 
-  return '/api/max17';
+  return `/api/${endpoint}`;
+}
+
+function getMax17ApiPath() {
+  return getApiPath('max17');
+}
+
+// Headers for the token-gated agent routes. NEXT_PUBLIC_* is inlined at build;
+// on a localhost-only server this is fine and adds defense-in-depth.
+function agentHeaders(): Record<string, string> {
+  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+  const token = process.env.NEXT_PUBLIC_MAX17_API_TOKEN;
+  if (token) headers['x-max17-token'] = token;
+  return headers;
 }
 
 export async function sendMax17Event(event: Record<string, unknown>): Promise<Max17Response> {
@@ -225,4 +240,165 @@ export async function sendMax17Event(event: Record<string, unknown>): Promise<Ma
   }
 
   return payload;
+}
+
+export interface CodeAgentStep {
+  action: string;
+  thought?: string;
+  path?: string | null;
+  command?: string | null;
+  observation?: string;
+}
+
+export interface CodeLessonUsed {
+  lesson: string;
+  success: boolean;
+  target?: string;
+  score?: number;
+}
+
+export interface CodeAgentResult {
+  ok: boolean;
+  answer?: string;
+  model?: string;
+  steps?: CodeAgentStep[];
+  files_changed?: string[];
+  restore?: Record<string, string | null>;
+  target?: string;
+  reverted?: string[];
+  workspace?: string;
+  error?: string;
+  // Phase 2 — code-outcome memory + verify→fix.
+  success?: boolean;
+  verify?: { last_exit?: number | null; fix_attempts?: number; passed?: boolean | null };
+  lessons_used?: CodeLessonUsed[];
+  memory_id?: number | null;
+}
+
+export async function sendCodeAgent(payload: {
+  instruction?: string;
+  history?: { role: string; content: string }[];
+  target?: 'sandbox' | 'project';
+  mode?: 'revert';
+  restore?: Record<string, string | null>;
+  max_steps?: number;
+}): Promise<CodeAgentResult> {
+  const response = await fetch(getApiPath('code'), {
+    method: 'POST',
+    headers: agentHeaders(),
+    body: JSON.stringify(payload),
+  });
+  return (await response.json()) as CodeAgentResult;
+}
+
+export interface DesktopAction {
+  action: string;
+  risk?: 'read' | 'write';
+  needs_confirm?: boolean;
+  summary?: string;
+  thought?: string;
+  app?: string;
+  text?: string;
+  keys?: string;
+  command?: string;
+  answer?: string;
+  [key: string]: unknown;
+}
+
+export interface DesktopMessage {
+  role: string;
+  content: string;
+}
+
+export interface DesktopResult {
+  ok: boolean;
+  proposal?: DesktopAction;
+  observation?: string;
+  messages?: DesktopMessage[];
+  model?: string;
+  done?: boolean;
+  error?: string;
+}
+
+export async function sendDesktopAgent(payload: {
+  mode: 'propose' | 'execute';
+  instruction?: string;
+  messages?: DesktopMessage[];
+  approved_action?: DesktopAction;
+}): Promise<DesktopResult> {
+  const response = await fetch(getApiPath('desktop'), {
+    method: 'POST',
+    headers: agentHeaders(),
+    body: JSON.stringify(payload),
+  });
+  return (await response.json()) as DesktopResult;
+}
+
+export interface DevBranch {
+  title: string;
+  why?: string;
+  steps?: string[];
+  risk?: string;
+  effort?: string;
+  files?: string[];
+}
+
+export interface ArchitectResult {
+  ok: boolean;
+  branches?: DevBranch[];
+  model?: string;
+  error?: string;
+}
+
+export async function sendArchitect(payload: {
+  focus?: string;
+  count?: number;
+}): Promise<ArchitectResult> {
+  const response = await fetch(getApiPath('architect'), {
+    method: 'POST',
+    headers: agentHeaders(),
+    body: JSON.stringify(payload),
+  });
+  return (await response.json()) as ArchitectResult;
+}
+
+export interface LlmPreset {
+  id: string;
+  label: string;
+  model: string;
+  local?: boolean;
+  available: boolean;
+  active: boolean;
+}
+
+export interface LlmRoleRoute {
+  id: string;
+  label: string;
+  active?: string | null;
+  resolved?: string | null;
+  auto: boolean;
+  model?: string;
+}
+
+export interface LlmConfig {
+  ok: boolean;
+  presets?: LlmPreset[];
+  roles?: LlmRoleRoute[];
+  active?: string | null;
+  env_model?: string;
+  error?: string;
+}
+
+export async function getLlmConfig(): Promise<LlmConfig> {
+  const response = await fetch(getApiPath('llm-config'), { method: 'GET' });
+  return (await response.json()) as LlmConfig;
+}
+
+export async function setLlmModel(id: string, role?: string): Promise<LlmConfig> {
+  const response = await fetch(getApiPath('llm-config'), {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ id, role }),
+  });
+  return (await response.json()) as LlmConfig;
 }

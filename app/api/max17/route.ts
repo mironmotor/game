@@ -1,6 +1,7 @@
 import { spawn } from 'node:child_process';
 import path from 'node:path';
 import { NextResponse } from 'next/server';
+import { sendToDaemon } from './max17-daemon';
 
 export const runtime = 'nodejs';
 
@@ -23,6 +24,11 @@ const ALLOWED_EVENTS = new Set([
   'graph_stats',
   'neural_seed',
   'neural_walk',
+  'internal_dream',
+  'generate_synergies',
+  'web_research',
+  'web_ingest',
+  'autonomous_research',
 ]);
 
 const DEFAULT_RESPONSE = {
@@ -60,6 +66,10 @@ function runMax17Bridge(event: unknown) {
       args.push('--no-llm');
     }
 
+    if (process.env.MAX17_WEB_ENABLED === 'true') {
+      args.push('--web-enabled');
+    }
+
     const child = spawn(process.env.PYTHON_BIN || 'python3', args, {
       cwd: process.cwd(),
       stdio: ['pipe', 'pipe', 'pipe'],
@@ -67,10 +77,14 @@ function runMax17Bridge(event: unknown) {
 
     let stdout = '';
     let stderr = '';
+    // One-shot fallback pays a full cold start (Python + numpy import + ~52MB DB
+    // open) every call, which can exceed 15s under disk contention, plus the
+    // optional Gonka voice call on a user_message. Give it a generous budget so
+    // the last-resort path can actually complete.
     const timeout = setTimeout(() => {
       child.kill('SIGTERM');
       reject(new Error('Max17 bridge timeout'));
-    }, 15000);
+    }, 45000);
 
     child.stdout.on('data', (chunk) => {
       stdout += chunk.toString();
@@ -129,7 +143,17 @@ export async function POST(request: Request) {
   }
 
   try {
-    const result = await runMax17Bridge(body);
+    let result: Record<string, unknown>;
+    if (process.env.MAX17_DAEMON !== 'false') {
+      try {
+        result = await sendToDaemon(body);
+      } catch {
+        // Daemon down/desynced: never hard-degrade, fall back to one-shot bridge.
+        result = await runMax17Bridge(body);
+      }
+    } else {
+      result = await runMax17Bridge(body);
+    }
     const status = result.ok === false ? 502 : 200;
     return NextResponse.json(
       {

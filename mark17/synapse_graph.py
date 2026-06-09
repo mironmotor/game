@@ -34,6 +34,7 @@ RELATION_TYPES = frozenset(
         "bridges_to",
         "grounds",
         "activates",
+        "synergy_with",
     }
 )
 

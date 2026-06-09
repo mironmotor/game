@@ -126,6 +126,8 @@ CAPABILITY_ANSWER = (
     "вспоминаю похожие события, оцениваю свои реакции через critic/self-evaluation, "
     "отслеживаю задачи created/completed/failed, принимаю первые camera-observation события "
     "и строю первый локальный concept-grounding слой для базовых смыслов и сенсорных опор. "
+    "Ещё у меня есть экспериментальный Web Sense: я могу принять web_research событие, "
+    "сохранить source-backed факты отдельно от личной памяти и связать их с графом. "
     "Gemini без ключа не использую; этот ответ собран deterministic composer. "
     f"{REALITY_CONTACT_HINT}"
 )
@@ -599,6 +601,10 @@ def _memory_question_answer(event: Event, result: dict[str, Any]) -> dict[str, A
     else:
         parts.append("Synapse Graph уже хранит ассоциации, но для этого запроса сильная связь пока не выделилась.")
 
+    labels = _active_concept_labels(result, limit=4)
+    if labels:
+        parts.append("Сейчас активны смысловые узлы: " + ", ".join(labels) + ".")
+
     parts.append(
         "Пока это ранняя память: я не понимаю её как полноценный LLM, "
         "но уже могу находить похожие смыслы, сохранять паттерны и усиливать связи."
@@ -634,6 +640,50 @@ def _debug_answer(result: dict[str, Any], self_evaluation: dict[str, Any] | None
 def _working_memory_context(result: dict[str, Any]) -> dict[str, Any]:
     context = result.get("working_memory")
     return context if isinstance(context, dict) else {}
+
+
+def _causal_block(result: dict[str, Any]) -> dict[str, Any]:
+    block = result.get("causal_decoder")
+    return block if isinstance(block, dict) else {}
+
+
+def _active_graph_block(result: dict[str, Any]) -> dict[str, Any]:
+    block = result.get("active_graph")
+    return block if isinstance(block, dict) else {}
+
+
+def _causal_summary(result: dict[str, Any]) -> str:
+    summary = str(_causal_block(result).get("summary") or "").strip()
+    # Skip the "nothing active" placeholder — it adds no signal.
+    if not summary or summary.startswith("Сейчас нет"):
+        return ""
+    return summary
+
+
+def _causal_hint(result: dict[str, Any]) -> str:
+    return str(_causal_block(result).get("answer_hint") or "").strip()
+
+
+def _active_concept_labels(result: dict[str, Any], *, limit: int = 4) -> list[str]:
+    concepts = _active_graph_block(result).get("activated_concepts")
+    labels: list[str] = []
+    if isinstance(concepts, list):
+        for concept in concepts:
+            if not isinstance(concept, dict):
+                continue
+            label = str(concept.get("label") or concept.get("id") or "").strip()
+            if label and label not in labels:
+                labels.append(label)
+            if len(labels) >= limit:
+                break
+    return labels
+
+
+def _intuition_text(result: dict[str, Any]) -> str:
+    block = result.get("intuition")
+    if not isinstance(block, dict):
+        return ""
+    return str(block.get("intuition") or "").strip()
 
 
 def _plan_answer(result: dict[str, Any], confidence: float) -> dict[str, Any] | None:
@@ -718,10 +768,51 @@ def _working_memory_next_answer(result: dict[str, Any], confidence: float) -> di
     }
 
 
+def _causal_next_answer(result: dict[str, Any], confidence: float) -> dict[str, Any] | None:
+    causal = _causal_summary(result)
+    hint = _causal_hint(result)
+    if not hint:
+        return None
+    parts: list[str] = []
+    if causal:
+        parts.append(causal)
+    parts.append(hint)
+    return {
+        "text": " ".join(parts),
+        "source": "composer",
+        "confidence": round(confidence, 4),
+    }
+
+
 def _vague_status_answer(result: dict[str, Any], confidence: float) -> dict[str, Any]:
+    causal = _causal_summary(result)
+    labels = _active_concept_labels(result, limit=3)
+    hint = _causal_hint(result)
+
     contextual = _working_memory_next_answer(result, confidence)
     if contextual:
+        prefix_parts: list[str] = []
+        if causal:
+            prefix_parts.append(causal)
+        elif labels:
+            prefix_parts.append("Сейчас в фокусе: " + ", ".join(labels) + ".")
+        if prefix_parts:
+            contextual["text"] = " ".join(prefix_parts) + " " + contextual["text"]
         return contextual
+
+    if causal or labels:
+        parts: list[str] = []
+        if causal:
+            parts.append(causal)
+        elif labels:
+            parts.append("Сейчас в фокусе: " + ", ".join(labels) + ".")
+        parts.append(hint or "Сформулируй задачу чуть конкретнее, и я предложу следующий маленький шаг.")
+        return {
+            "text": " ".join(parts),
+            "source": "composer",
+            "confidence": round(confidence, 4),
+        }
+
     return {
         "text": (
             "Я на связи в Game. Могу принять сообщение, вспомнить релевантную память, "
@@ -1008,17 +1099,181 @@ def _environment_observation_answer(event: Event, response: dict[str, Any]) -> d
     if isinstance(stability, (int, float)):
         stability_text = f" Стабильность около {round(float(stability) * 100)}%, движение: {motion}."
 
-    text = (
-        f"Vision Summary v0.1: {scene}. Свет — {light}, общий тон — {tone}."
-        f"{brightness_text}{stability_text}"
-        f"{f' Сводка: {summary}.' if summary else ''} "
-        "Пока я не распознаю объекты как vision-модель, "
-        "но уже могу сохранять такие наблюдения в память и связывать их с контекстом."
-    )
+    environment = response.get("environment")
+    environment = environment if isinstance(environment, dict) else {}
+    conclusions = environment.get("conclusions")
+    conclusions = conclusions if isinstance(conclusions, list) else []
+    presence = str(environment.get("presence") or "")
+    count = environment.get("observations_count")
+
+    presence_text = {
+        "present": " Похоже, ты рядом.",
+        "away": " Похоже, тебя сейчас нет в кадре.",
+    }.get(presence, "")
+
+    if conclusions:
+        reasoning = " ".join(str(c) for c in conclusions[:2])
+        memory_text = ""
+        if isinstance(count, int) and count > 1:
+            memory_text = f" Я держу в памяти последние {min(count, 8)} наблюдений и сравниваю их."
+        text = (
+            f"Vision Summary v0.1: {scene}. Свет — {light}, движение — {motion}. "
+            f"{reasoning}{presence_text}{memory_text} "
+            "Я не распознаю объекты как vision-модель, но уже думаю над средой во времени "
+            "и связываю выводы с памятью."
+        )
+    else:
+        text = (
+            f"Vision Summary v0.1: {scene}. Свет — {light}, общий тон — {tone}."
+            f"{brightness_text}{stability_text}"
+            f"{f' Сводка: {summary}.' if summary else ''}{presence_text} "
+            "Пока я не распознаю объекты как vision-модель, "
+            "но уже могу сохранять такие наблюдения в память и связывать их с контекстом."
+        )
+
+    env_confidence = environment.get("confidence")
+    confidence = float(env_confidence) if isinstance(env_confidence, (int, float)) else _confidence(response)
     return {
         "text": text,
         "source": "composer",
-        "confidence": round(_confidence(response), 4),
+        "confidence": round(confidence, 4),
+    }
+
+
+def _web_research_answer(response: dict[str, Any]) -> dict[str, Any]:
+    web = response.get("web")
+    if not isinstance(web, dict):
+        return {
+            "text": "Я получил web_research, но блок источников пока пустой.",
+            "source": "composer",
+            "confidence": 0.2,
+        }
+
+    facts = web.get("facts")
+    facts = facts if isinstance(facts, list) else []
+    sources = web.get("sources")
+    sources = sources if isinstance(sources, list) else []
+    status = str(web.get("status") or "unknown")
+    query = str(web.get("query") or "").strip()
+    stored = int(web.get("stored_facts") or 0)
+    network = bool(web.get("network_enabled"))
+    target = int(web.get("target_web_synapses") or 1_000_000)
+
+    claims: list[str] = []
+    for fact in facts[:3]:
+        if not isinstance(fact, dict):
+            continue
+        claim = _clean_public_text(fact.get("claim"), limit=180)
+        if claim and claim not in claims:
+            claims.append(claim)
+
+    source_names: list[str] = []
+    for source in sources[:2]:
+        if not isinstance(source, dict):
+            continue
+        title = str(source.get("title") or source.get("domain") or source.get("url") or "").strip()
+        mode = str(source.get("mode") or status)
+        if title:
+            source_names.append(f"{title} ({mode})")
+
+    if claims:
+        text = (
+            f"Я обработал web research по запросу «{query or 'контекст'}» "
+            f"и сохранил {stored} source-backed фактов. "
+            "Главное: "
+            + "; ".join(claims[:3])
+            + "."
+        )
+    else:
+        text = (
+            f"Я запустил web research по запросу «{query or 'контекст'}», "
+            "но полезные факты пока не выделились."
+        )
+
+    if source_names:
+        text += " Источники: " + "; ".join(source_names) + "."
+    text += (
+        f" Сеть {'включена' if network else 'выключена'}; цель слоя — расти к {target} "
+        "проверяемым web-синапсам, не смешивая источники с личной памятью."
+    )
+
+    return {
+        "text": text,
+        "source": "composer",
+        "confidence": round(_confidence(response) or 0.62, 4),
+    }
+
+
+def _knowledge_gap_answer(response: dict[str, Any], confidence: float) -> dict[str, Any] | None:
+    gap = response.get("knowledge_gap")
+    if not isinstance(gap, dict) or not gap.get("needed"):
+        return None
+    markers = gap.get("markers")
+    if not isinstance(markers, list) or not markers:
+        return None
+
+    # Retrieval-first: prefer to answer with source-backed facts that were
+    # gathered (by meaning) before this composer ran. We only keep facts that
+    # actually overlap the question, so an offline curated fallback never gets
+    # presented as if it were about the asked topic.
+    web = response.get("web") if isinstance(response.get("web"), dict) else {}
+    facts = web.get("facts") if isinstance(web.get("facts"), list) else []
+    query = str(web.get("query") or "").strip()
+    network = bool(web.get("network_enabled"))
+    query_tokens = _relevance_tokens(query)
+
+    # A curated domain anchor whose triggers matched the question is on-topic by
+    # construction, so it is accepted even with no surface-token overlap (an
+    # English MDN claim answering a Russian question). Take those first so the
+    # authoritative source leads, then fill with live facts that overlap the
+    # question by meaning.
+    def _ordered(items: list[Any]) -> list[dict[str, Any]]:
+        anchors = [f for f in items if isinstance(f, dict) and f.get("mode") == "curated_match"]
+        rest = [f for f in items if isinstance(f, dict) and f.get("mode") != "curated_match"]
+        return anchors + rest
+
+    claims: list[str] = []
+    source_names: list[str] = []
+    for fact in _ordered(facts):
+        claim = _clean_public_text(fact.get("claim"), limit=180)
+        if not claim or claim in claims:
+            continue
+        is_anchor = fact.get("mode") == "curated_match"
+        if not is_anchor and query_tokens and not (query_tokens & _relevance_tokens(claim)):
+            continue
+        claims.append(claim)
+        title = str(fact.get("title") or fact.get("domain") or fact.get("url") or "").strip()
+        if title and title not in source_names:
+            source_names.append(title)
+        if len(claims) >= 3:
+            break
+
+    if claims:
+        text = "Сначала поискал по смыслам в источниках, потом отвечаю. Нашёл: " + "; ".join(claims) + "."
+        if source_names:
+            text += " Источники: " + "; ".join(source_names[:2]) + "."
+        text += " Сохранил это как source-backed знание и связал с графом, отдельно от личной памяти."
+        return {
+            "text": text,
+            "source": "composer",
+            "confidence": round(max(confidence, 0.6), 4),
+        }
+
+    if network:
+        text = (
+            "Поискал по смыслам в источниках, но релевантных фактов пока не выделилось. "
+            "Уточни запрос или дай ссылку — переотправлю web_research и закрою пробел источником."
+        )
+    else:
+        text = (
+            "Здесь нужен источник, а не догадка, а web-доступ сейчас выключен. "
+            "Включи MAX17_WEB_ENABLED=true — "
+            "я найду по смыслам и сохраню source-backed факты в SynapseGraph."
+        )
+    return {
+        "text": text,
+        "source": "composer",
+        "confidence": round(confidence, 4),
     }
 
 
@@ -1056,6 +1311,9 @@ def compose_answer(
     if event.type == "environment_observation":
         return _environment_observation_answer(event, response)
 
+    if event.type in {"web_research", "web_ingest"}:
+        return _web_research_answer(response)
+
     if event.type != "user_message":
         return None
 
@@ -1082,6 +1340,19 @@ def compose_answer(
         planned = _plan_answer(response, confidence)
         if planned:
             return planned
+        contextual = _working_memory_next_answer(response, confidence)
+        if contextual:
+            causal = _causal_summary(response)
+            if causal:
+                contextual["text"] = causal + " " + contextual["text"]
+            return contextual
+        causal_next = _causal_next_answer(response, confidence)
+        if causal_next:
+            return causal_next
+
+    gap_answer = _knowledge_gap_answer(response, confidence)
+    if gap_answer:
+        return gap_answer
 
     concept_answer = _concept_grounding_answer(event, response)
     if concept_answer:
@@ -1098,12 +1369,16 @@ def compose_answer(
         contextual = _working_memory_next_answer(response, confidence)
         if contextual:
             return contextual
+        causal_next = _causal_next_answer(response, confidence)
+        if causal_next:
+            return causal_next
 
     recalled = _first_recalled_summary(response, user_text)
     semantic = _first_semantic_summary(response, user_text)
     next_step = _next_adaptation(response, user_text)
 
-    parts = ["Я понял запрос."]
+    causal = _causal_summary(response)
+    parts = [causal] if causal else ["Я понял запрос."]
     if semantic:
         parts.append(f"В памяти есть похожий смысл: {semantic}.")
     elif recalled:
@@ -1114,6 +1389,10 @@ def compose_answer(
     parts.append(_confidence_tone(confidence))
     if next_step:
         parts.append(f"Полезный следующий шаг: {next_step}.")
+    else:
+        hint = _causal_hint(response)
+        if hint:
+            parts.append(hint)
     parts.append(REALITY_CONTACT_HINT)
 
     return {

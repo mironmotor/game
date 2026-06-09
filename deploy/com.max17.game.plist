@@ -1,0 +1,48 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Max17 / Game — local "deployment" as a macOS LaunchAgent.
+  Runs the production server (npm run start:hud) at login, restarts it if it dies,
+  bound to localhost:3002. Serves http://localhost:3002/game
+
+  Install:
+    1) npm run build                 # build once (and after any code change)
+    2) cp deploy/com.max17.game.plist ~/Library/LaunchAgents/
+    3) launchctl load ~/Library/LaunchAgents/com.max17.game.plist
+  Stop:    launchctl unload ~/Library/LaunchAgents/com.max17.game.plist
+  Logs:    /tmp/max17-game.out.log  /  /tmp/max17-game.err.log
+-->
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.max17.game</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>/bin/zsh</string>
+        <string>-lc</string>
+        <string>cd "/Users/gost/Documents/game 2" &amp;&amp; exec npm run start:hud</string>
+    </array>
+
+    <key>WorkingDirectory</key>
+    <string>/Users/gost/Documents/game 2</string>
+
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>MAX17_DAEMON</key>
+        <string>true</string>
+        <key>MAX17_WEB_ENABLED</key>
+        <string>true</string>
+    </dict>
+
+    <key>RunAtLoad</key>
+    <true/>
+
+    <key>KeepAlive</key>
+    <true/>
+
+    <key>StandardOutPath</key>
+    <string>/tmp/max17-game.out.log</string>
+    <key>StandardErrorPath</key>
+    <string>/tmp/max17-game.err.log</string>
+</dict>
+</plist>
