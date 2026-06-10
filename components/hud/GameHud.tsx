@@ -83,6 +83,7 @@ export interface GameHudProps {
   onToggleArchitect: () => void;
   onToggleModels: () => void;
   onToggleVoice: () => void;
+  onToggleAppearance?: () => void;
   onNavChange: (id: HudNavId) => void;
   onMissionToggle: (taskId: string) => void;
   onKeyDown?: (e: KeyboardEvent) => void;
@@ -141,7 +142,7 @@ function SystemStatusIcon() {
   );
 }
 
-function HudDock() {
+function HudDock({ onOpenAppearance }: { onOpenAppearance?: () => void }) {
   const wm = useWindowManager();
   const bg = getBackground(wm.background);
 
@@ -168,8 +169,8 @@ function HudDock() {
         <button
           type="button"
           className="hud-dock-tool"
-          onClick={() => wm.cycleBackground()}
-          title="Сменить фон"
+          onClick={() => (onOpenAppearance ? onOpenAppearance() : wm.cycleBackground())}
+          title="Вид: темы, фоны и генератор снов"
         >
           <ImageIcon size={13} />
           <span>{bg.label}</span>
@@ -229,6 +230,7 @@ export function GameHud(props: GameHudProps) {
     onToggleArchitect,
     onToggleModels,
     onToggleVoice,
+    onToggleAppearance,
     onNavChange,
     onMissionToggle,
     onKeyDown,
@@ -255,7 +257,7 @@ export function GameHud(props: GameHudProps) {
         <p className="hud-core-caption">{promptText}</p>
       </div>
 
-      <HudDock />
+      <HudDock onOpenAppearance={onToggleAppearance} />
 
       {/* ===================== WINDOWS ===================== */}
       <HudWindow id="rank" accent="purple">

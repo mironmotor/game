@@ -4,6 +4,7 @@
 // the cognitive core for memory, but the UI reacts immediately.
 
 import { getBackground, matchBackgroundId } from './backgrounds';
+import { getTheme, matchThemeId } from './themes';
 import type { WindowId } from './window-manager';
 
 export type CameraDir = 'left' | 'right' | 'up' | 'down' | 'center';
@@ -14,6 +15,7 @@ export type UiCommand =
   | { kind: 'toggle'; target: WindowId }
   | { kind: 'minimize'; target: WindowId }
   | { kind: 'background'; value: string }
+  | { kind: 'theme'; value: string }
   | { kind: 'reset' }
   | { kind: 'showAll' }
   | { kind: 'closeAll' }
@@ -123,6 +125,17 @@ export function interpretUiCommand(raw: string): InterpretedCommand | null {
   const wantsOpen = RE_OPEN.test(t);
   const wantsMin = RE_MIN.test(t);
   const allWord = RE_ALL.test(t);
+
+  // Theme — «тема пурпур», «смени тему на матрицу».
+  if (/(тема|тему|theme)/.test(t)) {
+    const themeId = matchThemeId(t);
+    if (themeId) {
+      return {
+        command: { kind: 'theme', value: themeId },
+        reply: `Ставлю тему «${getTheme(themeId).label}».`,
+      };
+    }
+  }
 
   // Background — only on explicit change intent (next / a known background id),
   // never because a sentence merely mentions the word "фон".

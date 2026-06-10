@@ -5,6 +5,8 @@ import { GameHud, type HudNavId } from './GameHud';
 import { useGameState } from '@/hooks/use-game-state';
 import { sendMax17Event, type Max17Response } from '@/lib/max17-client';
 import { VoiceSignature } from './VoiceSignature';
+import { AppearancePanel } from './AppearancePanel';
+import { applyTheme, initTheme } from './themes';
 import { WindowManagerProvider, useWindowManager } from './window-manager';
 import { interpretUiCommand, type UiCommand } from './ui-commands';
 import { detectFaces, prewarmFaceApi, type FaceReading } from './face-detect';
@@ -337,6 +339,12 @@ function HudContent() {
   const [architectOpen, setArchitectOpen] = useState(false);
   const [modelsOpen, setModelsOpen] = useState(false);
   const [voiceOpen, setVoiceOpen] = useState(false);
+  const [appearanceOpen, setAppearanceOpen] = useState(false);
+
+  // Restore the persisted HUD theme (CSS variable overrides) on mount.
+  useEffect(() => {
+    initTheme();
+  }, []);
   const [isSpeechEnabled, setIsSpeechEnabled] = useState(false);
   const [isSpeaking, setIsSpeaking] = useState(false);
   const [cameraStatus, setCameraStatus] = useState<CameraStatus>('off');
@@ -530,6 +538,9 @@ function HudContent() {
         case 'background':
           if (command.value === 'next') wm.cycleBackground();
           else wm.setBackground(command.value);
+          break;
+        case 'theme':
+          applyTheme(command.value);
           break;
         case 'reset':
           wm.resetLayout();
@@ -1115,6 +1126,7 @@ function HudContent() {
         onToggleArchitect={() => setArchitectOpen((v) => !v)}
         onToggleModels={() => setModelsOpen((v) => !v)}
         onToggleVoice={() => setVoiceOpen((v) => !v)}
+        onToggleAppearance={() => setAppearanceOpen((v) => !v)}
         onNavChange={setActiveNav}
         onMissionToggle={handleMissionToggle}
         onKeyDown={(e) => {
@@ -1168,6 +1180,13 @@ function HudContent() {
         />
       )}
       {modelsOpen && <ModelSwitcher onClose={() => setModelsOpen(false)} />}
+      {appearanceOpen && (
+        <AppearancePanel
+          onClose={() => setAppearanceOpen(false)}
+          background={wm.background}
+          onSetBackground={(id) => wm.setBackground(id)}
+        />
+      )}
       {voiceOpen && (
         <VoiceSignature
           onClose={() => setVoiceOpen(false)}

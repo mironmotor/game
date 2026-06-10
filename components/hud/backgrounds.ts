@@ -54,7 +54,41 @@ export const HUD_BACKGROUNDS: HudBackground[] = [
 
 export const DEFAULT_BACKGROUND_ID = 'miami';
 
+// «Сон» — a procedurally generated wallpaper (dream-canvas.ts) stored locally
+// as a data-URL. Not in the preset list: it's dynamic, one slot, regenerated
+// at will. Fully offline.
+export const DREAM_BACKGROUND_ID = 'dream';
+const DREAM_KEY = 'max17_dream_bg';
+
+export function saveDreamBackground(dataUrl: string): boolean {
+  try {
+    localStorage.setItem(DREAM_KEY, dataUrl);
+    return true;
+  } catch {
+    return false; // quota/private mode — caller falls back gracefully
+  }
+}
+
+export function loadDreamBackground(): string | null {
+  try {
+    return localStorage.getItem(DREAM_KEY);
+  } catch {
+    return null;
+  }
+}
+
 export function getBackground(id: string | undefined): HudBackground {
+  if (id === DREAM_BACKGROUND_ID && typeof window !== 'undefined') {
+    const dataUrl = loadDreamBackground();
+    if (dataUrl) {
+      return {
+        id: DREAM_BACKGROUND_ID,
+        label: 'Сон',
+        css: `center / cover no-repeat url('${dataUrl}'), #05030f`,
+        scrim: 0.3,
+      };
+    }
+  }
   return HUD_BACKGROUNDS.find((b) => b.id === id) ?? HUD_BACKGROUNDS[0];
 }
 
@@ -74,6 +108,7 @@ export function matchBackgroundId(text: string): string | null {
     cyber: ['кибер', 'cyber', 'син', 'blue', 'неон', 'neon'],
     sunset: ['закат', 'sunset', 'розов', 'pink', 'тепл', 'warm'],
     space: ['космос', 'space', 'чёрн', 'черн', 'black', 'тёмн', 'темн', 'dark', 'ar', 'очки', 'glasses'],
+    dream: ['сон', 'сны', 'dream', 'подсознан', 'полотно', 'образ'],
   };
   for (const [id, words] of Object.entries(aliases)) {
     if (words.some((w) => t.includes(w))) return id;
