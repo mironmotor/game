@@ -57,6 +57,11 @@ CASES = [
         {"energy": 0.3, "pitch_hz": 140, "pitch_var": 18.0, "tempo": 2.3, "pause_ratio": 0.35, "voiced_ratio": 0.6, "duration_sec": 5.0},
         "спокоен",
     ),
+    (
+        "rich_tense",  # rich path: HUD VoiceSignature axes (jitter/shimmer/HNR + arousal/valence/tension)
+        {"arousal": 0.8, "valence": 0.4, "tension": 0.75, "jitter": 0.6, "shimmer": 0.5, "hnr": 6, "f0": 190, "f1": 600, "f2": 1600},
+        "напряжён",
+    ),
 ]
 
 
@@ -84,8 +89,8 @@ def main() -> int:
 
         # Trend history persisted (3 readings).
         history = stores.working_memory.get_voice_history()
-        if len(history) != 3:
-            _fail(f"voice history expected 3 entries, got {len(history)}")
+        if len(history) != len(CASES):
+            _fail(f"voice history expected {len(CASES)} entries, got {len(history)}")
 
     print(json.dumps({"ok": True, "cases": out_cases, "memory_hit": hits[0].summary[:60], "history": len(history)}, ensure_ascii=False))
     return 0

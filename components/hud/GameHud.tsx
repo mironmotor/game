@@ -4,6 +4,7 @@ import type { ReactNode, KeyboardEvent } from 'react';
 import {
   BookOpen,
   Briefcase,
+  AudioLines,
   Camera,
   Globe,
   Image as ImageIcon,
@@ -67,6 +68,7 @@ export interface GameHudProps {
   isDesktopOpen: boolean;
   isArchitectOpen: boolean;
   isModelsOpen: boolean;
+  isVoiceOpen: boolean;
   coreStatus: NeuralCoreStatus;
   activeNav: HudNavId;
   friendsBadge?: number;
@@ -80,6 +82,7 @@ export interface GameHudProps {
   onToggleDesktop: () => void;
   onToggleArchitect: () => void;
   onToggleModels: () => void;
+  onToggleVoice: () => void;
   onNavChange: (id: HudNavId) => void;
   onMissionToggle: (taskId: string) => void;
   onKeyDown?: (e: KeyboardEvent) => void;
@@ -211,6 +214,7 @@ export function GameHud(props: GameHudProps) {
     isDesktopOpen,
     isArchitectOpen,
     isModelsOpen,
+    isVoiceOpen,
     coreStatus,
     activeNav,
     friendsBadge = 2,
@@ -224,6 +228,7 @@ export function GameHud(props: GameHudProps) {
     onToggleDesktop,
     onToggleArchitect,
     onToggleModels,
+    onToggleVoice,
     onNavChange,
     onMissionToggle,
     onKeyDown,
@@ -459,6 +464,15 @@ export function GameHud(props: GameHudProps) {
               title="Выбор модели ИИ (Ollama / Gemini / Groq)"
             >
               <Cpu size={18} />
+            </button>
+            <button
+              type="button"
+              className={`hud-icon-btn ${isVoiceOpen ? 'active' : ''}`}
+              onClick={onToggleVoice}
+              aria-label={isVoiceOpen ? 'Закрыть голос Макса' : 'Голос Макса: состояние по голосу'}
+              title="Голос Макса: читает состояние по голосу (возбуждение / позитив / напряжение)"
+            >
+              <AudioLines size={18} />
             </button>
             <button
               type="button"
