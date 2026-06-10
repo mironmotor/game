@@ -13,6 +13,7 @@ const ALLOWED_EVENTS = new Set([
   'terminal_error',
   'system_state',
   'environment_observation',
+  'voice_observation',
   'sleep_consolidation',
   'working_memory_reset',
   'outcome_success',

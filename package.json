@@ -26,6 +26,7 @@
     "max17:selfgrow": "python3 mark17/synapse_growth_smoke.py",
     "max17:ann": "python3 mark17/ann_smoke.py",
     "max17:bridge": "python3 mark17/bridge_smoke.py",
+    "max17:voicestate": "python3 mark17/voice_smoke.py",
     "max17:codemem": "python3 mark17/code_memory_smoke.py",
     "max17:concepts": "python3 mark17/concepts_smoke.py",
     "max17:stats": "python3 mark17/json_cli.py --no-llm < mark17/examples/max17-graph-stats.json",

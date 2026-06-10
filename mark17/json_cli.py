@@ -34,6 +34,7 @@ from mark17.planner import plan_next_actions
 from mark17.outcome import OUTCOME_EVENT_TYPES, evaluate_outcome, update_outcome_synapses
 from mark17.growth import grow_synapses
 from mark17.synapse_growth import propose_seeds
+from mark17.voice_state import analyze_voice
 from mark17.concepts import ConceptGrounding
 from mark17.concept_compression import compress_to_concept
 from mark17.concept_codec import extract_concepts as codec_extract_concepts
@@ -63,6 +64,7 @@ ALLOWED_EVENTS = frozenset(
         "terminal_error",
         "system_state",
         "environment_observation",
+        "voice_observation",
         "sleep_consolidation",
         "working_memory_reset",
         "outcome_success",
@@ -400,6 +402,68 @@ def _apply_environment_reasoning(
             relation_type=str(assoc.get("relation") or "related_to"),
             weight=float(assoc.get("weight") or 0.5),
             metadata={"origin": "environment_observation", "presence": environment.get("presence")},
+        )
+
+
+def _apply_voice_reasoning(
+    result: dict[str, Any],
+    event: Event,
+    brain: Mark17Brain,
+    vector_memory: VectorMemory,
+    synapse_graph: SynapseGraph,
+    working_memory: WorkingMemory,
+) -> None:
+    """Sound → state: decompose the HUD's voice summary into a user-state reading,
+    remember it (so Phase 5 bridges link it to what was said/seen) and persist the
+    trend. Mirrors _apply_environment_reasoning for the audio modality."""
+    observation = event.payload.get("voice")
+    observation = observation if isinstance(observation, dict) else {}
+    history = working_memory.get_voice_history()
+    voice = analyze_voice(observation, history)
+    result["voice"] = voice
+
+    # Persist this reading so the next observation can reason about the trend.
+    working_memory.push_voice_observation(
+        {"state": voice.get("state"), "arousal": voice.get("arousal"), "trend": voice.get("trend")}
+    )
+
+    conclusions = voice.get("conclusions")
+    conclusion_text = ""
+    if isinstance(conclusions, list) and conclusions:
+        conclusion_text = "; ".join(str(c) for c in conclusions[:2])
+
+    if conclusion_text:
+        confidence = float(voice.get("confidence") or 0.4)
+        voice_event = Event(
+            type="voice_observation",
+            payload={
+                "note": conclusion_text,
+                "state": voice.get("state"),
+                "text": str(event.payload.get("text") or "")[:140],
+            },
+            source="voice",
+        )
+        brain.memory.remember(voice_event, hint=conclusion_text, action="voice_reasoning")
+        vector_memory.remember(
+            voice_event,
+            {"score": confidence, "reason": conclusion_text, "store_memory": True, "reinforce": "voice_state"},
+        )
+
+    for assoc in voice.get("associations", []):
+        if not isinstance(assoc, dict):
+            continue
+        left = str(assoc.get("from") or "")
+        right = str(assoc.get("to") or "")
+        if not left or not right:
+            continue
+        synapse_graph.upsert_synapse(
+            source_type="concept",
+            source_id=left,
+            target_type="concept",
+            target_id=right,
+            relation_type=str(assoc.get("relation") or "related_to"),
+            weight=float(assoc.get("weight") or 0.5),
+            metadata={"origin": "voice_observation", "state": voice.get("state")},
         )
 
 
@@ -1531,7 +1595,7 @@ def _handle_event(event: Event, args: argparse.Namespace, stores: Mark17Stores) 
     evaluation = evaluate_event(event, result)
     result["self_evaluation"] = evaluation.to_dict()
     result["next_adaptation"] = _next_adaptation(result)
-    if event.type in {"user_message", "task_created", "task_completed", "deadline_failed", "terminal_error", "system_state", "environment_observation"}:
+    if event.type in {"user_message", "task_created", "task_completed", "deadline_failed", "terminal_error", "system_state", "environment_observation", "voice_observation"}:
         result["working_memory"] = working_memory.update_from_event(event, result, result["self_evaluation"])
     _apply_event_compression(
         result,
@@ -1552,11 +1616,21 @@ def _handle_event(event: Event, args: argparse.Namespace, stores: Mark17Stores) 
             result["route_intent"] = intent
     if event.type == "environment_observation":
         _apply_environment_reasoning(result, event, brain, vector_memory, synapse_graph, working_memory)
+    if event.type == "voice_observation":
+        _apply_voice_reasoning(result, event, brain, vector_memory, synapse_graph, working_memory)
     answer = compose_answer(event, result, result["self_evaluation"])
     if answer:
         result["answer"] = answer
-        if event.type in {"user_message", "task_created", "task_completed", "deadline_failed", "terminal_error", "system_state", "environment_observation"}:
+        if event.type in {"user_message", "task_created", "task_completed", "deadline_failed", "terminal_error", "system_state", "environment_observation", "voice_observation"}:
             result["working_memory"] = working_memory.update_from_event(event, result, result["self_evaluation"])
+    if event.type == "voice_observation":
+        voice = result.get("voice")
+        if isinstance(voice, dict) and voice.get("summary"):
+            result["answer"] = {
+                "text": str(voice["summary"]),
+                "source": "voice_state",
+                "confidence": float(voice.get("confidence") or 0.5),
+            }
     if event.type == "user_message":
         _synthesize_natural_answer(result, event, working_memory)
     _apply_compression_synapses(synapse_graph, event, result)
@@ -2036,7 +2110,7 @@ def _run_warmup(
         evaluation = evaluate_event(event, result)
         result["self_evaluation"] = evaluation.to_dict()
         result["next_adaptation"] = _next_adaptation(result)
-        if event.type in {"user_message", "task_created", "task_completed", "deadline_failed", "terminal_error", "system_state", "environment_observation"}:
+        if event.type in {"user_message", "task_created", "task_completed", "deadline_failed", "terminal_error", "system_state", "environment_observation", "voice_observation"}:
             result["working_memory"] = working_memory.update_from_event(event, result, result["self_evaluation"])
         _apply_event_compression(
             result,
@@ -2053,7 +2127,7 @@ def _run_warmup(
         answer = compose_answer(event, result, result["self_evaluation"])
         if answer:
             result["answer"] = answer
-            if event.type in {"user_message", "task_created", "task_completed", "deadline_failed", "terminal_error", "system_state", "environment_observation"}:
+            if event.type in {"user_message", "task_created", "task_completed", "deadline_failed", "terminal_error", "system_state", "environment_observation", "voice_observation"}:
                 working_memory.update_from_event(event, result, result["self_evaluation"])
         _apply_compression_synapses(synapse_graph, event, result)
         _apply_growth(synapse_graph, event, result, result["self_evaluation"])

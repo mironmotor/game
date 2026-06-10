@@ -291,6 +291,28 @@ class WorkingMemory:
         clean = [item for item in history if isinstance(item, dict)]
         return clean[-limit:]
 
+    def get_voice_history(self, *, limit: int = 8) -> list[dict[str, Any]]:
+        """Rolling buffer of recent voice-state readings (sound → state sensor),
+        kept separate from env_history so camera and voice trends don't mix."""
+        state = self.load()
+        history = state.get("voice_history")
+        if not isinstance(history, list):
+            return []
+        return [item for item in history if isinstance(item, dict)][-limit:]
+
+    def push_voice_observation(self, observation: dict[str, Any], *, limit: int = 8) -> list[dict[str, Any]]:
+        if not isinstance(observation, dict):
+            return self.get_voice_history(limit=limit)
+        state = self.load()
+        history = state.get("voice_history")
+        history = [item for item in history if isinstance(item, dict)] if isinstance(history, list) else []
+        entry = dict(observation)
+        entry["observed_at"] = _now()
+        history.append(entry)
+        state["voice_history"] = history[-limit:]
+        self.save(state)
+        return state["voice_history"]
+
     def push_env_observation(self, observation: dict[str, Any], *, limit: int = 8) -> list[dict[str, Any]]:
         if not isinstance(observation, dict):
             return self.get_env_history(limit=limit)

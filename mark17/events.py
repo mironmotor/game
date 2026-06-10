@@ -19,6 +19,7 @@ KNOWN_TYPES = frozenset(
         "search_memory",
         "remember",
         "environment_observation",
+        "voice_observation",
         "compress_memory",
         "graph_stats",
         "neural_seed",

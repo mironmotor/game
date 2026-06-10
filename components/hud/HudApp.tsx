@@ -4,6 +4,7 @@ import React, { useState, useRef, useEffect, useCallback, Component, type ReactN
 import { GameHud, type HudNavId } from './GameHud';
 import { useGameState } from '@/hooks/use-game-state';
 import { sendMax17Event, type Max17Response } from '@/lib/max17-client';
+import { VoiceDecomposer } from './voice-decompose';
 import { WindowManagerProvider, useWindowManager } from './window-manager';
 import { interpretUiCommand, type UiCommand } from './ui-commands';
 import { detectFaces, prewarmFaceApi, type FaceReading } from './face-detect';
@@ -363,6 +364,9 @@ function HudContent() {
   const lastActivityRef = useRef<number>(Date.now());
   const lastGrowRef = useRef<number>(0);
   const isLoadingRef = useRef<boolean>(false);
+  // Sound → state: decomposes mic prosody while listening; summaries go to the
+  // core as voice_observation events (see mark17/voice_state.py).
+  const voiceRef = useRef<VoiceDecomposer | null>(null);
 
   useEffect(() => {
     isLoadingRef.current = isLoading;
@@ -814,6 +818,24 @@ function HudContent() {
     };
   }, []);
 
+  // Voice decomposer lifecycle: run while any mic mode is on (manual listen or
+  // hands-free), stop and release the mic otherwise.
+  useEffect(() => {
+    const active = isListening || handsFree;
+    if (!active) {
+      voiceRef.current?.stop();
+      voiceRef.current = null;
+      return;
+    }
+    const decomposer = new VoiceDecomposer();
+    voiceRef.current = decomposer;
+    void decomposer.start();
+    return () => {
+      decomposer.stop();
+      if (voiceRef.current === decomposer) voiceRef.current = null;
+    };
+  }, [isListening, handsFree]);
+
   // Autonomous flywheel (Phase 3): after a few idle minutes the core asks its
   // own questions and learns from the web on its own. Bounded: only when idle,
   // not mid-request, and at most once every few minutes. Server still gates the
@@ -844,6 +866,22 @@ function HudContent() {
     const userMsg = (override ?? input).trim();
     if (!userMsg || isLoading) return;
     lastActivityRef.current = Date.now(); // reset the idle-flywheel timer
+
+    // Sound → state: if the decomposer caught actual speech for this message,
+    // ship the prosody summary as its own observation. The core reads the state
+    // (спокоен/возбуждён/устал…) and bridges link it to what was said.
+    const voiceSummary = voiceRef.current?.summarize(12);
+    if (voiceSummary && voiceSummary.voiced_ratio > 0.15) {
+      voiceRef.current?.reset();
+      void emitMax17HudEvent({
+        type: 'voice_observation',
+        voice: voiceSummary,
+        text: userMsg.slice(0, 140),
+      }).then((res) => {
+        const note = res?.answer?.text;
+        if (note) pushLog(`🎙 ${note}`);
+      });
+    }
 
     // Fast local path: interface control by text or voice ("закрой миссии",
     // "смени фон", "сбрось окна"). Executed instantly; still forwarded to Max17

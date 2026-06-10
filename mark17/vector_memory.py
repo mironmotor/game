@@ -235,6 +235,7 @@ def importance_for_event(event: Event, evaluation: dict[str, Any] | None = None)
         "outcome_failure": 0.74,
         "action_skipped": 0.52,
         "compressed_concept": 0.82,
+        "voice_observation": 0.6,
     }.get(event.type, 0.45)
 
     if event.type == "system_state":
@@ -291,6 +292,21 @@ def text_from_event(event: Event, evaluation: dict[str, Any] | None = None) -> s
             "height",
         ):
             value = camera.get(key)
+            if value is not None:
+                chunks.append(f"{key}:{value}")
+
+    state = payload.get("state")
+    if isinstance(state, str) and state.strip():
+        chunks.append(f"state:{state.strip()}")
+
+    voice = payload.get("voice")
+    if isinstance(voice, dict):
+        for key in ("state", "trend", "summary"):
+            value = voice.get(key)
+            if isinstance(value, str) and value.strip():
+                chunks.append(value.strip())
+        for key in ("arousal", "tempo", "energy", "pause_ratio", "pitch_hz"):
+            value = voice.get(key)
             if value is not None:
                 chunks.append(f"{key}:{value}")
 
