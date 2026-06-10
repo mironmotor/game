@@ -1934,6 +1934,15 @@ def _handle_sleep_consolidation(
         limit = 50
     engine = ConsolidationEngine(brain.memory, vector_memory, synapse_graph)
     consolidation = engine.consolidate_recent(limit=limit)
+    # Phase 5: during sleep also wire cross-cluster bridges (associative insight
+    # links between semantically-close memories of different modalities). Best-
+    # effort — must never break consolidation.
+    try:
+        bridges = engine.bridge_distant(limit=12)
+    except Exception:  # noqa: BLE001
+        bridges = {"bridges_created": 0, "bridges": []}
+    if isinstance(consolidation, dict):
+        consolidation["bridges"] = bridges
     patterns = consolidation.get("patterns") if isinstance(consolidation, dict) else []
     strengths = [
         float(pattern.get("strength", 0.0))

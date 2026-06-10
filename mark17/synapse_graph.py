@@ -25,6 +25,7 @@ RELATION_TYPES = frozenset(
         "routed_to",
         "evaluated_as",
         "related_to",
+        "bridges",
         "recalled_with",
         "completed_after",
         "failed_after",
