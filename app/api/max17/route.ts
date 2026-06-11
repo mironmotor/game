@@ -16,6 +16,7 @@ const ALLOWED_EVENTS = new Set([
   'voice_observation',
   'compile_semantic',
   'meaning_tree',
+  'ultra_think',
   'sleep_consolidation',
   'working_memory_reset',
   'outcome_success',

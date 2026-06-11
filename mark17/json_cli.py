@@ -37,6 +37,7 @@ from mark17.synapse_growth import propose_seeds
 from mark17.voice_state import analyze_voice
 from mark17.semantic_compiler import MIN_SIM as IR_MIN_SIM, SemanticCompiler
 from mark17.meaning_tree import MeaningTree
+from mark17.ultra_orchestrator import decide as ultra_decide, gather_state as ultra_gather_state
 from mark17.concepts import ConceptGrounding
 from mark17.concept_compression import compress_to_concept
 from mark17.concept_codec import extract_concepts as codec_extract_concepts
@@ -70,6 +71,7 @@ ALLOWED_EVENTS = frozenset(
         "voice_observation",
         "compile_semantic",
         "meaning_tree",
+        "ultra_think",
         "sleep_consolidation",
         "working_memory_reset",
         "outcome_success",
@@ -903,6 +905,95 @@ def _dispatch_result(event: Event, intent: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _handle_ultra_think(event: Event, args: argparse.Namespace, stores: Mark17Stores) -> dict[str, Any]:
+    """Phase 8: the core's own agency. Snapshot self-state → ONE decision (LLM
+    role=ultra, or the deterministic policy offline) → EXECUTE it from the safe
+    action menu → record the decision so the next think sees it."""
+    state = ultra_gather_state(stores)
+    decision = ultra_decide(state)
+    action = decision["action"]
+
+    executed: dict[str, Any] = {}
+    try:
+        if action == "research":
+            query = decision.get("query") or ""
+            if query:
+                stores.curiosity.record_gap(query, source="ultra")
+            executed = _run_curiosity_pass(args, stores, limit=2).get("autonomous_research", {})
+        elif action == "compile":
+            sem = SemanticCompiler(stores.state_dir)
+            compiled = 0
+            for memory in stores.brain.memory.recent(limit=20):
+                if getattr(memory, "event_type", "") != "user_message":
+                    continue
+                content = getattr(memory, "content", {})
+                payload = content.get("payload") if isinstance(content, dict) else {}
+                text = str((payload or {}).get("text") or "").strip()
+                if len(text) < 12 or sem.lookup(text):
+                    continue
+                ir = sem.compile_text(text, vector_memory=stores.vector_memory, synapse_graph=stores.synapse_graph)
+                if ir.get("verified"):
+                    compiled += 1
+                if compiled >= 2:
+                    break
+            executed = {"compiled": compiled, "ir_stats": sem.stats()}
+        elif action == "consolidate":
+            engine = ConsolidationEngine(stores.brain.memory, stores.vector_memory, stores.synapse_graph)
+            executed = engine.consolidate_recent(limit=20)
+            try:
+                executed["bridges"] = engine.bridge_distant(limit=8)
+            except Exception:  # noqa: BLE001
+                pass
+            executed.pop("patterns", None)  # keep the response compact
+        elif action == "tree":
+            tree = MeaningTree(stores.state_dir).build(stores.vector_memory)
+            executed = {"root": tree.get("root", {})}
+    except Exception as exc:  # noqa: BLE001 - agency must fail soft
+        executed = {"error": str(exc)[:160]}
+
+    # Remember the decision: the next think (and chat recall) sees what Ultra did.
+    try:
+        stores.vector_memory.remember(
+            Event(
+                type="ultra_decision",
+                payload={"text": f"ultra decision решение оркестратора: {action} {decision.get('query') or ''} — {decision.get('reason') or ''}"},
+                source="ultra",
+            ),
+            {"score": 0.7, "reason": decision.get("reason") or action, "store_memory": True, "reinforce": "ultra"},
+        )
+    except Exception:  # noqa: BLE001
+        pass
+
+    reason = decision.get("reason") or ""
+    text = f"Ультра: выбрал «{action}»{' — ' + reason if reason else ''}."
+    if action == "research" and isinstance(executed, dict):
+        text += f" Выучено фактов: {executed.get('facts_learned', 0)}."
+    elif action == "compile":
+        text += f" Скомпилировано: {executed.get('compiled', 0)}."
+    elif action == "consolidate":
+        text += f" Паттернов: {executed.get('patterns_created', 0)}, мостов: {(executed.get('bridges') or {}).get('bridges_created', 0)}."
+    elif action == "tree":
+        text += f" Карта: {(executed.get('root') or {}).get('conspect', '')[:120]}."
+
+    return {
+        "ok": True,
+        "event_type": event.type,
+        "route": "ultra_orchestrator",
+        "memory": {},
+        "plasticity": {"confidence": 0.65, "action": f"ultra_{action}", "learned": action != "none"},
+        "llm": {"status": "skipped", "text": "Ультра-оркестратор.", "latency_ms": 0.0},
+        "next_adaptation": text,
+        "self_evaluation": {
+            "score": 0.65,
+            "reason": f"ultra decided {action} ({decision.get('decider')})",
+            "store_memory": False,
+            "reinforce": "ultra",
+        },
+        "answer": {"text": text, "source": "ultra_orchestrator", "confidence": 0.65},
+        "ultra": {"state": state, "decision": decision, "executed": executed},
+    }
+
+
 def _handle_meaning_tree(event: Event, stores: Mark17Stores) -> dict[str, Any]:
     """Phase 7: Merkle meaning tree. action=read (one-take view, lazily rebuilt),
     rebuild (force), descend {cluster} (open one branch)."""
@@ -1446,6 +1537,9 @@ def normalize(result: dict[str, Any]) -> dict[str, Any]:
     meaning_tree = result.get("meaning_tree")
     if isinstance(meaning_tree, dict):
         normalized["meaning_tree"] = meaning_tree
+    ultra = result.get("ultra")
+    if isinstance(ultra, dict):
+        normalized["ultra"] = ultra
     web = result.get("web")
     if isinstance(web, dict):
         normalized["web"] = web
@@ -1742,6 +1836,8 @@ def _handle_event(event: Event, args: argparse.Namespace, stores: Mark17Stores) 
         return _handle_compile_semantic(event, stores)
     if event.type == "meaning_tree":
         return _handle_meaning_tree(event, stores)
+    if event.type == "ultra_think":
+        return _handle_ultra_think(event, args, stores)
     if event.type in OUTCOME_EVENT_TYPES:
         return _handle_outcome_event(event, brain, vector_memory, synapse_graph, working_memory)
     if event.type in {"internal_dream", "generate_synergies"}:

@@ -237,6 +237,7 @@ def importance_for_event(event: Event, evaluation: dict[str, Any] | None = None)
         "compressed_concept": 0.82,
         "voice_observation": 0.6,
         "semantic_ir": 0.78,
+        "ultra_decision": 0.7,
     }.get(event.type, 0.45)
 
     if event.type == "system_state":

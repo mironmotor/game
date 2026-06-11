@@ -23,13 +23,14 @@ _STATE = _ROOT / "mark17" / "state" / "llm_active.json"
 
 DEFAULT_BASE_URL = "https://proxy.gonkabroker.com/v1"
 DEFAULT_MODEL = "Qwen/Qwen3-235B-A22B-Instruct-2507-FP8"
-ROLES = ("chat", "code", "architect", "desktop", "bulk")
+ROLES = ("chat", "code", "architect", "desktop", "bulk", "ultra")
 ROLE_LABELS = {
     "chat": "Чат",
     "code": "Код",
     "architect": "Архитектор",
     "desktop": "Desktop",
     "bulk": "Bulk ingest",
+    "ultra": "Ультра-оркестратор",
 }
 ROLE_DEFAULTS = {
     # On Air 2015 local Ollama can be slow; prefer the selected/global cloud
@@ -41,6 +42,9 @@ ROLE_DEFAULTS = {
     # Bulk graph growth should be cheap. If Ollama is not running, it will fail
     # soft and the deterministic pipeline remains the fallback.
     "bulk": "ollama-0.5b",
+    # Ultra decides the core's OWN next action — needs judgment, calls are rare
+    # (idle cadence) and tiny, so the smart model is worth it.
+    "ultra": "gonka-qwen3",
 }
 
 # Resilience ladder per role: if the resolved primary backend fails (provider
@@ -54,6 +58,7 @@ FALLBACK_CHAINS = {
     "architect": ["gonka-qwen3", "gonka-kimi", "gemini"],
     "desktop": ["gonka-qwen3", "gemini", "groq"],
     "bulk": ["ollama-0.5b", "ollama-3b", "gemini"],
+    "ultra": ["gonka-qwen3", "gonka-kimi", "gemini"],
 }
 
 # id -> preset. `key` = literal API key; `key_env` = env var holding the key.

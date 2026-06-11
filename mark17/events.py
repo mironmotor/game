@@ -23,6 +23,8 @@ KNOWN_TYPES = frozenset(
         "compile_semantic",
         "semantic_ir",
         "meaning_tree",
+        "ultra_think",
+        "ultra_decision",
         "compress_memory",
         "graph_stats",
         "neural_seed",

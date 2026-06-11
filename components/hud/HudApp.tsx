@@ -851,9 +851,11 @@ function HudContent() {
       if (now - lastActivityRef.current < IDLE_MS) return;
       if (now - lastGrowRef.current < MIN_GAP_MS) return;
       lastGrowRef.current = now;
-      const res = await emitMax17HudEvent({ type: 'autonomous_research', limit: 3 });
+      // Phase 8: Ultra decides its own next action (research/compile/
+      // consolidate/tree) via the LLM and executes it — true core agency.
+      const res = await emitMax17HudEvent({ type: 'ultra_think' });
       const note = res?.next_adaptation;
-      if (note && /придумал|закрыл/i.test(note)) {
+      if (note && /ультра|придумал|закрыл/i.test(note)) {
         pushLog(`🧠 ${note}`);
         setAgiMessage(`MAX17: ${note}`);
       }

@@ -29,6 +29,7 @@
     "max17:voicestate": "python3 mark17/voice_smoke.py",
     "max17:semantic": "python3 mark17/semantic_smoke.py",
     "max17:tree": "python3 mark17/meaning_tree_smoke.py",
+    "max17:ultra": "python3 mark17/ultra_smoke.py",
     "max17:codemem": "python3 mark17/code_memory_smoke.py",
     "max17:concepts": "python3 mark17/concepts_smoke.py",
     "max17:stats": "python3 mark17/json_cli.py --no-llm < mark17/examples/max17-graph-stats.json",
