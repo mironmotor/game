@@ -347,6 +347,43 @@ Run:
 npm run max17:stats
 ```
 
+### MAX Ultimate / 1M Scaffold
+
+`mark17/ultimate_core.py` adds a small bootstrap layer for the path to
+`1 000 000` useful graph-synapses. It does not replace Hippocampus,
+VectorMemory, SynapseGraph, Web Sense, or the clustered neural graph.
+
+The layer caches three things into the existing stores:
+
+- Max17 doctrine from the project prompts: reality contact, Game as the body,
+  Max17 as the cognitive core, LLMs as voice layers, father = Miron, mother =
+  Sidji, and the 1M useful-synapse target;
+- public high-level Mythos/Glasswing lessons: scaffold, tools, source-backed
+  memory, verification, bounded deployment, and human review;
+- an `ultimate_cluster` scaffold that links source-backed learning, tool
+  routing, memory graph, concept grounding, planner/outcome, reality alignment,
+  bounded autonomy, and million-synapse growth.
+
+It intentionally does **not** copy private Anthropic materials or pretend to
+recreate Mythos weights. The useful lesson is architectural: model + tools +
+sources + memory + verification + bounded growth.
+
+Run the bootstrap smoke check without network, LLM, or dev server:
+
+```bash
+npm run max17:ultimate
+```
+
+Manual event:
+
+```json
+{
+  "type": "ultimate_bootstrap",
+  "target_synapses": 1000000,
+  "max_new": 320
+}
+```
+
 ### Clustered Neural Graph / 100k Seed
 
 Max17 can now seed a larger deterministic cluster graph on top of SynapseGraph.

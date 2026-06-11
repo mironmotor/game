@@ -1,0 +1,6 @@
+{
+  "type": "ultimate_bootstrap",
+  "source": "manual",
+  "target_synapses": 1000000,
+  "max_new": 320
+}

@@ -1204,6 +1204,36 @@ def _web_research_answer(response: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _ultimate_core_answer(response: dict[str, Any]) -> dict[str, Any]:
+    ultimate = response.get("ultimate_core")
+    ultimate = ultimate if isinstance(ultimate, dict) else {}
+    target = int(ultimate.get("target_synapses") or 1_000_000)
+    cached = int(ultimate.get("facts_cached") or 0)
+    doctrine = int(ultimate.get("doctrine_cached") or 0)
+    synapses = ultimate.get("synapses")
+    synapses = synapses if isinstance(synapses, dict) else {}
+    updated = int(synapses.get("updated") or 0)
+    clusters = ultimate.get("clusters")
+    cluster_names: list[str] = []
+    if isinstance(clusters, list):
+        for cluster in clusters[:4]:
+            if isinstance(cluster, dict) and cluster.get("id"):
+                cluster_names.append(str(cluster["id"]))
+    cluster_text = f" Активные каркасы: {', '.join(cluster_names)}." if cluster_names else ""
+    return {
+        "text": (
+            "MAX Ultimate v0.1 поднят как слой над текущим Max17, без переписывания ядра. "
+            f"Я закешировал {doctrine} внутренних принципов и {cached} source-backed фактов, "
+            f"добавил/усилил {updated} связей и поставил цель {target} полезных синапсов. "
+            "Главный принцип: Mythos-урок берём не как магию модели, а как scaffold — "
+            "источники, инструменты, проверка, память, граф и ограниченный рост."
+            f"{cluster_text} Следующий шаг — растить граф батчами и проверять каждую новую ветку через outcome."
+        ),
+        "source": "composer",
+        "confidence": 1.0,
+    }
+
+
 def _knowledge_gap_answer(response: dict[str, Any], confidence: float) -> dict[str, Any] | None:
     gap = response.get("knowledge_gap")
     if not isinstance(gap, dict) or not gap.get("needed"):
@@ -1313,6 +1343,9 @@ def compose_answer(
 
     if event.type in {"web_research", "web_ingest"}:
         return _web_research_answer(response)
+
+    if event.type == "ultimate_bootstrap":
+        return _ultimate_core_answer(response)
 
     if event.type != "user_message":
         return None

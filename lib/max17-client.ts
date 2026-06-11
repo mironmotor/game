@@ -158,6 +158,22 @@ export interface Max17GraphStats {
   stores?: Record<string, number>;
 }
 
+export interface Max17UltimateCore {
+  version?: string;
+  target_synapses?: number;
+  batch_limit?: number;
+  sources_cached?: number;
+  facts_cached?: number;
+  doctrine_cached?: number;
+  memory_ids?: number[];
+  source_ids?: number[];
+  fact_ids?: number[];
+  clusters?: Array<Record<string, unknown>>;
+  synapses?: Max17Synapses;
+  elapsed_ms?: number;
+  source_note?: string;
+}
+
 export interface Max17Response {
   ok?: boolean;
   route: string;
@@ -175,6 +191,7 @@ export interface Max17Response {
   growth?: Max17Growth;
   concepts?: Max17Concepts;
   graph_stats?: Max17GraphStats;
+  ultimate_core?: Max17UltimateCore;
   self_evaluation?: Max17SelfEvaluation;
   raw?: Record<string, unknown>;
   route_intent?: { route?: string; confidence?: number; reason?: string };

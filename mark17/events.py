@@ -26,6 +26,7 @@ KNOWN_TYPES = frozenset(
         "neural_walk",
         "web_research",
         "web_ingest",
+        "ultimate_bootstrap",
     }
 )
 

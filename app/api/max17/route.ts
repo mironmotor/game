@@ -30,6 +30,7 @@ const ALLOWED_EVENTS = new Set([
   'web_research',
   'web_ingest',
   'autonomous_research',
+  'ultimate_bootstrap',
 ]);
 
 const DEFAULT_RESPONSE = {

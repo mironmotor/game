@@ -48,6 +48,7 @@ from mark17.neural_graph import ClusteredNeuralGraph, TARGET_NEURAL_SYNAPSES
 from mark17.curiosity import CuriosityLedger
 from mark17.orchestrator import classify as classify_intent
 from mark17.source_memory import SourceMemory
+from mark17.ultimate_core import MAX_ULTIMATE_TARGET_SYNAPSES, bootstrap_ultimate_core
 from mark17.web_sense import (
     WEB_SYNAPSE_TARGET,
     detect_knowledge_gap,
@@ -81,6 +82,7 @@ ALLOWED_EVENTS = frozenset(
         "web_research",
         "web_ingest",
         "autonomous_research",
+        "ultimate_bootstrap",
     }
 )
 
@@ -1362,6 +1364,9 @@ def normalize(result: dict[str, Any]) -> dict[str, Any]:
     autonomous_research = result.get("autonomous_research")
     if isinstance(autonomous_research, dict):
         normalized["autonomous_research"] = autonomous_research
+    ultimate_core = result.get("ultimate_core")
+    if isinstance(ultimate_core, dict):
+        normalized["ultimate_core"] = ultimate_core
     route_intent = result.get("route_intent")
     if isinstance(route_intent, dict):
         normalized["route_intent"] = route_intent
@@ -1608,6 +1613,8 @@ def _handle_event(event: Event, args: argparse.Namespace, stores: Mark17Stores) 
         return _handle_neural_seed(event, state_dir, synapse_graph)
     if event.type == "neural_walk" and not args.warmup:
         return _handle_neural_walk(event, state_dir, synapse_graph)
+    if event.type == "ultimate_bootstrap" and not args.warmup:
+        return _handle_ultimate_bootstrap(event, stores)
     if args.warmup:
         _run_warmup(args.warmup, brain, vector_memory, synapse_graph, working_memory, concept_grounding, source_memory, args)
     if event.type == "working_memory_reset":
@@ -1618,6 +1625,8 @@ def _handle_event(event: Event, args: argparse.Namespace, stores: Mark17Stores) 
         return _handle_neural_seed(event, state_dir, synapse_graph)
     if event.type == "neural_walk":
         return _handle_neural_walk(event, state_dir, synapse_graph)
+    if event.type == "ultimate_bootstrap":
+        return _handle_ultimate_bootstrap(event, stores)
     if event.type == "compress_memory":
         return _handle_compress_memory(event, brain, vector_memory, synapse_graph, working_memory)
     if event.type == "sleep_consolidation":
@@ -1962,6 +1971,71 @@ def _handle_neural_walk(
     return result
 
 
+def _handle_ultimate_bootstrap(event: Event, stores: Mark17Stores) -> dict[str, Any]:
+    try:
+        target_synapses = int(event.payload.get("target_synapses") or MAX_ULTIMATE_TARGET_SYNAPSES)
+    except (TypeError, ValueError):
+        target_synapses = MAX_ULTIMATE_TARGET_SYNAPSES
+    try:
+        max_new = int(event.payload.get("max_new") or 320)
+    except (TypeError, ValueError):
+        max_new = 320
+
+    ultimate = bootstrap_ultimate_core(
+        memory=stores.brain.memory,
+        vector_memory=stores.vector_memory,
+        synapse_graph=stores.synapse_graph,
+        source_memory=stores.source_memory,
+        target_synapses=target_synapses,
+        max_new=max_new,
+    )
+    stats = GraphStats(stores.synapse_graph, target_synapses=target_synapses).collect(limit=5)
+    stats["stores"] = collect_store_counts(stores.state_dir)
+    stats["neural_graph"] = ClusteredNeuralGraph(stores.synapse_graph).snapshot(limit=5)
+
+    updated = int((ultimate.get("synapses") or {}).get("updated") or 0)
+    result: dict[str, Any] = {
+        "ok": True,
+        "event_type": event.type,
+        "route": "ultimate_core",
+        "memory": {
+            "recalled": [],
+            "semantic": [],
+            "ultimate_memory_ids": ultimate.get("memory_ids", []),
+            "source_memory_counts": stores.source_memory.counts(),
+        },
+        "plasticity": {
+            "confidence": 1.0,
+            "action": "bootstrap_ultimate_core",
+            "learned": bool(updated),
+        },
+        "llm": {
+            "status": "skipped",
+            "text": "LLM отключён для ultimate_bootstrap.",
+            "latency_ms": 0.0,
+        },
+        "confidence": 1.0,
+        "next_adaptation": (
+            "Дальше расти к 1M синапсов через source-backed research, "
+            "controlled neural_seed batches и outcome verification."
+        ),
+        "self_evaluation": {
+            "score": 1.0,
+            "reason": f"MAX Ultimate cached doctrine and public scaffold; updated {updated} synapses",
+            "store_memory": False,
+            "reinforce": "max ultimate scaffold",
+        },
+        "ultimate_core": ultimate,
+        "synapses": ultimate.get("synapses", {"updated": 0, "top": []}),
+        "graph_stats": stats,
+    }
+    answer = compose_answer(event, result, result["self_evaluation"])
+    if answer:
+        result["answer"] = answer
+    stores.brain.plasticity.save()
+    return result
+
+
 def _handle_compress_memory(
     event: Event,
     brain: Mark17Brain,
@@ -2158,6 +2232,19 @@ def _run_warmup(
             continue
         if event.type == "neural_walk":
             _handle_neural_walk(event, brain.memory.db_path.parent, synapse_graph)
+            continue
+        if event.type == "ultimate_bootstrap":
+            warmup_stores = Mark17Stores(
+                state_dir=brain.memory.db_path.parent,
+                brain=brain,
+                vector_memory=vector_memory,
+                synapse_graph=synapse_graph,
+                working_memory=working_memory,
+                concept_grounding=concept_grounding,
+                source_memory=source_memory,
+                curiosity=CuriosityLedger(brain.memory.db_path.parent),
+            )
+            _handle_ultimate_bootstrap(event, warmup_stores)
             continue
         if event.type == "compress_memory":
             _handle_compress_memory(event, brain, vector_memory, synapse_graph, working_memory)
