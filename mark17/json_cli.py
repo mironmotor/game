@@ -35,6 +35,7 @@ from mark17.outcome import OUTCOME_EVENT_TYPES, evaluate_outcome, update_outcome
 from mark17.growth import grow_synapses
 from mark17.synapse_growth import propose_seeds
 from mark17.voice_state import analyze_voice
+from mark17.semantic_compiler import MIN_SIM as IR_MIN_SIM, SemanticCompiler
 from mark17.concepts import ConceptGrounding
 from mark17.concept_compression import compress_to_concept
 from mark17.concept_codec import extract_concepts as codec_extract_concepts
@@ -66,6 +67,7 @@ ALLOWED_EVENTS = frozenset(
         "system_state",
         "environment_observation",
         "voice_observation",
+        "compile_semantic",
         "sleep_consolidation",
         "working_memory_reset",
         "outcome_success",
@@ -109,7 +111,7 @@ def _as_event(data: dict[str, Any]) -> Event:
         if key not in {"type", "event", "source", "ts"}
     }
 
-    if event_type in {"user_message", "compress_memory"}:
+    if event_type in {"user_message", "compress_memory", "compile_semantic"}:
         text = data.get("message") or data.get("text") or data.get("content") or ""
         payload["text"] = str(text)
     elif event_type in {"web_research", "web_ingest"}:
@@ -899,6 +901,40 @@ def _dispatch_result(event: Event, intent: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _handle_compile_semantic(event: Event, stores: Mark17Stores) -> dict[str, Any]:
+    """Phase 6: compile one utterance into IR-code memory (cached by text hash)."""
+    text = str(event.payload.get("text") or "").strip()
+    compiler = SemanticCompiler(stores.state_dir)
+    ir = compiler.compile_text(text, vector_memory=stores.vector_memory, synapse_graph=stores.synapse_graph)
+    n_units = len(ir.get("units") or [])
+    if not text:
+        answer_text = "Нечего компилировать — пустой текст."
+    elif ir.get("cached"):
+        answer_text = f"Этот смысл уже скомпилирован ({n_units} юнитов, кеш)."
+    elif ir.get("verified"):
+        answer_text = f"Смысл скомпилирован в {n_units} юнитов IR (round-trip {ir.get('sim'):.2f}) и вшит в граф."
+    else:
+        answer_text = f"Компиляция не прошла проверку (round-trip {ir.get('sim'):.2f} < {IR_MIN_SIM}) — храню как текст."
+    return {
+        "ok": True,
+        "event_type": event.type,
+        "route": "semantic_compiler",
+        "memory": {},
+        "plasticity": {"confidence": float(ir.get("sim") or 0.0), "action": "semantic_compile", "learned": bool(ir.get("verified"))},
+        "llm": {"status": "skipped", "text": "Семантическая компиляция.", "latency_ms": 0.0},
+        "next_adaptation": answer_text,
+        "self_evaluation": {
+            "score": float(ir.get("sim") or 0.0),
+            "reason": f"semantic compile: {n_units} units, verified={ir.get('verified')}",
+            "store_memory": False,
+            "reinforce": "semantic_ir",
+        },
+        "answer": {"text": answer_text, "source": "semantic_compiler", "confidence": float(ir.get("sim") or 0.0)},
+        "semantic_ir": ir,
+        "ir_stats": compiler.stats(),
+    }
+
+
 def _handle_autonomous_research(
     event: Event,
     args: argparse.Namespace,
@@ -1352,6 +1388,15 @@ def normalize(result: dict[str, Any]) -> dict[str, Any]:
     environment = result.get("environment")
     if isinstance(environment, dict):
         normalized["environment"] = environment
+    voice = result.get("voice")
+    if isinstance(voice, dict):
+        normalized["voice"] = voice
+    semantic_ir = result.get("semantic_ir")
+    if isinstance(semantic_ir, dict):
+        normalized["semantic_ir"] = semantic_ir
+    ir_stats = result.get("ir_stats")
+    if isinstance(ir_stats, dict):
+        normalized["ir_stats"] = ir_stats
     web = result.get("web")
     if isinstance(web, dict):
         normalized["web"] = web
@@ -1644,6 +1689,8 @@ def _handle_event(event: Event, args: argparse.Namespace, stores: Mark17Stores) 
         return result
     if event.type == "autonomous_research":
         return _handle_autonomous_research(event, args, stores)
+    if event.type == "compile_semantic":
+        return _handle_compile_semantic(event, stores)
     if event.type in OUTCOME_EVENT_TYPES:
         return _handle_outcome_event(event, brain, vector_memory, synapse_graph, working_memory)
     if event.type in {"internal_dream", "generate_synergies"}:
@@ -2157,6 +2204,30 @@ def _handle_sleep_consolidation(
         bridges = {"bridges_created": 0, "bridges": []}
     if isinstance(consolidation, dict):
         consolidation["bridges"] = bridges
+    # Phase 6: during sleep, compile recent un-compiled speech into IR-code
+    # memory (cached by text hash, so re-sleeping is free). Off the hot path,
+    # best-effort, capped — never blocks consolidation.
+    if os.environ.get("MAX17_IR_AUTOCOMPILE") != "false":
+        try:
+            sem = SemanticCompiler(vector_memory.db_path.parent)
+            compiled = 0
+            for memory in brain.memory.recent(limit=30):
+                if getattr(memory, "event_type", "") != "user_message":
+                    continue
+                content = getattr(memory, "content", {})
+                payload = content.get("payload") if isinstance(content, dict) else {}
+                text = str((payload or {}).get("text") or "").strip()
+                if len(text) < 12 or sem.lookup(text):
+                    continue
+                ir = sem.compile_text(text, vector_memory=vector_memory, synapse_graph=synapse_graph)
+                if ir.get("verified"):
+                    compiled += 1
+                if compiled >= 3:
+                    break
+            if isinstance(consolidation, dict):
+                consolidation["semantic_compiled"] = compiled
+        except Exception:  # noqa: BLE001
+            pass
     patterns = consolidation.get("patterns") if isinstance(consolidation, dict) else []
     strengths = [
         float(pattern.get("strength", 0.0))

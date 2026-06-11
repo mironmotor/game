@@ -53,6 +53,7 @@ BATTERY: list[dict[str, Any]] = [
     {"type": "environment_observation", "camera": {"brightness": 0.3, "scene_mode": "desk"}},
     {"type": "environment_observation", "camera": {"active": True, "brightness": 0.12, "motion_level": "moving", "scene_mode": "active-room", "light_level": "low"}},
     {"type": "voice_observation", "voice": {"energy": 0.7, "pitch_hz": 180, "pitch_var": 62.0, "tempo": 4.2, "pause_ratio": 0.18, "voiced_ratio": 0.8, "duration_sec": 6.0}, "text": "паритетный голосовой кадр"},
+    {"type": "compile_semantic", "text": "Марина моя подруга, ей 26, у неё сын Матвей"},
     {"type": "compress_memory", "text": "recall, semantic search, consolidation, synapse growth"},
     {"type": "sleep_consolidation", "limit": 20},
     {"type": "outcome_success", "text": "маленький шаг сработал", "score": 0.9},
