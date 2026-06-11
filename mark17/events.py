@@ -22,6 +22,7 @@ KNOWN_TYPES = frozenset(
         "voice_observation",
         "compile_semantic",
         "semantic_ir",
+        "meaning_tree",
         "compress_memory",
         "graph_stats",
         "neural_seed",

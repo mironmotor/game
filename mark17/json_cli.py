@@ -36,6 +36,7 @@ from mark17.growth import grow_synapses
 from mark17.synapse_growth import propose_seeds
 from mark17.voice_state import analyze_voice
 from mark17.semantic_compiler import MIN_SIM as IR_MIN_SIM, SemanticCompiler
+from mark17.meaning_tree import MeaningTree
 from mark17.concepts import ConceptGrounding
 from mark17.concept_compression import compress_to_concept
 from mark17.concept_codec import extract_concepts as codec_extract_concepts
@@ -68,6 +69,7 @@ ALLOWED_EVENTS = frozenset(
         "environment_observation",
         "voice_observation",
         "compile_semantic",
+        "meaning_tree",
         "sleep_consolidation",
         "working_memory_reset",
         "outcome_success",
@@ -901,6 +903,37 @@ def _dispatch_result(event: Event, intent: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _handle_meaning_tree(event: Event, stores: Mark17Stores) -> dict[str, Any]:
+    """Phase 7: Merkle meaning tree. action=read (one-take view, lazily rebuilt),
+    rebuild (force), descend {cluster} (open one branch)."""
+    action = str(event.payload.get("action") or "read")
+    tree = MeaningTree(stores.state_dir)
+    if action == "descend":
+        view: dict[str, Any] = tree.descend(str(event.payload.get("cluster") or ""), stores.vector_memory)
+        text = f"Кластер «{view.get('label')}»: {len(view.get('leaves') or [])} воспоминаний раскрыто."
+    else:
+        view = tree.one_take(stores.vector_memory, rebuild=(action == "rebuild"))
+        root = view.get("root", {})
+        text = f"Один тейк: {root.get('conspect', 'память пуста')} [корень {str(root.get('hash'))[:10]}]"
+    return {
+        "ok": True,
+        "event_type": event.type,
+        "route": "meaning_tree",
+        "memory": {},
+        "plasticity": {"confidence": 0.7, "action": f"meaning_tree_{action}", "learned": False},
+        "llm": {"status": "skipped", "text": "Меркл-память.", "latency_ms": 0.0},
+        "next_adaptation": text,
+        "self_evaluation": {
+            "score": 0.7,
+            "reason": f"meaning tree {action}",
+            "store_memory": False,
+            "reinforce": "meaning_tree",
+        },
+        "answer": {"text": text, "source": "meaning_tree", "confidence": 0.7},
+        "meaning_tree": view,
+    }
+
+
 def _handle_compile_semantic(event: Event, stores: Mark17Stores) -> dict[str, Any]:
     """Phase 6: compile one utterance into IR-code memory (cached by text hash)."""
     text = str(event.payload.get("text") or "").strip()
@@ -1223,6 +1256,19 @@ def _gonka_memory_block(result: dict[str, Any], working_memory: WorkingMemory) -
     if mem_lines:
         lines.append("Твои воспоминания, релевантные этому вопросу:\n" + "\n".join(mem_lines[:8]))
 
+    # Phase 7: the one-take map — Max always knows the SHAPE of his whole memory
+    # (root conspect of the Merkle meaning tree), even when nothing specific
+    # matched the question. Read from the persisted tree only (no rebuild here:
+    # the hot path must stay fast); sleep keeps it fresh.
+    try:
+        tree = MeaningTree(working_memory.path.parent).load()
+        if tree:
+            conspect = str(tree.get("root", {}).get("conspect") or "")
+            if conspect:
+                lines.append(f"Карта всей памяти (один тейк): {conspect[:300]}")
+    except Exception:  # noqa: BLE001
+        pass
+
     return "\n".join(lines)
 
 
@@ -1397,6 +1443,9 @@ def normalize(result: dict[str, Any]) -> dict[str, Any]:
     ir_stats = result.get("ir_stats")
     if isinstance(ir_stats, dict):
         normalized["ir_stats"] = ir_stats
+    meaning_tree = result.get("meaning_tree")
+    if isinstance(meaning_tree, dict):
+        normalized["meaning_tree"] = meaning_tree
     web = result.get("web")
     if isinstance(web, dict):
         normalized["web"] = web
@@ -1691,6 +1740,8 @@ def _handle_event(event: Event, args: argparse.Namespace, stores: Mark17Stores) 
         return _handle_autonomous_research(event, args, stores)
     if event.type == "compile_semantic":
         return _handle_compile_semantic(event, stores)
+    if event.type == "meaning_tree":
+        return _handle_meaning_tree(event, stores)
     if event.type in OUTCOME_EVENT_TYPES:
         return _handle_outcome_event(event, brain, vector_memory, synapse_graph, working_memory)
     if event.type in {"internal_dream", "generate_synergies"}:
@@ -2228,6 +2279,12 @@ def _handle_sleep_consolidation(
                 consolidation["semantic_compiled"] = compiled
         except Exception:  # noqa: BLE001
             pass
+    # Phase 7: refresh the Merkle meaning tree during sleep, so the one-take map
+    # stays current. Best-effort.
+    try:
+        MeaningTree(vector_memory.db_path.parent).build(vector_memory)
+    except Exception:  # noqa: BLE001
+        pass
     patterns = consolidation.get("patterns") if isinstance(consolidation, dict) else []
     strengths = [
         float(pattern.get("strength", 0.0))
