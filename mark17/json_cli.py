@@ -1121,10 +1121,70 @@ def _gonka_history_block(working_memory: WorkingMemory) -> str:
         return ""
     turns = ctx.get("recent_turns") if isinstance(ctx.get("recent_turns"), list) else []
     lines: list[str] = []
-    for turn in turns[-6:]:
+    for turn in turns[-10:]:
         if isinstance(turn, dict) and turn.get("text"):
             who = "Ты" if turn.get("role") == "model" else "Пользователь"
             lines.append(f"{who}: {str(turn['text'])[:200]}")
+    return "\n".join(lines)
+
+
+def _gonka_memory_block(result: dict[str, Any], working_memory: WorkingMemory) -> str:
+    """Context flywheel: pack everything the core ALREADY retrieved for this turn
+    — working-memory state, the latest voice reading, semantic recalls and stable
+    patterns — into one block for the voice layer. The deterministic pipeline
+    always finds something, so Max never has to say "у меня нет контекста"."""
+    lines: list[str] = []
+
+    try:
+        ctx = working_memory.get_context()
+    except Exception:  # noqa: BLE001
+        ctx = {}
+    state_bits: list[str] = []
+    if ctx.get("current_topic"):
+        state_bits.append(f"тема: {ctx['current_topic']}")
+    if ctx.get("active_goal"):
+        state_bits.append(f"цель: {ctx['active_goal']}")
+    if ctx.get("current_mode") not in ("", "unknown", None):
+        state_bits.append(f"режим: {ctx['current_mode']}")
+    if ctx.get("last_user_intent") not in ("", "unknown", None):
+        state_bits.append(f"интент: {ctx['last_user_intent']}")
+    if state_bits:
+        lines.append("Рабочая память (текущее состояние сессии): " + "; ".join(state_bits))
+
+    try:
+        voice_hist = working_memory.get_voice_history(limit=1)
+    except Exception:  # noqa: BLE001
+        voice_hist = []
+    if voice_hist and voice_hist[-1].get("state"):
+        v = voice_hist[-1]
+        lines.append(
+            f"Состояние пользователя по голосу: {v.get('state')}"
+            + (f" (динамика: {v.get('trend')})" if v.get("trend") else "")
+        )
+
+    memory = result.get("memory") if isinstance(result.get("memory"), dict) else {}
+    seen: set[str] = set()
+    mem_lines: list[str] = []
+    for key, label in (("semantic", "смысл"), ("recalled", "память")):
+        rows = memory.get(key) if isinstance(memory.get(key), list) else []
+        for row in rows[:4]:
+            if not isinstance(row, dict):
+                continue
+            text = str(row.get("summary") or row.get("reinforce") or row.get("text") or "").strip()
+            if not text or text[:80] in seen:
+                continue
+            seen.add(text[:80])
+            mem_lines.append(f"- [{label}] {text[:220]}")
+    patterns = memory.get("consolidated_patterns") if isinstance(memory.get("consolidated_patterns"), list) else []
+    for pattern in patterns[:3]:
+        if isinstance(pattern, dict) and pattern.get("summary"):
+            text = str(pattern["summary"]).strip()
+            if text[:80] not in seen:
+                seen.add(text[:80])
+                mem_lines.append(f"- [паттерн] {text[:220]}")
+    if mem_lines:
+        lines.append("Твои воспоминания, релевантные этому вопросу:\n" + "\n".join(mem_lines[:8]))
+
     return "\n".join(lines)
 
 
@@ -1155,8 +1215,11 @@ def _synthesize_natural_answer(result: dict[str, Any], event: Event, working_mem
         "ниже — а не как обычный чат-ассистент (никаких «я всего лишь ИИ-помощник»). "
         "Отвечай на языке пользователя живо, развёрнуто и по делу (без воды); "
         "учитывай недавний диалог для связности. "
-        "Опирайся ТОЛЬКО на приведённые ниже факты из источников, данные с камеры и черновик; "
-        "если данных не хватает — честно скажи и предложи уточнить, ничего не выдумывай. "
+        "Твой контекст ВСЕГДА при тебе: ниже даны недавний диалог, рабочая память, твои воспоминания, "
+        "факты из источников, зрение и черновик ядра. НИКОГДА не говори «у меня нет контекста / нет "
+        "истории / я ничего о тебе не знаю» — вместо этого опирайся на блоки памяти и диалога. "
+        "Если конкретного факта в памяти нет — скажи, что именно ещё не зафиксировал, и задай "
+        "уточняющий вопрос. Не выдумывай фактов, которых нет в блоках ниже. "
         "Камера даёт ограниченные сигналы: уровень света, движение и наличие лиц (детектор лиц). "
         "Ты можешь сказать, есть ли в кадре человек и сколько лиц, и описать свет/движение — строго по "
         "блоку «Зрение (камера)». Но ты НЕ узнаёшь личность и НЕ распознаёшь предметы, мебель и место "
@@ -1169,6 +1232,9 @@ def _synthesize_natural_answer(result: dict[str, Any], event: Event, working_mem
     history_block = _gonka_history_block(working_memory)
     if history_block:
         parts.append("Недавний диалог (для контекста):\n" + history_block)
+    memory_block = _gonka_memory_block(result, working_memory)
+    if memory_block:
+        parts.append("Контекст ядра (рабочая память + воспоминания):\n" + memory_block)
     parts.append(f"Вопрос пользователя: {question}")
     if vision_block:
         parts.append("Зрение (камера, прямо сейчас):\n" + vision_block)
