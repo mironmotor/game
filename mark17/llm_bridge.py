@@ -77,7 +77,7 @@ class LlmBridge:
         if not self.enabled and not force:
             return LlmResponse(
                 ok=False,
-                text="LLM отключён (--no-llm). Используй plasticity hint.",
+                text="Локальный ollama-мост спит (--no-llm); голос Макса — облачная модель, см. llm_voice.",
                 model=self.model,
                 status="skipped",
             )

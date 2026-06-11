@@ -352,7 +352,13 @@ function HudContent() {
   const [cameraCorner, setCameraCorner] = useState<'bottom' | 'left' | 'right' | 'top'>('bottom');
   const [activeNav, setActiveNav] = useState<HudNavId>('codex');
   const [sessionId, setSessionId] = useState<string | null>(null);
-  const [max17State, setMax17State] = useState<Pick<Max17Response, 'route' | 'confidence' | 'next_adaptation'> | null>(null);
+  const [max17State, setMax17State] = useState<
+    | (Pick<Max17Response, 'route' | 'confidence' | 'next_adaptation'> & {
+        voiceModel?: string;
+        voiceOk?: boolean;
+      })
+    | null
+  >(null);
   const [log, setLog] = useState<string[]>([]);
   const recognitionRef = useRef<SpeechRecognition | null>(null);
   const cameraVideoRef = useRef<HTMLVideoElement | null>(null);
@@ -486,10 +492,15 @@ function HudContent() {
       try {
         const max17 = await sendMax17Event(event);
         if (surfaceState) {
+          // Surface WHICH brain voiced this answer, so the Gonka link is visible
+          // (llm_voice is the cloud voice layer; "синапсы" = deterministic core).
+          const voice = (max17 as { llm_voice?: { model?: string; status?: string } }).llm_voice;
           setMax17State({
             route: max17.route,
             confidence: max17.confidence,
             next_adaptation: max17.next_adaptation,
+            voiceModel: voice?.status === 'ok' ? String(voice.model || '').split('/').pop() : undefined,
+            voiceOk: voice?.status === 'ok',
           });
         }
         if (process.env.NODE_ENV === 'development') {
@@ -1208,6 +1219,10 @@ function HudContent() {
           <span>{max17State.route}</span>
           <span className="px-1 text-white/25">·</span>
           <span>{max17Confidence}%</span>
+          <span className="px-1 text-white/25">·</span>
+          <span className={max17State.voiceOk ? 'text-emerald-300/90' : 'text-white/45'}>
+            {max17State.voiceOk ? `⚡ ${max17State.voiceModel}` : '⚙ синапсы'}
+          </span>
           {max17State.next_adaptation && (
             <>
               <span className="px-1 text-white/25">·</span>
