@@ -19,6 +19,7 @@ const ALLOWED_EVENTS = new Set([
   'ultra_think',
   'music_observation',
   'music_taste',
+  'dream_mood',
   'sleep_consolidation',
   'working_memory_reset',
   'outcome_success',

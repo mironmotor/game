@@ -58,6 +58,7 @@ BATTERY: list[dict[str, Any]] = [
     {"type": "ultra_think"},
     {"type": "music_observation", "music": {"bpm": 126, "energy": 0.7, "bass": 0.6, "brightness": 0.55, "regularity": 0.7, "dynamics": 0.5, "key": "A", "minor_like": 0.6, "duration_sec": 20}},
     {"type": "music_taste"},
+    {"type": "dream_mood"},
     {"type": "compress_memory", "text": "recall, semantic search, consolidation, synapse growth"},
     {"type": "sleep_consolidation", "limit": 20},
     {"type": "outcome_success", "text": "маленький шаг сработал", "score": 0.9},

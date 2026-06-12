@@ -49,19 +49,21 @@ export function AppearancePanel({
     try {
       stopRef.current?.();
       setPlaying(false);
-      const res = (await sendMax17Event({ type: 'music_taste' })) as {
-        music_taste?: DreamTaste & { tracks?: number; summary?: string };
+      const res = (await sendMax17Event({ type: 'dream_mood' })) as {
+        dream_mood?: DreamTaste & { label?: string; reason?: string };
+        music_taste?: { tracks?: number };
       };
-      const taste = res.music_taste || {};
-      const buffer = await generateDreamTrack(taste, seed);
+      const mood = res.dream_mood || {};
+      const tracks = res.music_taste?.tracks || 0;
+      const buffer = await generateDreamTrack(mood, seed || mood.label || '');
       stopRef.current = playBuffer(buffer);
       setPlaying(true);
       if (wavUrl) URL.revokeObjectURL(wavUrl);
       setWavUrl(URL.createObjectURL(bufferToWav(buffer)));
       setTasteNote(
-        taste.tracks
-          ? `Сочинил из вкуса (${taste.tracks} прослушиваний): ~${taste.avg_bpm} BPM, ${taste.fav_key} ${taste.mode}.`
-          : 'Я ещё не слушал музыку — сочинил из базовой палитры. Скажи «слушай музыку» и врубай треки!',
+        tracks
+          ? `${mood.reason || 'Сочинил под настроение'} · ~${mood.avg_bpm} BPM, ${mood.fav_key} ${mood.mode} · вкус из ${tracks} прослушиваний.`
+          : `${mood.reason || 'Сочинил'} · вкуса пока нет — скажи «слушай музыку» и врубай треки!`,
       );
     } catch (e) {
       setTasteNote(e instanceof Error ? e.message : String(e));

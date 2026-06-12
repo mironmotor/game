@@ -17,6 +17,7 @@ export type UiCommand =
   | { kind: 'background'; value: string }
   | { kind: 'theme'; value: string }
   | { kind: 'music'; action: 'start' | 'stop' }
+  | { kind: 'compose' }
   | { kind: 'reset' }
   | { kind: 'showAll' }
   | { kind: 'closeAll' }
@@ -126,6 +127,11 @@ export function interpretUiCommand(raw: string): InterpretedCommand | null {
   const wantsOpen = RE_OPEN.test(t);
   const wantsMin = RE_MIN.test(t);
   const allWord = RE_ALL.test(t);
+
+  // Composing — «сочини трек», «сыграй своё», «трек под настроение».
+  if (/(сочини|сыграй сво|под настроение|compose)/.test(t) && /(трек|музык|track|своё|свое)/.test(t)) {
+    return { command: { kind: 'compose' }, reply: 'Сочиняю трек под своё настроение…' };
+  }
 
   // Music listening — «слушай музыку», «оцени трек» / «хватит слушать».
   if (/(музык|трек|track|music)/.test(t)) {

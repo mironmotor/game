@@ -27,7 +27,7 @@ from typing import Any
 
 from mark17.gonka_bridge import chat as gonka_chat, is_enabled as gonka_is_enabled
 
-ALLOWED_ACTIONS = ("research", "compile", "consolidate", "tree", "none")
+ALLOWED_ACTIONS = ("research", "compile", "consolidate", "tree", "compose", "none")
 
 _DECIDER_PROMPT = (
     "Ты — MAX ULTRA, оркестратор собственного когнитивного ядра. Тебе дано твоё "
@@ -37,6 +37,8 @@ _DECIDER_PROMPT = (
     "  compile — скомпилировать недавнюю речь пользователя в смысловой IR-код;\n"
     "  consolidate — консолидация сна: паттерны + мосты между кластерами;\n"
     "  tree — перестроить меркл-карту памяти;\n"
+    "  compose — сочинить трек под своё настроение (выбирай при инсайте, после "
+    "выученных фактов или когда пользователю нужна поддержка по голосу);\n"
     "  none — ничего не делать (тоже решение).\n"
     "Критерии: закрывай пробелы знаний, не повторяй последнее действие без причины, "
     "research выбирай только с конкретным полезным query. Ответ — строго JSON: "

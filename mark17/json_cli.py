@@ -38,7 +38,7 @@ from mark17.voice_state import analyze_voice
 from mark17.semantic_compiler import MIN_SIM as IR_MIN_SIM, SemanticCompiler
 from mark17.meaning_tree import MeaningTree
 from mark17.ultra_orchestrator import decide as ultra_decide, gather_state as ultra_gather_state
-from mark17.music_sense import aggregate_taste, analyze_music
+from mark17.music_sense import aggregate_taste, analyze_music, mood_music_spec
 from mark17.concepts import ConceptGrounding
 from mark17.concept_compression import compress_to_concept
 from mark17.concept_codec import extract_concepts as codec_extract_concepts
@@ -75,6 +75,7 @@ ALLOWED_EVENTS = frozenset(
         "ultra_think",
         "music_observation",
         "music_taste",
+        "dream_mood",
         "sleep_consolidation",
         "working_memory_reset",
         "outcome_success",
@@ -980,6 +981,34 @@ def _handle_music_taste(stores: Mark17Stores) -> dict[str, Any]:
     }
 
 
+def _handle_dream_mood(event: Event, stores: Mark17Stores) -> dict[str, Any]:
+    """Phase 9.5: Max's current mood → composition spec for Dreaming Music.
+    Mood = his learned taste, как звучит пользователь, недавний кайф, инсайт."""
+    insight = bool(event.payload.get("insight"))
+    taste = aggregate_taste(stores.working_memory.get_music_history())
+    voice_hist = stores.working_memory.get_voice_history(limit=1)
+    voice_state = str(voice_hist[-1].get("state") or "") if voice_hist else ""
+    music_hist = stores.working_memory.get_music_history(limit=3)
+    recent_kaif = (
+        sum(float(m.get("kaif") or 0) for m in music_hist) / len(music_hist) if music_hist else None
+    )
+    mood = mood_music_spec(voice_state, taste, insight=insight, recent_kaif=recent_kaif)
+    text = f"Сочиняю {mood['label']}: ~{mood['avg_bpm']} BPM, {mood['fav_key']} {mood['mode']}. {mood['reason']}."
+    return {
+        "ok": True,
+        "event_type": "dream_mood",
+        "route": "music_sense",
+        "memory": {},
+        "plasticity": {"confidence": 0.6, "action": "dream_mood", "learned": False},
+        "llm": {"status": "skipped", "text": "Настроение для Dreaming Music.", "latency_ms": 0.0},
+        "next_adaptation": text,
+        "self_evaluation": {"score": 0.6, "reason": mood["reason"], "store_memory": False, "reinforce": "music"},
+        "answer": {"text": text, "source": "music_sense", "confidence": 0.6},
+        "dream_mood": mood,
+        "music_taste": taste,
+    }
+
+
 def _handle_ultra_think(event: Event, args: argparse.Namespace, stores: Mark17Stores) -> dict[str, Any]:
     """Phase 8: the core's own agency. Snapshot self-state → ONE decision (LLM
     role=ultra, or the deterministic policy offline) → EXECUTE it from the safe
@@ -1023,8 +1052,17 @@ def _handle_ultra_think(event: Event, args: argparse.Namespace, stores: Mark17St
         elif action == "tree":
             tree = MeaningTree(stores.state_dir).build(stores.vector_memory)
             executed = {"root": tree.get("root", {})}
+        elif action == "compose":
+            # Composition itself is Web Audio (browser) — the core prepares the
+            # mood spec; the HUD synthesizes when it sees this decision.
+            mood_result = _handle_dream_mood(Event(type="dream_mood", payload={}, source="ultra"), stores)
+            executed = {"mood": mood_result.get("dream_mood"), "compose": True}
     except Exception as exc:  # noqa: BLE001 - agency must fail soft
         executed = {"error": str(exc)[:160]}
+
+    # Insight detection: real new knowledge ⇒ the HUD may celebrate with a track.
+    if action == "research" and isinstance(executed, dict) and int(executed.get("facts_learned") or 0) > 0:
+        executed["insight"] = True
 
     # Remember the decision: the next think (and chat recall) sees what Ultra did.
     try:
@@ -1049,6 +1087,9 @@ def _handle_ultra_think(event: Event, args: argparse.Namespace, stores: Mark17St
         text += f" Паттернов: {executed.get('patterns_created', 0)}, мостов: {(executed.get('bridges') or {}).get('bridges_created', 0)}."
     elif action == "tree":
         text += f" Карта: {(executed.get('root') or {}).get('conspect', '')[:120]}."
+    elif action == "compose":
+        mood = executed.get("mood") or {}
+        text += f" Сочиняю {mood.get('label', 'трек')} (~{mood.get('avg_bpm')} BPM, {mood.get('fav_key')} {mood.get('mode')})."
 
     return {
         "ok": True,
@@ -1621,6 +1662,9 @@ def normalize(result: dict[str, Any]) -> dict[str, Any]:
     music_taste = result.get("music_taste")
     if isinstance(music_taste, dict):
         normalized["music_taste"] = music_taste
+    dream_mood = result.get("dream_mood")
+    if isinstance(dream_mood, dict):
+        normalized["dream_mood"] = dream_mood
     web = result.get("web")
     if isinstance(web, dict):
         normalized["web"] = web
@@ -1923,6 +1967,8 @@ def _handle_event(event: Event, args: argparse.Namespace, stores: Mark17Stores) 
         return _handle_music_observation(event, stores)
     if event.type == "music_taste":
         return _handle_music_taste(stores)
+    if event.type == "dream_mood":
+        return _handle_dream_mood(event, stores)
     if event.type in OUTCOME_EVENT_TYPES:
         return _handle_outcome_event(event, brain, vector_memory, synapse_graph, working_memory)
     if event.type in {"internal_dream", "generate_synergies"}:

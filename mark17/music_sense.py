@@ -133,6 +133,65 @@ def analyze_music(observation: dict[str, Any], history: list[dict[str, Any]] | N
     }
 
 
+def mood_music_spec(
+    voice_state: str,
+    taste: dict[str, Any],
+    *,
+    insight: bool = False,
+    recent_kaif: float | None = None,
+) -> dict[str, Any]:
+    """Max's CURRENT mood → composition parameters for Dreaming Music.
+
+    Base aesthetics come from his learned taste; the user's voice state shifts
+    the expression (он сопереживает: усталому — мягче, напряжённому — глубже и
+    спокойнее, возбуждённому — драйвовее); an INSIGHT brightens everything —
+    радость открытия. Deterministic: same state ⇒ same mood ⇒ same track.
+    """
+    bpm = int(taste.get("avg_bpm") or 100)
+    key = str(taste.get("fav_key") or "A")
+    mode = str(taste.get("mode") or "minor")
+    bass = _f(taste.get("avg_bass"), 0.5)
+    bright = _f(taste.get("avg_brightness"), 0.5)
+    energy = _f(taste.get("avg_energy"), 0.5)
+
+    # Substring matching: the rich VoiceSignature path stores expressive labels
+    # («😬 зажатый, напряжённый»), not just the canonical state words.
+    state = (voice_state or "").strip()
+    s = state.casefold()
+    if "возбужд" in s or "воодушев" in s or "энергич" in s:
+        label, bpm, energy, bright = "драйвовое", bpm + 16, _clamp(energy + 0.2), _clamp(bright + 0.1)
+    elif "устал" in s or "подавлен" in s or "глухов" in s:
+        label, bpm, energy, bright = "колыбельное", max(68, bpm - 28), 0.3, _clamp(bright - 0.15)
+    elif "напряж" in s or "зажат" in s or "взвод" in s:
+        label, bpm, energy, bass, mode = "успокаивающее, глубокое", max(75, bpm - 12), 0.45, _clamp(bass + 0.15), "minor"
+    elif "споко" in s or "расслаб" in s or "ровн" in s or "позитив" in s:
+        label = "ровное, тёплое"
+    else:
+        label = "своё, из вкуса"
+
+    if recent_kaif is not None and recent_kaif >= 0.65:
+        bright = _clamp(bright + 0.08)
+    if insight:
+        label = f"инсайт! светлое {label}"
+        bright = _clamp(bright + 0.2)
+        energy = _clamp(energy + 0.1)
+        mode = "major"
+
+    reason = f"настроение Макса: {label}" + (f"; слышу тебя как «{state}»" if state else "")
+    return {
+        "label": label,
+        "reason": reason,
+        "avg_bpm": int(_clamp(bpm, 65, 150)),
+        "fav_key": key,
+        "mode": mode,
+        "avg_bass": round(bass, 2),
+        "avg_brightness": round(bright, 2),
+        "avg_energy": round(energy, 2),
+        "insight": bool(insight),
+        "voice_state": state,
+    }
+
+
 def aggregate_taste(history: list[dict[str, Any]]) -> dict[str, Any]:
     """Max's taste profile from everything he has heard — Dreaming Music's seed."""
     rows = [h for h in history if isinstance(h, dict) and isinstance(h.get("features"), dict)]

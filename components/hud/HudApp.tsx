@@ -6,6 +6,7 @@ import { useGameState } from '@/hooks/use-game-state';
 import { sendMax17Event, type Max17Response } from '@/lib/max17-client';
 import { VoiceSignature } from './VoiceSignature';
 import { MusicDecomposer } from './music-decompose';
+import { generateDreamTrack, playBuffer, type DreamTaste } from './dream-music';
 import { AppearancePanel } from './AppearancePanel';
 import { applyTheme, initTheme } from './themes';
 import { WindowManagerProvider, useWindowManager } from './window-manager';
@@ -384,6 +385,9 @@ function HudContent() {
   // music_observation — Max evaluates tracks (кайф-скор) and grows taste.
   const musicRef = useRef<MusicDecomposer | null>(null);
   const [musicListening, setMusicListening] = useState(false);
+  // Dreaming Music: Max composes under his own mood — on request or on insight.
+  const dreamStopRef = useRef<(() => void) | null>(null);
+  const lastComposeRef = useRef<number>(0);
 
   useEffect(() => {
     if (!musicListening) {
@@ -566,6 +570,31 @@ function HudContent() {
     setLog((prev) => [clean, ...prev].slice(0, 24));
   }, []);
 
+  // Max composes under his own mood — on voice request («сочини трек») or
+  // automatically on insight / when Ultra decides "compose".
+  const composeMoodTrack = useCallback(
+    async (auto = false) => {
+      const now = Date.now();
+      if (auto && now - lastComposeRef.current < 600_000) return; // авто — не чаще раза в 10 мин
+      lastComposeRef.current = now;
+      try {
+        const res = (await sendMax17Event({ type: 'dream_mood', insight: auto })) as {
+          dream_mood?: DreamTaste & { label?: string; reason?: string };
+        };
+        const mood = res.dream_mood || {};
+        const buffer = await generateDreamTrack(mood, mood.label || 'mood');
+        dreamStopRef.current?.();
+        dreamStopRef.current = playBuffer(buffer);
+        const note = `🎼 ${auto ? 'Инсайт! ' : ''}Dreaming: ${mood.label || 'трек'} (~${mood.avg_bpm} BPM, ${mood.fav_key} ${mood.mode})`;
+        pushLog(note);
+        setAgiMessage(`MAX17: ${note}`);
+      } catch {
+        if (!auto) setAgiMessage('MAX17: не смог сочинить — попробуй ещё раз.');
+      }
+    },
+    [pushLog],
+  );
+
   const executeUiCommand = useCallback(
     (command: UiCommand) => {
       switch (command.kind) {
@@ -590,6 +619,9 @@ function HudContent() {
           break;
         case 'music':
           setMusicListening(command.action === 'start');
+          break;
+        case 'compose':
+          void composeMoodTrack(false);
           break;
         case 'reset':
           wm.resetLayout();
@@ -897,12 +929,18 @@ function HudContent() {
         pushLog(`🧠 ${note}`);
         setAgiMessage(`MAX17: ${note}`);
       }
+      // Max decided to compose, or research yielded real new facts (insight) —
+      // celebrate with a track under his current mood.
+      const ultra = (res as { ultra?: { decision?: { action?: string }; executed?: { insight?: boolean } } })?.ultra;
+      if (ultra?.decision?.action === 'compose' || ultra?.executed?.insight) {
+        void composeMoodTrack(true);
+      }
     };
     const interval = window.setInterval(() => {
       void tick();
     }, 60_000);
     return () => window.clearInterval(interval);
-  }, [emitMax17HudEvent, pushLog]);
+  }, [emitMax17HudEvent, pushLog, composeMoodTrack]);
 
   const handleSend = async (override?: string) => {
     const userMsg = (override ?? input).trim();
