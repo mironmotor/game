@@ -16,6 +16,7 @@ export type UiCommand =
   | { kind: 'minimize'; target: WindowId }
   | { kind: 'background'; value: string }
   | { kind: 'theme'; value: string }
+  | { kind: 'music'; action: 'start' | 'stop' }
   | { kind: 'reset' }
   | { kind: 'showAll' }
   | { kind: 'closeAll' }
@@ -125,6 +126,19 @@ export function interpretUiCommand(raw: string): InterpretedCommand | null {
   const wantsOpen = RE_OPEN.test(t);
   const wantsMin = RE_MIN.test(t);
   const allWord = RE_ALL.test(t);
+
+  // Music listening — «слушай музыку», «оцени трек» / «хватит слушать».
+  if (/(музык|трек|track|music)/.test(t)) {
+    if (/(хватит|стоп|останов|выключ|stop)/.test(t)) {
+      return { command: { kind: 'music', action: 'stop' }, reply: 'Перестаю слушать музыку.' };
+    }
+    if (/(слушай|послушай|оцени|включаю|врубаю|listen)/.test(t)) {
+      return {
+        command: { kind: 'music', action: 'start' },
+        reply: 'Включаю уши — врубай трек, буду слушать и оценивать.',
+      };
+    }
+  }
 
   // Theme — «тема пурпур», «смени тему на матрицу».
   if (/(тема|тему|theme)/.test(t)) {

@@ -5,6 +5,7 @@ import { GameHud, type HudNavId } from './GameHud';
 import { useGameState } from '@/hooks/use-game-state';
 import { sendMax17Event, type Max17Response } from '@/lib/max17-client';
 import { VoiceSignature } from './VoiceSignature';
+import { MusicDecomposer } from './music-decompose';
 import { AppearancePanel } from './AppearancePanel';
 import { applyTheme, initTheme } from './themes';
 import { WindowManagerProvider, useWindowManager } from './window-manager';
@@ -379,6 +380,40 @@ function HudContent() {
   const lastActivityRef = useRef<number>(Date.now());
   const lastGrowRef = useRef<number>(0);
   const isLoadingRef = useRef<boolean>(false);
+  // Music ears (Phase 9): while ON, ~20s listening windows go to the core as
+  // music_observation — Max evaluates tracks (кайф-скор) and grows taste.
+  const musicRef = useRef<MusicDecomposer | null>(null);
+  const [musicListening, setMusicListening] = useState(false);
+
+  useEffect(() => {
+    if (!musicListening) {
+      musicRef.current?.stop();
+      musicRef.current = null;
+      return;
+    }
+    const ears = new MusicDecomposer();
+    musicRef.current = ears;
+    void ears.start().then((ok) => {
+      if (!ok) {
+        setMusicListening(false);
+        setAgiMessage('MAX17: не получил доступ к микрофону для музыки.');
+      }
+    });
+    const interval = window.setInterval(() => {
+      const summary = musicRef.current?.summarize(20);
+      if (!summary || summary.energy < 0.04) return;
+      void emitMax17HudEvent({ type: 'music_observation', music: summary }).then((res) => {
+        const note = res?.answer?.text;
+        if (note) pushLog(`🎵 ${note}`);
+      });
+    }, 21000);
+    return () => {
+      window.clearInterval(interval);
+      ears.stop();
+      if (musicRef.current === ears) musicRef.current = null;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [musicListening]);
 
   useEffect(() => {
     isLoadingRef.current = isLoading;
@@ -552,6 +587,9 @@ function HudContent() {
           break;
         case 'theme':
           applyTheme(command.value);
+          break;
+        case 'music':
+          setMusicListening(command.action === 'start');
           break;
         case 'reset':
           wm.resetLayout();

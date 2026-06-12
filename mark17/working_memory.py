@@ -313,6 +313,27 @@ class WorkingMemory:
         self.save(state)
         return state["voice_history"]
 
+    def get_music_history(self, *, limit: int = 24) -> list[dict[str, Any]]:
+        """Rolling buffer of music readings — Max's listening diary / taste source."""
+        state = self.load()
+        history = state.get("music_history")
+        if not isinstance(history, list):
+            return []
+        return [item for item in history if isinstance(item, dict)][-limit:]
+
+    def push_music_observation(self, observation: dict[str, Any], *, limit: int = 24) -> list[dict[str, Any]]:
+        if not isinstance(observation, dict):
+            return self.get_music_history(limit=limit)
+        state = self.load()
+        history = state.get("music_history")
+        history = [item for item in history if isinstance(item, dict)] if isinstance(history, list) else []
+        entry = dict(observation)
+        entry["observed_at"] = _now()
+        history.append(entry)
+        state["music_history"] = history[-limit:]
+        self.save(state)
+        return state["music_history"]
+
     def push_env_observation(self, observation: dict[str, Any], *, limit: int = 8) -> list[dict[str, Any]]:
         if not isinstance(observation, dict):
             return self.get_env_history(limit=limit)

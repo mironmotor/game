@@ -25,6 +25,8 @@ KNOWN_TYPES = frozenset(
         "meaning_tree",
         "ultra_think",
         "ultra_decision",
+        "music_observation",
+        "music_taste",
         "compress_memory",
         "graph_stats",
         "neural_seed",

@@ -38,6 +38,7 @@ from mark17.voice_state import analyze_voice
 from mark17.semantic_compiler import MIN_SIM as IR_MIN_SIM, SemanticCompiler
 from mark17.meaning_tree import MeaningTree
 from mark17.ultra_orchestrator import decide as ultra_decide, gather_state as ultra_gather_state
+from mark17.music_sense import aggregate_taste, analyze_music
 from mark17.concepts import ConceptGrounding
 from mark17.concept_compression import compress_to_concept
 from mark17.concept_codec import extract_concepts as codec_extract_concepts
@@ -72,6 +73,8 @@ ALLOWED_EVENTS = frozenset(
         "compile_semantic",
         "meaning_tree",
         "ultra_think",
+        "music_observation",
+        "music_taste",
         "sleep_consolidation",
         "working_memory_reset",
         "outcome_success",
@@ -905,6 +908,78 @@ def _dispatch_result(event: Event, intent: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _handle_music_observation(event: Event, stores: Mark17Stores) -> dict[str, Any]:
+    """Phase 9: one listening window. Analyze → remember → grow taste history,
+    so bridges link «что играло» with the moment, and Dreaming composes later."""
+    observation = event.payload.get("music")
+    observation = observation if isinstance(observation, dict) else {}
+    history = stores.working_memory.get_music_history()
+    music = analyze_music(observation, history)
+
+    if music.get("mood") != "тишина":
+        stores.working_memory.push_music_observation(
+            {k: music[k] for k in ("mood", "kaif", "novelty", "verdict", "key", "features", "vector") if k in music}
+        )
+        conclusions = music.get("conclusions") or []
+        if conclusions:
+            music_event = Event(
+                type="music_observation",
+                payload={"note": str(conclusions[0]), "text": str(event.payload.get("text") or "")[:120]},
+                source="music",
+            )
+            stores.brain.memory.remember(music_event, hint=str(conclusions[0]), action="music_listening")
+            stores.vector_memory.remember(
+                music_event,
+                {"score": float(music.get("kaif") or 0.4), "reason": str(conclusions[0]), "store_memory": True, "reinforce": "music"},
+            )
+        for assoc in music.get("associations", []):
+            if isinstance(assoc, dict) and assoc.get("from") and assoc.get("to"):
+                stores.synapse_graph.upsert_synapse(
+                    source_type="concept", source_id=str(assoc["from"]),
+                    target_type="concept", target_id=str(assoc["to"]),
+                    relation_type=str(assoc.get("relation") or "related_to"),
+                    weight=float(assoc.get("weight") or 0.5),
+                    metadata={"origin": "music_observation", "mood": music.get("mood")},
+                )
+
+    text = str(music.get("summary") or "Слушаю.")
+    return {
+        "ok": True,
+        "event_type": event.type,
+        "route": "music_sense",
+        "memory": {},
+        "plasticity": {"confidence": float(music.get("kaif") or 0.3), "action": "music_listening", "learned": music.get("mood") != "тишина"},
+        "llm": {"status": "skipped", "text": "Музыкальный слух.", "latency_ms": 0.0},
+        "next_adaptation": text,
+        "self_evaluation": {
+            "score": float(music.get("kaif") or 0.3),
+            "reason": f"music: {music.get('mood')} kaif={music.get('kaif')}",
+            "store_memory": False,
+            "reinforce": "music",
+        },
+        "answer": {"text": text, "source": "music_sense", "confidence": float(music.get("kaif") or 0.3)},
+        "music": music,
+    }
+
+
+def _handle_music_taste(stores: Mark17Stores) -> dict[str, Any]:
+    """Phase 9: Max's aggregated taste — the seed Dreaming Music composes from."""
+    taste = aggregate_taste(stores.working_memory.get_music_history())
+    text = str(taste.get("summary") or "")
+    return {
+        "ok": True,
+        "event_type": "music_taste",
+        "route": "music_sense",
+        "memory": {},
+        "plasticity": {"confidence": 0.6, "action": "music_taste", "learned": False},
+        "llm": {"status": "skipped", "text": "Музыкальный вкус.", "latency_ms": 0.0},
+        "next_adaptation": text,
+        "self_evaluation": {"score": 0.6, "reason": f"taste over {taste.get('tracks')} tracks", "store_memory": False, "reinforce": "music"},
+        "answer": {"text": text, "source": "music_sense", "confidence": 0.6},
+        "music_taste": taste,
+    }
+
+
 def _handle_ultra_think(event: Event, args: argparse.Namespace, stores: Mark17Stores) -> dict[str, Any]:
     """Phase 8: the core's own agency. Snapshot self-state → ONE decision (LLM
     role=ultra, or the deterministic policy offline) → EXECUTE it from the safe
@@ -1540,6 +1615,12 @@ def normalize(result: dict[str, Any]) -> dict[str, Any]:
     ultra = result.get("ultra")
     if isinstance(ultra, dict):
         normalized["ultra"] = ultra
+    music = result.get("music")
+    if isinstance(music, dict):
+        normalized["music"] = music
+    music_taste = result.get("music_taste")
+    if isinstance(music_taste, dict):
+        normalized["music_taste"] = music_taste
     web = result.get("web")
     if isinstance(web, dict):
         normalized["web"] = web
@@ -1838,6 +1919,10 @@ def _handle_event(event: Event, args: argparse.Namespace, stores: Mark17Stores) 
         return _handle_meaning_tree(event, stores)
     if event.type == "ultra_think":
         return _handle_ultra_think(event, args, stores)
+    if event.type == "music_observation":
+        return _handle_music_observation(event, stores)
+    if event.type == "music_taste":
+        return _handle_music_taste(stores)
     if event.type in OUTCOME_EVENT_TYPES:
         return _handle_outcome_event(event, brain, vector_memory, synapse_graph, working_memory)
     if event.type in {"internal_dream", "generate_synergies"}:

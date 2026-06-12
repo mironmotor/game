@@ -1,9 +1,11 @@
 'use client';
 
-import { useState } from 'react';
-import { X, Palette, Sparkles, Loader2, Check } from 'lucide-react';
+import { useEffect, useRef, useState } from 'react';
+import { X, Palette, Sparkles, Loader2, Check, Music, Square, Download } from 'lucide-react';
 import { HUD_BACKGROUNDS, DREAM_BACKGROUND_ID, saveDreamBackground } from './backgrounds';
 import { DREAM_STYLES, generateDream } from './dream-canvas';
+import { bufferToWav, generateDreamTrack, playBuffer, type DreamTaste } from './dream-music';
+import { sendMax17Event } from '@/lib/max17-client';
 import { HUD_THEMES, applyTheme, getTheme, loadThemeId } from './themes';
 
 /**
@@ -25,6 +27,48 @@ export function AppearancePanel({
   const [busy, setBusy] = useState(false);
   const [preview, setPreview] = useState<string | null>(null);
   const [note, setNote] = useState('');
+  // Dreaming Music — Max composes from his listening taste.
+  const [composing, setComposing] = useState(false);
+  const [tasteNote, setTasteNote] = useState('');
+  const [wavUrl, setWavUrl] = useState<string | null>(null);
+  const stopRef = useRef<(() => void) | null>(null);
+  const [playing, setPlaying] = useState(false);
+
+  useEffect(() => {
+    return () => {
+      stopRef.current?.();
+      if (wavUrl) URL.revokeObjectURL(wavUrl);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const composeDream = async () => {
+    if (composing) return;
+    setComposing(true);
+    setTasteNote('');
+    try {
+      stopRef.current?.();
+      setPlaying(false);
+      const res = (await sendMax17Event({ type: 'music_taste' })) as {
+        music_taste?: DreamTaste & { tracks?: number; summary?: string };
+      };
+      const taste = res.music_taste || {};
+      const buffer = await generateDreamTrack(taste, seed);
+      stopRef.current = playBuffer(buffer);
+      setPlaying(true);
+      if (wavUrl) URL.revokeObjectURL(wavUrl);
+      setWavUrl(URL.createObjectURL(bufferToWav(buffer)));
+      setTasteNote(
+        taste.tracks
+          ? `Сочинил из вкуса (${taste.tracks} прослушиваний): ~${taste.avg_bpm} BPM, ${taste.fav_key} ${taste.mode}.`
+          : 'Я ещё не слушал музыку — сочинил из базовой палитры. Скажи «слушай музыку» и врубай треки!',
+      );
+    } catch (e) {
+      setTasteNote(e instanceof Error ? e.message : String(e));
+    } finally {
+      setComposing(false);
+    }
+  };
 
   const pickTheme = (id: string) => {
     const theme = applyTheme(id);
@@ -161,6 +205,49 @@ export function AppearancePanel({
           <p className="mt-1.5 text-[9px] leading-relaxed text-fuchsia-100/35">
             Без API и сети: полотно рисуется локально из «мысли-зерна» в палитре темы — как образы подсознания Макса.
           </p>
+
+          <div className="mt-2 border-t border-fuchsia-300/15 pt-2">
+            <div className="mb-1.5 flex items-center gap-1.5 text-[9px] uppercase tracking-[0.18em] text-fuchsia-100/60">
+              <Music size={11} />
+              Dreaming Music · from MAX17
+            </div>
+            <div className="flex items-center gap-1.5">
+              <button
+                type="button"
+                onClick={() => void composeDream()}
+                disabled={composing}
+                className="flex shrink-0 items-center gap-1 rounded bg-fuchsia-400/25 px-2.5 py-1.5 text-[10px] text-fuchsia-50 transition hover:bg-fuchsia-400/40 disabled:opacity-50"
+              >
+                {composing ? <Loader2 size={11} className="animate-spin" /> : <Music size={11} />}
+                Сочинить трек
+              </button>
+              {playing && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    stopRef.current?.();
+                    setPlaying(false);
+                  }}
+                  className="flex items-center gap-1 rounded bg-fuchsia-300/10 px-2 py-1.5 text-[10px] text-fuchsia-100/70 hover:bg-fuchsia-300/20"
+                >
+                  <Square size={10} /> стоп
+                </button>
+              )}
+              {wavUrl && (
+                <a
+                  href={wavUrl}
+                  download="dreaming-music-max17.wav"
+                  className="flex items-center gap-1 rounded bg-fuchsia-300/10 px-2 py-1.5 text-[10px] text-fuchsia-100/70 hover:bg-fuchsia-300/20"
+                >
+                  <Download size={10} /> WAV
+                </a>
+              )}
+            </div>
+            {tasteNote && <div className="mt-1 text-[9px] text-fuchsia-100/55">{tasteNote}</div>}
+            <p className="mt-1 text-[9px] leading-relaxed text-fuchsia-100/35">
+              Макс сочиняет из СВОЕГО вкуса — того, что наслушал через «слушай музыку». Чистый синтез, без API.
+            </p>
+          </div>
         </div>
       </div>
     </div>
