@@ -17,6 +17,8 @@ export interface DreamTaste {
   avg_energy?: number;
 }
 
+import { SoundBank } from './sound-bank';
+
 const NOTES = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
 const DURATION = 24; // seconds
 const SR = 44100;
@@ -66,6 +68,19 @@ export async function generateDreamTrack(taste: DreamTaste, seedText = ''): Prom
   // chord progression over scale degrees (seeded): i — VI — III — VII style walks
   const degrees = [0, 5, 2, 6].map((d) => (rnd() < 0.3 ? Math.floor(rnd() * 7) : d));
 
+  // Sound database: synthesized drum kit + strings + bells (seeded separately,
+  // so the kit's character doesn't shift the melodic dice).
+  const bank = new SoundBank(ctx, mulberry32(hashSeed(`${seedText}::bank`)));
+  const drums = ctx.createGain();
+  const label = ((taste as { label?: string }).label || '').toLowerCase();
+  const energy = Math.min(1, Math.max(0.1, taste.avg_energy ?? 0.5));
+  const lullaby = label.includes('колыбель');
+  const calmStyle = lullaby || label.includes('успока') || label.includes('эмбиент') || energy < 0.35;
+  const driveStyle = !calmStyle && (label.includes('драйв') || (bpm >= 115 && energy >= 0.55));
+  const insight = label.includes('инсайт');
+  drums.gain.value = lullaby ? 0.5 : 0.8 + energy * 0.5;
+  drums.connect(master);
+
   const tone = (
     freq: number,
     t0: number,
@@ -104,17 +119,57 @@ export async function generateDreamTrack(taste: DreamTaste, seedText = ''): Prom
         tone(noteHz(chordRoot - 12), t0 + b * beat, beat * 0.9, 0.16 * bass + 0.06, 'sine');
       }
     }
-    // arpeggio: seeded 8th-note walk over the scale
+    // plucked-string arpeggio (Karplus-Strong) — живые струны вместо синта
     for (let s = 0; s < 8; s++) {
-      if (rnd() < 0.72) {
+      if (rnd() < (calmStyle ? 0.45 : 0.72)) {
         const step = scale[Math.floor(rnd() * 7)];
         const octave = rnd() < 0.3 ? 24 : 12;
-        tone(noteHz(chordRoot + step + octave), t0 + s * beat * 0.5, beat * 0.45, 0.045 + bright * 0.03, 'triangle');
+        bank.hit(master, 'pluck', t0 + s * beat * 0.5, 0.16 + bright * 0.1, noteHz(chordRoot + step + octave));
       }
     }
-    // sparkles: rare high pings, more when the taste is bright
+    // sparkles: bells when bright / on insight, soft sines otherwise
     if (rnd() < 0.3 + bright * 0.4) {
-      tone(noteHz(chordRoot + 24 + scale[Math.floor(rnd() * 7)]), t0 + rnd() * bar, beat, 0.02, 'sine');
+      const hi = noteHz(chordRoot + 24 + scale[Math.floor(rnd() * 7)]);
+      if (insight || bright > 0.6) bank.hit(master, 'bell', t0 + rnd() * bar, 0.12, hi);
+      else tone(hi, t0 + rnd() * bar, beat, 0.02, 'sine');
+    }
+
+    // --- beats from the sound database (pattern follows the mood) ---------
+    const step16 = beat / 4;
+    for (let s = 0; s < 16; s++) {
+      const ts = t0 + s * step16;
+      if (lullaby) {
+        if (s === 0 || s === 8) bank.hit(drums, 'shaker', ts, 0.25);
+        continue;
+      }
+      if (calmStyle) {
+        if (s === 0) bank.hit(drums, 'kick', ts, 0.35);
+        if (s === 4 || s === 12) bank.hit(drums, 'shaker', ts, 0.3);
+        if (s === 8) bank.hit(drums, 'hat', ts, 0.15);
+        continue;
+      }
+      if (driveStyle) {
+        if (s % 4 === 0) bank.hit(drums, 'kick', ts, 0.55); // four-on-the-floor
+        if (s === 4 || s === 12) bank.hit(drums, 'clap', ts, 0.4);
+        if (s % 2 === 1) bank.hit(drums, 'hat', ts, s % 4 === 3 ? 0.28 : 0.18);
+        if (s === 14 && rnd() < 0.6) bank.hit(drums, 'openhat', ts, 0.22);
+        if (rnd() < 0.06) bank.hit(drums, 'hat', ts + step16 / 2, 0.1); // ghost
+      } else {
+        if (s === 0 || s === 8) bank.hit(drums, 'kick', ts, 0.5);
+        if (s === 4 || s === 12) bank.hit(drums, 'snare', ts, 0.4);
+        if (s % 2 === 0) bank.hit(drums, 'hat', ts, 0.16);
+        if (s === 10 && rnd() < 0.4) bank.hit(drums, 'kick', ts, 0.3); // syncopation
+      }
+    }
+    // fill: tom run at the end of every 4th bar
+    if (!lullaby && !calmStyle && barIdx % 4 === 3) {
+      for (let f = 0; f < 4; f++) {
+        bank.hit(drums, 'tom', t0 + (12 + f) * step16, 0.3, 90 + f * 35);
+      }
+    }
+    // insight: a bell chime opens each bar — радость открытия
+    if (insight && barIdx % 2 === 0) {
+      bank.hit(master, 'bell', t0, 0.14, noteHz(chordRoot + 24));
     }
   }
 
