@@ -1139,7 +1139,9 @@ def _handle_ultra_think(event: Event, args: argparse.Namespace, stores: Mark17St
         pass
 
     reason = decision.get("reason") or ""
-    text = f"Ультра: выбрал «{action}»{' — ' + reason if reason else ''}."
+    ult_version = str(((state.get("ultimate") or {}).get("version")) or "")
+    under = f" под конституцией {ult_version}" if ult_version else ""
+    text = f"Ультра-режим{under}: выбрал «{action}»{' — ' + reason if reason else ''}."
     if action == "research" and isinstance(executed, dict):
         text += f" Выучено фактов: {executed.get('facts_learned', 0)}."
     elif action == "compile":
@@ -1167,7 +1169,15 @@ def _handle_ultra_think(event: Event, args: argparse.Namespace, stores: Mark17St
             "reinforce": "ultra",
         },
         "answer": {"text": text, "source": "ultra_orchestrator", "confidence": 0.65},
-        "ultra": {"state": state, "decision": decision, "executed": executed},
+        "ultra": {
+            "state": state,
+            "decision": decision,
+            "executed": executed,
+            "constitution": {
+                "version": ult_version or "max_ultimate_v0.7",
+                "applied_constraints": decision.get("applied_constraints") or [],
+            },
+        },
     }
 
 

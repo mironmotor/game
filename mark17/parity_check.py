@@ -39,6 +39,9 @@ VOLATILE_KEYS = frozenset(
         "last_used",
         "created_at",
         "updated_at",
+        # Environmental absolute path embedded by get_ultimate_state in the Ultra
+        # snapshot — differs between the two ephemeral parity dirs by design.
+        "state_dir",
     }
 )
 

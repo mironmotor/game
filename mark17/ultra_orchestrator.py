@@ -26,8 +26,29 @@ import re
 from typing import Any
 
 from mark17.gonka_bridge import chat as gonka_chat, is_enabled as gonka_is_enabled
+from mark17.ultimate_core import get_ultimate_state
 
 ALLOWED_ACTIONS = ("research", "compile", "consolidate", "tree", "compose", "none")
+
+# MAX Ultimate v0.7 is the CONSTITUTION; Ultra is the executor. Every Ultra
+# decision operates under these laws of growth — listed per action so the
+# response can show which ones it respected.
+_BASE_CONSTRAINTS = ("bounded_growth", "human_override", "quality_gate")
+_ACTION_CONSTRAINTS = {
+    "research": ("source_backed_learning", "reality_contact"),
+    "compile": ("quality_gate",),
+    "consolidate": ("quality_gate",),
+    "tree": ("quality_gate",),
+    "compose": ("reality_contact",),
+    "none": (),
+}
+
+
+def applied_constraints(action: str) -> list[str]:
+    """Which MAX Ultimate constraints this action operated under (deduped)."""
+    out = list(_BASE_CONSTRAINTS) + list(_ACTION_CONSTRAINTS.get(action, ()))
+    seen: set[str] = set()
+    return [c for c in out if not (c in seen or seen.add(c))]
 
 _DECIDER_PROMPT = (
     "Ты — MAX ULTRA, оркестратор собственного когнитивного ядра. Тебе дано твоё "
@@ -40,6 +61,12 @@ _DECIDER_PROMPT = (
     "  compose — сочинить трек под своё настроение (выбирай при инсайте, после "
     "выученных фактов или когда пользователю нужна поддержка по голосу);\n"
     "  none — ничего не делать (тоже решение).\n"
+    "Ты действуешь ПОД КОНСТИТУЦИЕЙ MAX Ultimate v0.7. Соблюдай её ограничения: "
+    "bounded_growth, source_backed_learning, reality_contact, no_fake_private_mythos, "
+    "human_override, quality_gate. Никогда не выбирай действие, нарушающее ограниченный "
+    "рост или контроль человека. Предпочитай source-backed обучение догадкам. Предпочитай "
+    "полезную сжатую память сырому объёму. Каждое действие должно двигать Max17 к 1 000 000 "
+    "ПОЛЕЗНЫХ синапсов, а не просто к большему количеству данных.\n"
     "Критерии: закрывай пробелы знаний, не повторяй последнее действие без причины, "
     "research выбирай только с конкретным полезным query. Ответ — строго JSON: "
     '{"action":"...","query":"...","reason":"одно предложение почему"}. Только JSON.'
@@ -103,22 +130,54 @@ def gather_state(stores: Any) -> dict[str, Any]:
             state["last_decision"] = hits[0].summary[:120]
     except Exception:  # noqa: BLE001
         pass
+    try:
+        state["has_music_taste"] = len(stores.working_memory.get_music_history(limit=1)) > 0
+    except Exception:  # noqa: BLE001
+        state["has_music_taste"] = False
+    # MAX Ultimate v0.7 constitution snapshot — the laws Ultra acts under.
+    try:
+        state["ultimate"] = get_ultimate_state(stores)
+    except Exception:  # noqa: BLE001 - constitution is read-only; never block agency
+        state["ultimate"] = {}
     return state
 
 
+_TENSE_WORDS = ("напряж", "зажат", "устал", "подавлен", "взвод")
+
+
 def _fallback_policy(state: dict[str, Any]) -> dict[str, str]:
-    """No-LLM agency: a sensible deterministic ordering of needs."""
+    """No-LLM agency under MAX Ultimate v0.7: a deterministic, network-free
+    ordering of needs that always moves toward 1M USEFUL synapses, never loops
+    on research, and prefers compressed memory over raw volume."""
+    ultimate = state.get("ultimate") or {}
+    remaining = int((ultimate.get("progress") or {}).get("remaining") or 0)
     open_gaps = int((state.get("curiosity") or {}).get("stats", {}).get("open") or 0)
-    if open_gaps > 0:
-        top = (state.get("curiosity") or {}).get("top_open") or []
-        query = str(top[0].get("query")) if top else ""
-        return {"action": "research", "query": query, "reason": f"в очереди {open_gaps} открытых пробелов знаний"}
+    top_open = (state.get("curiosity") or {}).get("top_open") or []
     ir_total = int((state.get("ir_stats") or {}).get("total") or 0)
-    if ir_total < 3:
-        return {"action": "compile", "query": "", "reason": "IR-память почти пуста — компилирую недавнюю речь"}
-    if not state.get("memory_map"):
+    has_map = bool(state.get("memory_map"))
+    voice = str(state.get("user_voice_state") or "").lower()
+    tense = any(w in voice for w in _TENSE_WORDS)
+    has_music = bool(state.get("has_music_taste"))
+    last_was_research = "research" in str(state.get("last_decision") or "").lower()
+
+    # 1) bounded, source-backed growth toward 1M — only with a concrete gap, and
+    #    never two researches in a row (bounded_growth + no spinning).
+    if remaining > 0 and open_gaps > 0 and top_open and not last_was_research:
+        query = str(top_open[0].get("query") or "")
+        if query:
+            return {"action": "research", "query": query,
+                    "reason": f"под конституцией закрываю пробел знаний source-backed (до цели ещё {remaining:,})"}
+    # 2) quality over volume — compress raw speech into useful IR memory.
+    if ir_total < 5:
+        return {"action": "compile", "query": "", "reason": "IR-память ещё тонкая — сжимаю смысл, а не объём"}
+    # 3) keep the one-take map fresh.
+    if not has_map:
         return {"action": "tree", "query": "", "reason": "нет карты памяти — строю меркл-дерево"}
-    return {"action": "consolidate", "query": "", "reason": "плановая консолидация: паттерны и мосты"}
+    # 4) reality contact: support the user with a track when they sound strained.
+    if tense and has_music:
+        return {"action": "compose", "query": "", "reason": "слышу напряжение — поддержу музыкой под настроение"}
+    # 5) settle into consolidation rather than spinning on more data.
+    return {"action": "consolidate", "query": "", "reason": "плановая консолидация: паттерны и мосты, без погони за объёмом"}
 
 
 def decide(state: dict[str, Any]) -> dict[str, Any]:
@@ -154,4 +213,6 @@ def decide(state: dict[str, Any]) -> dict[str, Any]:
         # research without a topic is noise — degrade to consolidation.
         decision = {"action": "consolidate", "query": "", "reason": "research без query — заменено консолидацией"}
     decision["decider"] = decider
+    # The MAX Ultimate constraints this decision operated under (the constitution).
+    decision["applied_constraints"] = applied_constraints(decision["action"])
     return decision

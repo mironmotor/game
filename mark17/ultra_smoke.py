@@ -62,6 +62,22 @@ def main() -> int:
         if "executed" not in u1:
             _fail("nothing executed")
 
+        # MAX Ultimate v0.7 constitution must be in Ultra's state snapshot…
+        ult = (u1.get("state") or {}).get("ultimate") or {}
+        if ult.get("version") != "max_ultimate_v0.7":
+            _fail(f"ultimate version not in state: {ult.get('version')}")
+        if int(ult.get("target_synapses") or 0) != 1_000_000:
+            _fail(f"ultimate target wrong: {ult.get('target_synapses')}")
+        for key in ("principles", "constraints", "clusters", "life_game_domains", "knowledge_pack_strategy", "roadmap", "progress"):
+            if key not in ult:
+                _fail(f"ultimate state missing {key}")
+        # …and the decision must declare which constitution it acted under.
+        con = u1.get("constitution") or {}
+        if con.get("version") != "max_ultimate_v0.7":
+            _fail(f"constitution version missing: {con}")
+        if not con.get("applied_constraints"):
+            _fail("no applied_constraints on the decision")
+
         # The decision must be remembered…
         hits = stores.vector_memory.recall("ultra decision решение оркестратора", limit=2)
         if not hits or hits[0].event_type != "ultra_decision":
@@ -77,6 +93,9 @@ def main() -> int:
             "ok": True,
             "think1": {"action": d1.get("action"), "reason": d1.get("reason"), "decider": d1.get("decider")},
             "think2": {"action": ((r2.get("ultra") or {}).get("decision") or {}).get("action"), "saw_last": True},
+            "ultimate_version": ult.get("version"),
+            "target_synapses": ult.get("target_synapses"),
+            "applied_constraints": con.get("applied_constraints"),
         }
     print(json.dumps(out, ensure_ascii=False))
     return 0
