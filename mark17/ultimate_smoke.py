@@ -38,9 +38,15 @@ def main() -> int:
     _assert(payload.get("ok") is True, "ultimate payload should be ok")
     _assert(payload.get("route") == "ultimate_core", "route should be ultimate_core")
     _assert(isinstance(ultimate, dict), "ultimate_core field missing")
+    _assert(ultimate.get("version") == "max_ultimate_v0.7", "version should be max_ultimate_v0.7")
     _assert(int(ultimate.get("target_synapses") or 0) == 1_000_000, "target should be 1M")
     _assert(int(ultimate.get("facts_cached") or 0) >= 3, "source facts should be cached")
-    _assert(int(ultimate.get("doctrine_cached") or 0) >= 5, "doctrine should be cached")
+    _assert(int(ultimate.get("doctrine_cached") or 0) >= 10, "v0.7 doctrine should be cached")
+    _assert(isinstance(ultimate.get("constraints"), list) and len(ultimate["constraints"]) >= 5, "constraints missing")
+    _assert(isinstance(ultimate.get("life_game_domains"), list) and len(ultimate["life_game_domains"]) >= 8, "life domains missing")
+    state = ultimate.get("state")
+    _assert(isinstance(state, dict) and state.get("version") == "max_ultimate_v0.7", "read-only ultimate state missing")
+    _assert(int(state.get("target_synapses") or 0) == 1_000_000, "state target should be 1M")
     synapses = payload.get("synapses")
     _assert(isinstance(synapses, dict), "synapses field missing")
     _assert(int(synapses.get("updated") or 0) > 0, "ultimate bootstrap should update synapses")
@@ -53,6 +59,8 @@ def main() -> int:
                 "route": payload.get("route"),
                 "facts_cached": ultimate.get("facts_cached"),
                 "doctrine_cached": ultimate.get("doctrine_cached"),
+                "constraints": [item.get("id") for item in ultimate.get("constraints", [])[:4]],
+                "life_domains": [item.get("id") for item in ultimate.get("life_game_domains", [])[:4]],
                 "synapses_updated": synapses.get("updated"),
                 "target_synapses": ultimate.get("target_synapses"),
                 "answer": answer.get("text"),

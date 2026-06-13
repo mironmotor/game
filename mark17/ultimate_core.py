@@ -10,7 +10,9 @@ from __future__ import annotations
 
 import hashlib
 import json
+import sqlite3
 import time
+from pathlib import Path
 from typing import Any
 
 from mark17.events import Event
@@ -19,7 +21,7 @@ from mark17.source_memory import SourceMemory
 from mark17.synapse_graph import SynapseGraph
 from mark17.vector_memory import VectorMemory
 
-MAX_ULTIMATE_VERSION = "max_ultimate_v0.1"
+MAX_ULTIMATE_VERSION = "max_ultimate_v0.7"
 MAX_ULTIMATE_TARGET_SYNAPSES = 1_000_000
 
 
@@ -105,6 +107,30 @@ MAX17_CACHED_DOCTRINE = (
         "summary": "Рост ядра должен быть ограниченным, измеряемым и не перегревать Mac: батчи, лимиты, ручной запуск, без фонового хаоса.",
         "topic": "safety_risk",
     },
+    {
+        "id": "life_gamification",
+        "label": "геймификация жизни",
+        "summary": "Game должен переводить реальную жизнь в квесты: энергия, фокус, деньги, работа, отношения, тело, обучение и созданный результат.",
+        "topic": "life_game",
+    },
+    {
+        "id": "quality_over_volume",
+        "label": "качество важнее массы",
+        "summary": "Миллион синапсов полезен только если связи улучшают recall, план, outcome и контакт с реальностью; мусорные связи надо сжимать или ослаблять.",
+        "topic": "synapse_quality",
+    },
+    {
+        "id": "hot_cold_memory",
+        "label": "горячая и холодная память",
+        "summary": "Активный hot graph держит полезные текущие связи; редкая cold memory уходит в сжатые паттерны, source facts и meaning tree.",
+        "topic": "memory_architecture",
+    },
+    {
+        "id": "human_control",
+        "label": "человек управляет ростом",
+        "summary": "Max17 может предлагать обучение и self-growth, но тяжёлые импорты, web-автономность и фоновые циклы должны оставаться под контролем Мирона.",
+        "topic": "bounded_autonomy",
+    },
 )
 
 
@@ -117,6 +143,95 @@ ULTIMATE_CLUSTERS = (
     ("reality_alignment", "ответы возвращают человека к телу, людям, работе и созданию"),
     ("bounded_autonomy", "ручной контроль, лимиты, provenance, проверяемость"),
     ("million_synapses", "дорога к 1M полезных связей"),
+    ("life_gamification", "реальная жизнь как квесты, XP, уровни, streaks и outcome"),
+    ("synapse_quality", "качество, decay, pruning, compression и health score"),
+    ("hot_cold_memory", "hot graph для действий, cold graph для архива и смыслового дерева"),
+)
+
+
+ULTIMATE_CONSTRAINTS = (
+    {
+        "id": "bounded_growth",
+        "summary": "Рост идёт батчами, без фонового перегрева и без бесконечных циклов.",
+    },
+    {
+        "id": "source_backed_learning",
+        "summary": "Факты из интернета хранят provenance и не смешиваются с личной памятью без relevance gate.",
+    },
+    {
+        "id": "reality_contact",
+        "summary": "Ответ должен повышать контакт с телом, работой, деньгами, людьми или созданным результатом.",
+    },
+    {
+        "id": "no_fake_private_mythos",
+        "summary": "Нельзя утверждать доступ к закрытым Anthropic/Mythos материалам или копировать несуществующие приватные веса.",
+    },
+    {
+        "id": "human_override",
+        "summary": "Мирон может остановить серверы, web, рост графа и любые автономные циклы.",
+    },
+    {
+        "id": "quality_gate",
+        "summary": "Новые связи должны проходить usefulness/relevance/outcome gate; слабое знание сжимается или уходит в cold memory.",
+    },
+)
+
+
+LIFE_GAME_DOMAINS = (
+    ("body", "тело", "сон, еда, движение, дыхание, усталость, восстановление"),
+    ("energy", "энергия", "заряд, бодрость, перегрузка, ритм дня"),
+    ("focus", "фокус", "глубокая работа, внимание, отвлечения, маленький следующий шаг"),
+    ("money", "деньги", "доход, ценность, расходы, результат на рынке"),
+    ("work", "работа", "проекты, доставка, качество, ответственность"),
+    ("relationships", "отношения", "семья, дружба, любовь, границы, конфликт, восстановление связи"),
+    ("learning", "обучение", "навыки, практика, ошибки, закрепление"),
+    ("creation", "создание", "код, музыка, тексты, продукты, визуалы"),
+    ("home", "дом", "среда, порядок, безопасность, место силы"),
+    ("meaning", "смысл", "цель, ценности, честность, контакт с реальностью"),
+)
+
+
+KNOWLEDGE_PACK_STRATEGY = (
+    {
+        "id": "life_basics",
+        "summary": "Базовая карта человеческой жизни: тело, сон, еда, энергия, стресс, восстановление.",
+    },
+    {
+        "id": "human_relations",
+        "summary": "Связи семьи, дружбы, любви, доверия, границ, конфликта и заботы.",
+    },
+    {
+        "id": "game_gamification",
+        "summary": "XP, квесты, уровни, streaks, награды и превращение жизни в игру без ухода от реальности.",
+    },
+    {
+        "id": "work_money_projects",
+        "summary": "Проекты, деньги, рынок, фокус, доставка результата и качество.",
+    },
+    {
+        "id": "common_sense_core",
+        "summary": "Базовые связи мира: солнце, свет, вода, дом, звук, движение, причина и следствие.",
+    },
+)
+
+
+ULTIMATE_ROADMAP = (
+    {
+        "stage": "v0.7",
+        "summary": "Конституция ядра: доктрина, constraints, life-game domains, quality gates, 1M target.",
+    },
+    {
+        "stage": "v0.8",
+        "summary": "Max Ultra читает Ultimate state и выбирает действия строго внутри этой стратегии.",
+    },
+    {
+        "stage": "v0.9",
+        "summary": "Knowledge Pack ingestion: маленькие проверенные базы знаний вместо сырого 10GB шума.",
+    },
+    {
+        "stage": "v1.0",
+        "summary": "Max Core v1: Game UI, Ultimate constitution, Ultra executor, memory graph, outcome feedback и health dashboard работают вместе.",
+    },
 )
 
 
@@ -179,6 +294,103 @@ def _cache_source_item(source_memory: SourceMemory, item: dict[str, Any]) -> tup
             )
         )
     return source_id, fact_ids
+
+
+def _progress_from_graph(synapse_graph: SynapseGraph | None, target: int) -> dict[str, Any]:
+    if synapse_graph is None:
+        return {
+            "total_synapses": 0,
+            "remaining": target,
+            "progress_percent": 0.0,
+            "source": "unavailable",
+        }
+    try:
+        with synapse_graph._conn() as c:
+            total = int(c.execute("SELECT COUNT(*) FROM synapses").fetchone()[0])
+    except (sqlite3.Error, AttributeError, TypeError):
+        total = 0
+    return {
+        "total_synapses": total,
+        "remaining": max(0, target - total),
+        "progress_percent": round(min(100.0, (total / target) * 100), 4),
+        "source": "synapse_graph",
+    }
+
+
+def _source_counts(source_memory: SourceMemory | None) -> dict[str, int]:
+    if source_memory is None:
+        return {}
+    try:
+        return source_memory.counts()
+    except Exception:  # noqa: BLE001 - read-only state should never break callers.
+        return {}
+
+
+def _coerce_stores(
+    stores_or_state_dir: Any,
+    synapse_graph: SynapseGraph | None,
+    source_memory: SourceMemory | None,
+) -> tuple[Path | None, SynapseGraph | None, SourceMemory | None]:
+    state_dir: Path | None = None
+    if hasattr(stores_or_state_dir, "state_dir"):
+        state_dir = Path(stores_or_state_dir.state_dir)
+        synapse_graph = synapse_graph or getattr(stores_or_state_dir, "synapse_graph", None)
+        source_memory = source_memory or getattr(stores_or_state_dir, "source_memory", None)
+    elif stores_or_state_dir is not None:
+        state_dir = Path(stores_or_state_dir)
+    if synapse_graph is None and state_dir is not None:
+        try:
+            synapse_graph = SynapseGraph(state_dir)
+        except Exception:  # noqa: BLE001
+            synapse_graph = None
+    if source_memory is None and state_dir is not None:
+        try:
+            source_memory = SourceMemory(state_dir)
+        except Exception:  # noqa: BLE001
+            source_memory = None
+    return state_dir, synapse_graph, source_memory
+
+
+def get_ultimate_state(
+    stores_or_state_dir: Any = None,
+    synapse_graph: SynapseGraph | None = None,
+    source_memory: SourceMemory | None = None,
+) -> dict[str, Any]:
+    """Read-only constitution snapshot for future Max Ultra integration."""
+
+    state_dir, graph, sources = _coerce_stores(stores_or_state_dir, synapse_graph, source_memory)
+    target = MAX_ULTIMATE_TARGET_SYNAPSES
+    return {
+        "version": MAX_ULTIMATE_VERSION,
+        "target_synapses": target,
+        "principles": [
+            {
+                "id": str(item["id"]),
+                "label": str(item["label"]),
+                "summary": str(item["summary"]),
+                "topic": str(item["topic"]),
+            }
+            for item in MAX17_CACHED_DOCTRINE
+        ],
+        "constraints": list(ULTIMATE_CONSTRAINTS),
+        "clusters": [
+            {"id": cluster_id, "summary": summary}
+            for cluster_id, summary in ULTIMATE_CLUSTERS
+        ],
+        "life_game_domains": [
+            {"id": domain_id, "label": label, "summary": summary}
+            for domain_id, label, summary in LIFE_GAME_DOMAINS
+        ],
+        "knowledge_pack_strategy": list(KNOWLEDGE_PACK_STRATEGY),
+        "roadmap": list(ULTIMATE_ROADMAP),
+        "progress": _progress_from_graph(graph, target),
+        "source_memory_counts": _source_counts(sources),
+        "state_dir": str(state_dir) if state_dir is not None else "",
+        "source_note": (
+            "MAX Ultimate v0.7 is a local constitution/scaffold. It uses local user doctrine "
+            "and public high-level Mythos/Glasswing lessons only."
+        ),
+    }
 
 
 def bootstrap_ultimate_core(
@@ -259,6 +471,9 @@ def bootstrap_ultimate_core(
     touch("core", "max_ultimate", "memory_system", "source_memory", "contains", 0.86, "Web/source facts are cached with provenance.")
     touch("core", "max_ultimate", "memory_system", "synapse_graph", "contains", 0.9, "Meaning travels through weighted associations.")
     touch("core", "max_ultimate", "model_layer", "llm_voice", "related_to", 0.72, "The LLM is a voice layer, not the whole mind.")
+    touch("core", "max_ultimate", "quality_system", "synapse_quality_gate", "contains", 0.86, "Quality gates keep graph growth useful.")
+    touch("core", "max_ultimate", "memory_system", "hot_cold_memory", "contains", 0.84, "Hot graph acts now; cold memory compresses history.")
+    touch("core", "max_ultimate", "life_system", "game_life_graph", "contains", 0.88, "Life gamification turns real domains into quests and outcomes.")
 
     for item in MAX17_CACHED_DOCTRINE:
         concept_id = str(item["topic"])
@@ -276,6 +491,28 @@ def bootstrap_ultimate_core(
     for cluster_id, summary in ULTIMATE_CLUSTERS:
         touch("core", "max_ultimate", "ultimate_cluster", cluster_id, "contains", 0.76, summary)
         touch("ultimate_cluster", cluster_id, "goal", "million_useful_synapses", "leads_to", 0.7, summary)
+
+    for constraint in ULTIMATE_CONSTRAINTS:
+        constraint_id = str(constraint["id"])
+        touch("core", "max_ultimate", "constraint", constraint_id, "contains", 0.84, str(constraint["summary"]))
+        touch("constraint", constraint_id, "goal", "million_useful_synapses", "reinforces", 0.64, str(constraint["summary"]))
+
+    for domain_id, label, summary in LIFE_GAME_DOMAINS:
+        touch("life_game", "game_of_life", "life_domain", domain_id, "contains", 0.76, summary)
+        touch("life_domain", domain_id, "core", "max_ultimate", "reinforces", 0.66, f"{label}: {summary}")
+        touch("life_domain", domain_id, "principle", "reality_contact", "related_to", 0.72, f"{label} is checked through reality contact.")
+
+    for pack in KNOWLEDGE_PACK_STRATEGY:
+        pack_id = str(pack["id"])
+        touch("knowledge_pack", pack_id, "core", "max_ultimate", "related_to", 0.7, str(pack["summary"]))
+        touch("knowledge_pack", pack_id, "memory_system", "source_memory", "leads_to", 0.68, "Pack facts should be cached with provenance.")
+
+    for index, step in enumerate(ULTIMATE_ROADMAP):
+        stage = str(step["stage"])
+        touch("core", "max_ultimate", "roadmap_stage", stage, "leads_to", 0.72, str(step["summary"]))
+        if index:
+            prev = str(ULTIMATE_ROADMAP[index - 1]["stage"])
+            touch("roadmap_stage", prev, "roadmap_stage", stage, "leads_to", 0.7, f"{prev} -> {stage}")
 
     for left_index, (left_id, left_summary) in enumerate(ULTIMATE_CLUSTERS):
         for right_id, right_summary in ULTIMATE_CLUSTERS[left_index + 1 :]:
@@ -300,6 +537,17 @@ def bootstrap_ultimate_core(
             {"id": cluster_id, "summary": summary}
             for cluster_id, summary in ULTIMATE_CLUSTERS
         ],
+        "constraints": list(ULTIMATE_CONSTRAINTS),
+        "life_game_domains": [
+            {"id": domain_id, "label": label, "summary": summary}
+            for domain_id, label, summary in LIFE_GAME_DOMAINS
+        ],
+        "knowledge_pack_strategy": list(KNOWLEDGE_PACK_STRATEGY),
+        "roadmap": list(ULTIMATE_ROADMAP),
+        "state": get_ultimate_state(
+            synapse_graph=synapse_graph,
+            source_memory=source_memory,
+        ),
         "synapses": {
             "updated": len(touched),
             "top": synapse_graph._fetch_synapses(touched, limit=5),

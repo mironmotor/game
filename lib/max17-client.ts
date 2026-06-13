@@ -169,6 +169,11 @@ export interface Max17UltimateCore {
   source_ids?: number[];
   fact_ids?: number[];
   clusters?: Array<Record<string, unknown>>;
+  constraints?: Array<Record<string, unknown>>;
+  life_game_domains?: Array<Record<string, unknown>>;
+  knowledge_pack_strategy?: Array<Record<string, unknown>>;
+  roadmap?: Array<Record<string, unknown>>;
+  state?: Record<string, unknown>;
   synapses?: Max17Synapses;
   elapsed_ms?: number;
   source_note?: string;

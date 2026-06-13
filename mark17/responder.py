@@ -1207,6 +1207,8 @@ def _web_research_answer(response: dict[str, Any]) -> dict[str, Any]:
 def _ultimate_core_answer(response: dict[str, Any]) -> dict[str, Any]:
     ultimate = response.get("ultimate_core")
     ultimate = ultimate if isinstance(ultimate, dict) else {}
+    version = str(ultimate.get("version") or "max_ultimate_v0.7")
+    public_version = version.replace("max_ultimate_", "")
     target = int(ultimate.get("target_synapses") or 1_000_000)
     cached = int(ultimate.get("facts_cached") or 0)
     doctrine = int(ultimate.get("doctrine_cached") or 0)
@@ -1220,14 +1222,20 @@ def _ultimate_core_answer(response: dict[str, Any]) -> dict[str, Any]:
             if isinstance(cluster, dict) and cluster.get("id"):
                 cluster_names.append(str(cluster["id"]))
     cluster_text = f" Активные каркасы: {', '.join(cluster_names)}." if cluster_names else ""
+    constraints = ultimate.get("constraints")
+    constraint_text = ""
+    if isinstance(constraints, list) and constraints:
+        names = [str(item.get("id")) for item in constraints[:3] if isinstance(item, dict) and item.get("id")]
+        if names:
+            constraint_text = f" Ограничения ядра: {', '.join(names)}."
     return {
         "text": (
-            "MAX Ultimate v0.1 поднят как слой над текущим Max17, без переписывания ядра. "
+            f"MAX Ultimate {public_version} поднят как конституция над текущим Max17, без переписывания ядра. "
             f"Я закешировал {doctrine} внутренних принципов и {cached} source-backed фактов, "
             f"добавил/усилил {updated} связей и поставил цель {target} полезных синапсов. "
             "Главный принцип: Mythos-урок берём не как магию модели, а как scaffold — "
             "источники, инструменты, проверка, память, граф и ограниченный рост."
-            f"{cluster_text} Следующий шаг — растить граф батчами и проверять каждую новую ветку через outcome."
+            f"{cluster_text}{constraint_text} Следующий шаг — дать Max Ultra читать эту конституцию перед каждым своим решением."
         ),
         "source": "composer",
         "confidence": 1.0,
