@@ -950,6 +950,24 @@ function HudContent() {
     // Fast local path: interface control by text or voice ("закрой миссии",
     // "смени фон", "сбрось окна"). Executed instantly; still forwarded to Max17
     // in the background so the cognitive core keeps the memory trace.
+    // Bulk-ingest prefix: «впитай <текст>» / «изучи проект <путь>» — feed Max a
+    // corpus so it grows the synapse graph (the road to 1M). Checked before the
+    // word-limit-bound command interpreter, so long pastes still work.
+    const ingestMatch = userMsg.match(/^\s*(впитай|проглоти|запомни текст|изучи проект)[:\s]+([\s\S]+)/i);
+    if (ingestMatch) {
+      setInput('');
+      const isPath = /изучи проект/i.test(ingestMatch[1]);
+      const body = ingestMatch[2].trim();
+      pushLog(`Вы: ${userMsg.slice(0, 80)}`);
+      setAgiMessage('MAX17: впитываю…');
+      const res = await emitMax17HudEvent(isPath ? { type: 'ingest_corpus', path: body } : { type: 'ingest_corpus', text: body });
+      const note = res?.answer?.text || 'готово';
+      pushLog(`🧩 ${note}`);
+      setAgiMessage(`MAX17: ${note}`);
+      speakMax17(note.split('.')[0]);
+      return;
+    }
+
     const uiCommand = interpretUiCommand(userMsg);
     if (uiCommand) {
       setInput('');

@@ -31,6 +31,7 @@
     "max17:tree": "python3 mark17/meaning_tree_smoke.py",
     "max17:ultra": "python3 mark17/ultra_smoke.py",
     "max17:music": "python3 mark17/music_smoke.py",
+    "max17:ingest": "python3 mark17/corpus_smoke.py",
     "max17:codemem": "python3 mark17/code_memory_smoke.py",
     "max17:concepts": "python3 mark17/concepts_smoke.py",
     "max17:stats": "python3 mark17/json_cli.py --no-llm < mark17/examples/max17-graph-stats.json",

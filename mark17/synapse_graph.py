@@ -235,6 +235,33 @@ class SynapseGraph:
             metadata=metadata,
         )
 
+    def count(self) -> int:
+        with self._conn() as c:
+            row = c.execute("SELECT COUNT(*) AS n FROM synapses").fetchone()
+        return int(row["n"]) if row else 0
+
+    def prune_weak(self, *, weight_below: float = 0.12, max_evidence: int = 1, min_age_sec: float = 86400.0, limit: int = 5000) -> int:
+        """Forget the weakest, least-evidenced, stale edges so a million-edge graph
+        stays signal, not noise. Conservative: only edges below the weight floor
+        AND with ≤max_evidence AND not touched for min_age. Returns rows pruned."""
+        import time as _t
+
+        cutoff = _t.time() - max(0.0, min_age_sec)
+        with self._conn() as c:
+            cur = c.execute(
+                """
+                DELETE FROM synapses
+                WHERE id IN (
+                    SELECT id FROM synapses
+                    WHERE weight < ? AND evidence_count <= ? AND last_used < ?
+                    ORDER BY weight ASC, last_used ASC
+                    LIMIT ?
+                )
+                """,
+                (float(weight_below), int(max_evidence), cutoff, int(limit)),
+            )
+            return int(cur.rowcount or 0)
+
     def get_top_synapses(self, limit: int = 5) -> list[dict[str, Any]]:
         with self._conn() as c:
             rows = c.execute(

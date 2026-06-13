@@ -39,6 +39,7 @@ from mark17.semantic_compiler import MIN_SIM as IR_MIN_SIM, SemanticCompiler
 from mark17.meaning_tree import MeaningTree
 from mark17.ultra_orchestrator import decide as ultra_decide, gather_state as ultra_gather_state
 from mark17.music_sense import aggregate_taste, analyze_music, mood_music_spec
+from mark17.corpus_ingest import ingest_path, ingest_text
 from mark17.concepts import ConceptGrounding
 from mark17.concept_compression import compress_to_concept
 from mark17.concept_codec import extract_concepts as codec_extract_concepts
@@ -76,6 +77,7 @@ ALLOWED_EVENTS = frozenset(
         "music_observation",
         "music_taste",
         "dream_mood",
+        "ingest_corpus",
         "sleep_consolidation",
         "working_memory_reset",
         "outcome_success",
@@ -119,7 +121,7 @@ def _as_event(data: dict[str, Any]) -> Event:
         if key not in {"type", "event", "source", "ts"}
     }
 
-    if event_type in {"user_message", "compress_memory", "compile_semantic"}:
+    if event_type in {"user_message", "compress_memory", "compile_semantic", "ingest_corpus"}:
         text = data.get("message") or data.get("text") or data.get("content") or ""
         payload["text"] = str(text)
     elif event_type in {"web_research", "web_ingest"}:
@@ -981,6 +983,44 @@ def _handle_music_taste(stores: Mark17Stores) -> dict[str, Any]:
     }
 
 
+def _handle_ingest_corpus(event: Event, stores: Mark17Stores) -> dict[str, Any]:
+    """Phase 10: bulk a corpus (free text or a project file/folder) into the
+    graph via the semantic compiler. The road to 1M synapses — your meaning."""
+    compiler = SemanticCompiler(stores.state_dir)
+    path = str(event.payload.get("path") or "").strip()
+    text = str(event.payload.get("text") or "").strip()
+    if path:
+        report = ingest_path(path, compiler=compiler, vector_memory=stores.vector_memory, synapse_graph=stores.synapse_graph)
+        label = f"путь «{report.get('root', path)}» ({report.get('files', 0)} файлов)"
+    else:
+        report = ingest_text(text, source="hud", compiler=compiler, vector_memory=stores.vector_memory, synapse_graph=stores.synapse_graph)
+        label = f"{report.get('chunks', 0)} фрагментов"
+    added = int(report.get("synapses_added") or 0)
+    total = int(report.get("synapses_after") or stores.synapse_graph.count())
+    to_goal = max(0, 1_000_000 - total)
+    if report.get("error"):
+        text_out = f"Не смог проглотить: {report['error']}"
+    else:
+        text_out = (
+            f"Проглотил {label}: +{added} синапсов "
+            f"(скомпилировано {report.get('compiled', 0)}, из кеша {report.get('cached', 0)}). "
+            f"Всего связей: {total:,}. До миллиона ещё {to_goal:,}."
+        )
+    return {
+        "ok": True,
+        "event_type": "ingest_corpus",
+        "route": "corpus_ingest",
+        "memory": {},
+        "plasticity": {"confidence": 0.7, "action": "ingest", "learned": added > 0},
+        "llm": {"status": "skipped", "text": "Bulk-ингест корпуса.", "latency_ms": 0.0},
+        "next_adaptation": text_out,
+        "self_evaluation": {"score": 0.7, "reason": f"ingest +{added} synapses", "store_memory": False, "reinforce": "ingest"},
+        "answer": {"text": text_out, "source": "corpus_ingest", "confidence": 0.7},
+        "ingest": report,
+        "graph_total": total,
+    }
+
+
 def _handle_dream_mood(event: Event, stores: Mark17Stores) -> dict[str, Any]:
     """Phase 9.5: Max's current mood → composition spec for Dreaming Music.
     Mood = his learned taste, как звучит пользователь, недавний кайф, инсайт."""
@@ -1665,6 +1705,9 @@ def normalize(result: dict[str, Any]) -> dict[str, Any]:
     dream_mood = result.get("dream_mood")
     if isinstance(dream_mood, dict):
         normalized["dream_mood"] = dream_mood
+    ingest = result.get("ingest")
+    if isinstance(ingest, dict):
+        normalized["ingest"] = ingest
     web = result.get("web")
     if isinstance(web, dict):
         normalized["web"] = web
@@ -1969,6 +2012,8 @@ def _handle_event(event: Event, args: argparse.Namespace, stores: Mark17Stores) 
         return _handle_music_taste(stores)
     if event.type == "dream_mood":
         return _handle_dream_mood(event, stores)
+    if event.type == "ingest_corpus":
+        return _handle_ingest_corpus(event, stores)
     if event.type in OUTCOME_EVENT_TYPES:
         return _handle_outcome_event(event, brain, vector_memory, synapse_graph, working_memory)
     if event.type in {"internal_dream", "generate_synergies"}:
@@ -2512,6 +2557,15 @@ def _handle_sleep_consolidation(
         MeaningTree(vector_memory.db_path.parent).build(vector_memory)
     except Exception:  # noqa: BLE001
         pass
+    # Phase 10: prune the weakest, stalest, least-evidenced edges so a growing
+    # graph stays signal — a million SHARP synapses, not a million noisy ones.
+    if os.environ.get("MAX17_PRUNE") != "false":
+        try:
+            pruned = synapse_graph.prune_weak()
+            if isinstance(consolidation, dict) and pruned:
+                consolidation["pruned_synapses"] = pruned
+        except Exception:  # noqa: BLE001
+            pass
     patterns = consolidation.get("patterns") if isinstance(consolidation, dict) else []
     strengths = [
         float(pattern.get("strength", 0.0))
