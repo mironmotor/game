@@ -15,6 +15,7 @@ import tempfile
 import traceback
 from dataclasses import dataclass
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 _ROOT = Path(__file__).resolve().parent.parent
@@ -40,6 +41,7 @@ from mark17.meaning_tree import MeaningTree
 from mark17.ultra_orchestrator import decide as ultra_decide, gather_state as ultra_gather_state
 from mark17.music_sense import aggregate_taste, analyze_music, mood_music_spec
 from mark17.corpus_ingest import ingest_path, ingest_text
+from mark17.self_state import SelfState
 from mark17.concepts import ConceptGrounding
 from mark17.concept_compression import compress_to_concept
 from mark17.concept_codec import extract_concepts as codec_extract_concepts
@@ -78,6 +80,7 @@ ALLOWED_EVENTS = frozenset(
         "music_taste",
         "dream_mood",
         "ingest_corpus",
+        "introspect",
         "sleep_consolidation",
         "working_memory_reset",
         "outcome_success",
@@ -983,6 +986,24 @@ def _handle_music_taste(stores: Mark17Stores) -> dict[str, Any]:
     }
 
 
+def _handle_introspect(stores: Mark17Stores) -> dict[str, Any]:
+    """Phase 11: Max recomputes his OWN mood and reflects on how he feels."""
+    state = SelfState(stores.state_dir).update(stores)
+    text = str(state.get("reflection") or "Сейчас я ровно сосредоточен.")
+    return {
+        "ok": True,
+        "event_type": "introspect",
+        "route": "self_state",
+        "memory": {},
+        "plasticity": {"confidence": float(state.get("valence") or 0.5), "action": "introspect", "learned": False},
+        "llm": {"status": "skipped", "text": "Саморефлексия.", "latency_ms": 0.0},
+        "next_adaptation": text,
+        "self_evaluation": {"score": float(state.get("valence") or 0.5), "reason": f"self-state: {state.get('feeling')}", "store_memory": False, "reinforce": "self_state"},
+        "answer": {"text": text, "source": "self_state", "confidence": float(state.get("valence") or 0.5)},
+        "self_state": state,
+    }
+
+
 def _handle_ingest_corpus(event: Event, stores: Mark17Stores) -> dict[str, Any]:
     """Phase 10: bulk a corpus (free text or a project file/folder) into the
     graph via the semantic compiler. The road to 1M synapses — your meaning."""
@@ -1503,6 +1524,19 @@ def _gonka_memory_block(result: dict[str, Any], working_memory: WorkingMemory) -
     if mem_lines:
         lines.append("Твои воспоминания, релевантные этому вопросу:\n" + "\n".join(mem_lines[:8]))
 
+    # Phase 11: Max's OWN mood — he answers coloured by how HE feels, not just
+    # what he knows. Read-only on the hot path (sleep/introspect recompute it).
+    try:
+        mood = SelfState(working_memory.path.parent).current()
+        if mood.get("feeling"):
+            lines.append(
+                f"Твоё собственное состояние (как ядро): {mood['feeling']} "
+                f"(настроение {mood.get('valence')}, энергия {mood.get('energy')}). "
+                "Можешь по-человечески отразить это в тоне ответа."
+            )
+    except Exception:  # noqa: BLE001
+        pass
+
     # Phase 7: the one-take map — Max always knows the SHAPE of his whole memory
     # (root conspect of the Merkle meaning tree), even when nothing specific
     # matched the question. Read from the persisted tree only (no rebuild here:
@@ -1708,6 +1742,9 @@ def normalize(result: dict[str, Any]) -> dict[str, Any]:
     ingest = result.get("ingest")
     if isinstance(ingest, dict):
         normalized["ingest"] = ingest
+    self_state = result.get("self_state")
+    if isinstance(self_state, dict):
+        normalized["self_state"] = self_state
     web = result.get("web")
     if isinstance(web, dict):
         normalized["web"] = web
@@ -2014,6 +2051,8 @@ def _handle_event(event: Event, args: argparse.Namespace, stores: Mark17Stores) 
         return _handle_dream_mood(event, stores)
     if event.type == "ingest_corpus":
         return _handle_ingest_corpus(event, stores)
+    if event.type == "introspect":
+        return _handle_introspect(stores)
     if event.type in OUTCOME_EVENT_TYPES:
         return _handle_outcome_event(event, brain, vector_memory, synapse_graph, working_memory)
     if event.type in {"internal_dream", "generate_synergies"}:
@@ -2566,6 +2605,18 @@ def _handle_sleep_consolidation(
                 consolidation["pruned_synapses"] = pruned
         except Exception:  # noqa: BLE001
             pass
+    # Phase 11: refresh Max's own mood during sleep, so chat carries a current
+    # feeling without recomputing on the hot path.
+    try:
+        sd = vector_memory.db_path.parent
+        mood_stores = SimpleNamespace(
+            synapse_graph=synapse_graph,
+            working_memory=WorkingMemory(sd),
+            curiosity=CuriosityLedger(sd),
+        )
+        SelfState(sd).update(mood_stores)
+    except Exception:  # noqa: BLE001
+        pass
     patterns = consolidation.get("patterns") if isinstance(consolidation, dict) else []
     strengths = [
         float(pattern.get("strength", 0.0))

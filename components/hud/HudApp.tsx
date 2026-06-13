@@ -623,6 +623,16 @@ function HudContent() {
         case 'compose':
           void composeMoodTrack(false);
           break;
+        case 'introspect':
+          void emitMax17HudEvent({ type: 'introspect' }).then((res) => {
+            const note = res?.answer?.text;
+            if (note) {
+              pushLog(`💭 ${note}`);
+              setAgiMessage(`MAX17: ${note}`);
+              speakMax17(note.replace(/^[^\wа-яА-Я]+/, ''));
+            }
+          });
+          break;
         case 'reset':
           wm.resetLayout();
           break;

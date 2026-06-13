@@ -60,6 +60,7 @@ BATTERY: list[dict[str, Any]] = [
     {"type": "music_taste"},
     {"type": "dream_mood"},
     {"type": "ingest_corpus", "text": "Ядро Max17 растит синапс-граф через семантическую компиляцию корпусов."},
+    {"type": "introspect"},
     {"type": "compress_memory", "text": "recall, semantic search, consolidation, synapse growth"},
     {"type": "sleep_consolidation", "limit": 20},
     {"type": "outcome_success", "text": "маленький шаг сработал", "score": 0.9},

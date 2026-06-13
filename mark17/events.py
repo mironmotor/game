@@ -29,6 +29,7 @@ KNOWN_TYPES = frozenset(
         "music_taste",
         "dream_mood",
         "ingest_corpus",
+        "introspect",
         "compress_memory",
         "graph_stats",
         "neural_seed",

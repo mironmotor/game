@@ -18,6 +18,7 @@ export type UiCommand =
   | { kind: 'theme'; value: string }
   | { kind: 'music'; action: 'start' | 'stop' }
   | { kind: 'compose' }
+  | { kind: 'introspect' }
   | { kind: 'reset' }
   | { kind: 'showAll' }
   | { kind: 'closeAll' }
@@ -127,6 +128,11 @@ export function interpretUiCommand(raw: string): InterpretedCommand | null {
   const wantsOpen = RE_OPEN.test(t);
   const wantsMin = RE_MIN.test(t);
   const allWord = RE_ALL.test(t);
+
+  // Introspection — «как ты», «как настроение», «как себя чувствуешь».
+  if (/(как ты|как настроение|как себя|твоё настроение|твое настроение|как дела у тебя)/.test(t) && tokens.length <= 6) {
+    return { command: { kind: 'introspect' }, reply: 'Прислушиваюсь к себе…' };
+  }
 
   // Composing — «сочини трек», «сыграй своё», «трек под настроение».
   if (/(сочини|сыграй сво|под настроение|compose)/.test(t) && /(трек|музык|track|своё|свое)/.test(t)) {
