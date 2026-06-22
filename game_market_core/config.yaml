@@ -11,13 +11,23 @@ project:
   romi_target_monthly_high: 300     # percent
 
 data:
-  source: synthetic                 # synthetic | csv
+  source: synthetic                 # synthetic | csv | exchange
+  venue: binance                    # binance | bybit  (for source: exchange)
   symbol: BTCUSDT
   timeframe: 1h
-  bars: 26280                       # ~3 years of hourly bars
+  start_date: 2019-01-01            # exchange fetch start (UTC)
+  end_date:                         # blank = now
+  bars: 26280                       # synthetic length (~3y hourly)
   seed: 17                          # deterministic synthetic data
   csv_path: data/storage/BTCUSDT_1h.csv
   start_price: 20000.0
+  # source: exchange tries live fetch -> CSV cache -> synthetic, in that order,
+  # so it always runs even with no network. Cached under data/storage/.
+
+# Cross-asset context (S&P/Nasdaq/gold/dollar via Stooq). Used as REGIME
+# context for crypto (risk-on/off, crisis), NOT as separately traded assets.
+macro:
+  enabled: false                    # set true on a network-enabled machine
 
 # Execution frictions applied by the backtest. Removing these is one of the
 # most common ways backtests lie; they are mandatory and non-zero.
@@ -50,6 +60,21 @@ strategy:
     stop_atr_buffer: 0.5            # stop = wick extreme + buffer * ATR
     reward_risk: 1.8                # take-profit as a multiple of risk
     min_confidence: 0.5
+  trend:                            # Stage 2 trend-following engine
+    enabled: true
+    min_trend_strength: 0.6         # |MACD/ATR| required to call it a trend
+    stop_atr: 2.0                   # stop distance in ATRs
+    reward_risk: 2.0
+    min_confidence: 0.5
+
+# Regime classifier (rule baseline). Gates which engine may trade.
+regime:
+  trend_strength_threshold: 0.5     # |MACD/ATR| above this => trend/euphoria
+  vol_hot_multiple: 1.8             # realized vol vs its running avg => hot
+
+# Walk-forward validation (python3 main.py walkforward)
+walk_forward:
+  n_folds: 5
 
 backtest:
   one_position_at_a_time: true

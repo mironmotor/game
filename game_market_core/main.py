@@ -1,14 +1,11 @@
 """GAME MARKET CORE — entry point.
 
-Runs the Stage 1 pipeline end to end:
-    load data -> features -> meta controller (False Breakout) -> risk engine
-    -> backtest -> metrics -> scam detector -> markdown report.
-
-Usage:
-    python3 main.py                 # run backtest with config.yaml
-    python3 main.py backtest        # same
-    python3 main.py --mode aggressive
-    python3 main.py --mode godmode_research   # research-only, never live
+Commands:
+    python3 main.py [backtest]            # backtest (synthetic by default)
+    python3 main.py walkforward           # walk-forward validation (OOS)
+    python3 main.py --source exchange     # pull real data (Binance) if reachable
+    python3 main.py --mode conservative   # risk profile override
+    python3 main.py --mode godmode_research   # research only, never live
 """
 
 from __future__ import annotations
@@ -16,70 +13,78 @@ from __future__ import annotations
 import os
 import sys
 
-# Make the package root importable regardless of the caller's cwd.
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from config import load_config  # noqa: E402
 from data.loaders.crypto_loader import load_crypto  # noqa: E402
+from data.loaders.macro_loader import load_macro  # noqa: E402
 from features.market_features import MarketFeatures  # noqa: E402
+from features.macro_features import MacroContext  # noqa: E402
 from strategies.meta_controller import MetaController  # noqa: E402
 from risk.risk_engine import RiskEngine  # noqa: E402
 from backtest.engine import run_backtest  # noqa: E402
 from backtest.metrics import compute_metrics  # noqa: E402
 from backtest.scam_detector import detect  # noqa: E402
+from backtest.walk_forward import walk_forward  # noqa: E402
 from reports.report_generator import generate_report  # noqa: E402
 from data.storage.database import save_trades_csv  # noqa: E402
 
 
 def _parse_args(argv: list[str]) -> dict:
-    opts = {"command": "backtest", "mode": None}
+    opts = {"command": "backtest", "mode": None, "source": None}
     i = 0
     while i < len(argv):
         a = argv[i]
-        if a in {"backtest", "selfcheck"}:
+        if a in {"backtest", "walkforward", "selfcheck"}:
             opts["command"] = a
         elif a == "--mode" and i + 1 < len(argv):
-            opts["mode"] = argv[i + 1]
-            i += 1
+            opts["mode"] = argv[i + 1]; i += 1
+        elif a == "--source" and i + 1 < len(argv):
+            opts["source"] = argv[i + 1]; i += 1
         i += 1
     return opts
 
 
-def run(opts: dict) -> int:
-    cfg = load_config()
+def _apply_overrides(cfg: dict, opts: dict) -> None:
     if opts.get("mode"):
         cfg.setdefault("risk", {})["mode"] = opts["mode"]
+    if opts.get("source"):
+        cfg.setdefault("data", {})["source"] = opts["source"]
 
-    print("== GAME MARKET CORE — Stage 1 ==")
+
+def _build_features(candles, cfg):
+    sc = cfg.get("strategy", {}).get("false_breakout", {})
+    return MarketFeatures(candles, atr_period=int(sc.get("atr_period", 14)),
+                          sr_lookback=int(sc.get("sr_lookback", 48)))
+
+
+def run_backtest_cmd(cfg: dict) -> int:
+    print("== GAME MARKET CORE — Stage 2 ==")
     print(f"Data source: {cfg.get('data', {}).get('source')} | "
           f"symbol: {cfg.get('data', {}).get('symbol')} | "
           f"timeframe: {cfg.get('data', {}).get('timeframe')}")
 
     candles = load_crypto(cfg)
     print(f"Loaded {len(candles)} candles.")
+    macro_series = load_macro(cfg)
+    macro = MacroContext(macro_series) if macro_series else None
 
-    strat_cfg = cfg.get("strategy", {}).get("false_breakout", {})
-    mf = MarketFeatures(
-        candles,
-        atr_period=int(strat_cfg.get("atr_period", 14)),
-        sr_lookback=int(strat_cfg.get("sr_lookback", 48)),
-    )
+    mf = _build_features(candles, cfg)
     meta = MetaController(cfg)
     risk = RiskEngine(cfg)
+    print(f"Engines: {[s.name for s in meta.strategies]}")
     print(f"Risk mode: {risk.mode} | risk/trade: {risk.risk_per_trade:.2%} | "
           f"max leverage: {risk.max_leverage:g}x | live allowed: {risk.allow_live}")
 
-    result = run_backtest(candles, mf, meta, risk, cfg)
+    result = run_backtest(candles, mf, meta, risk, cfg, macro=macro)
     metrics = compute_metrics(result)
     flags = detect(metrics, cfg)
 
-    # Persist trade journal + report.
     root = os.path.dirname(os.path.abspath(__file__))
     out_dir = os.path.join(root, cfg.get("report", {}).get("out_dir", "reports/output"))
     save_trades_csv(result.trades, os.path.join(out_dir, "trades.csv"))
     report_path = generate_report(metrics, flags, cfg, result)
 
-    # Console summary.
     print("\n-- Results --------------------------------------------------")
     print(f"Trades:            {metrics['num_trades']}")
     print(f"Total return:      {metrics['total_return_pct']:.2f}%")
@@ -94,6 +99,20 @@ def run(opts: dict) -> int:
     print(f"P(>50% DD) MC:     {metrics['prob_large_drawdown']:.1%}")
     if metrics["kill_tripped"]:
         print(f"KILL SWITCH:       TRIPPED — {metrics['kill_reason']}")
+
+    # Regime / strategy decision breakdown.
+    by_regime: dict = {}
+    by_strat: dict = {}
+    for d in result.decision_log:
+        by_regime[d["regime"]] = by_regime.get(d["regime"], 0) + 1
+        by_strat[d["strategy"]] = by_strat.get(d["strategy"], 0) + 1
+    if result.decision_log:
+        # Signals PROPOSED by the meta controller (many are later vetoed by
+        # the risk engine — daily limits, cooldown, kill switch — so this is
+        # far larger than the executed trade count above).
+        print(f"Signals proposed by regime: {by_regime}")
+        print(f"Signals proposed by engine: {by_strat}")
+
     print("\n-- Integrity flags ------------------------------------------")
     for f in flags:
         print(f"[{f['severity'].upper():5}] {f['code']}: {f['message']}")
@@ -101,9 +120,50 @@ def run(opts: dict) -> int:
     return 0
 
 
+def run_walkforward_cmd(cfg: dict) -> int:
+    print("== GAME MARKET CORE — Walk-Forward (out-of-sample) ==")
+    candles = load_crypto(cfg)
+    print(f"Loaded {len(candles)} candles.")
+    n_folds = int(cfg.get("walk_forward", {}).get("n_folds", 5))
+    wf = walk_forward(candles, cfg, n_folds=n_folds)
+    if "error" in wf:
+        print(f"Walk-forward error: {wf['error']}")
+        return 1
+
+    print(f"\nFolds: {wf['n_folds']}  |  OOS total return: {wf['oos_total_return_pct']}%")
+    s = wf["oos_trade_stats"]
+    print(f"OOS trades: {s['n']} | winrate {s['winrate']:.1%} | avg R {s['avg_r']:.3f} | "
+          f"PF {s['profit_factor']:.2f}")
+    print("\nPer fold (in-sample train score -> out-of-sample return):")
+    for f in wf["folds"]:
+        print(f"  fold {f['fold']}: IS {f['is_train_score_pct']:+.2f}%  ->  "
+              f"OOS {f['oos_return_pct']:+.2f}%  "
+              f"({f['oos_trades']} trades, params {f['best_params']})")
+
+    is_mean = sum(f["is_train_score_pct"] for f in wf["folds"]) / max(1, len(wf["folds"]))
+    oos_mean = sum(f["oos_return_pct"] for f in wf["folds"]) / max(1, len(wf["folds"]))
+    print(f"\nMean IS {is_mean:+.2f}% vs mean OOS {oos_mean:+.2f}% per fold.")
+    if oos_mean <= 0:
+        if is_mean > 0:
+            print("VERDICT: no edge out-of-sample — in-sample profit was overfitting. "
+                  "Do not trade this.")
+        else:
+            print("VERDICT: no edge in-sample OR out-of-sample. Strategy/params reject. "
+                  "(Expected on synthetic data — proves the validator works.)")
+    elif oos_mean < 0.4 * is_mean:
+        print("VERDICT: large in-sample/out-of-sample gap — fragile, not trustworthy yet.")
+    else:
+        print("VERDICT: edge partially survives OOS. Still needs paper trading before live.")
+    return 0
+
+
 def main(argv: list[str]) -> int:
     opts = _parse_args(argv)
-    return run(opts)
+    cfg = load_config()
+    _apply_overrides(cfg, opts)
+    if opts["command"] == "walkforward":
+        return run_walkforward_cmd(cfg)
+    return run_backtest_cmd(cfg)
 
 
 if __name__ == "__main__":

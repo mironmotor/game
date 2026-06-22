@@ -74,10 +74,16 @@ def generate_report(metrics: dict, flags: list[dict], cfg: dict, result) -> str:
     md.append(f"Strategy: False Breakout Engine | Risk mode: **{metrics['risk_mode']}** | "
               f"Live trading allowed: **{metrics['allow_live']}**")
     md.append("")
-    md.append("> Stage 1 runs on deterministic SYNTHETIC data. These numbers test "
-              "the *plumbing and discipline* of the system, not a real edge. Real "
-              "data, out-of-sample, walk-forward, and paper trading come in later "
-              "stages before any live capital.")
+    source = cfg.get("data", {}).get("source", "synthetic")
+    if source == "synthetic":
+        md.append("> Data source: **synthetic** (deterministic). These numbers test the "
+                  "*plumbing and discipline* of the system, not a real edge. Switch "
+                  "`data.source` to `exchange`/`csv` for real data, then validate with "
+                  "walk-forward + paper trading before any live capital.")
+    else:
+        md.append(f"> Data source: **{source}**. A single backtest is still only the "
+                  "first gate — out-of-sample, walk-forward, and paper trading must "
+                  "follow before any live capital.")
     md.append("")
 
     md.append("## Verdict on the 100-300% ROMI target")

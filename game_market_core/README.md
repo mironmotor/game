@@ -76,8 +76,8 @@ markdown report`.
 
 | Stage | Scope | Status |
 |---|---|---|
-| **1** | Architecture, config, synthetic data, market features, False Breakout engine, risk engine, backtest, metrics, scam detector, report | ✅ in this commit |
-| **2** | Trend engine, regime classifier, walk-forward, full Monte Carlo, real OHLCV loaders (Stooq/exchange REST), macro features | ⬜ |
+| **1** | Architecture, config, synthetic data, market features, False Breakout engine, risk engine, backtest, metrics, scam detector, report | ✅ |
+| **2** | Real OHLCV loaders (Binance/Bybit REST + cache + fallback), macro/equities loader (Stooq) as regime context, rule-based regime classifier, Trend engine, regime-gated Meta Controller, walk-forward validation | ✅ |
 | **3** | News layer (GDELT/RSS), real-time websocket feeds, paper trading, web dashboard | ⬜ |
 | **4** | ML meta-controller (regime + trade-filter models), on-chain features, exchange execution adapter behind hard live limits | ⬜ |
 
@@ -129,10 +129,29 @@ markdown report`.
 ```bash
 cd game_market_core
 python3 main.py                       # backtest on synthetic data
+python3 main.py walkforward           # out-of-sample walk-forward validation
+python3 main.py --source exchange     # pull real Binance history (cache + fallback)
 python3 main.py --mode conservative   # 0.5% risk, 1x leverage
 python3 main.py --mode aggressive     # 1.5x risk (capped 3%/trade)
 python3 main.py --mode godmode_research  # high leverage, RESEARCH ONLY (no live)
 ```
+
+### Real data
+
+`--source exchange` (or `data.source: exchange` in `config.yaml`) fetches real
+OHLCV from `data.venue` (`binance` | `bybit`) over the public REST API — **no
+keys needed**. It follows a safe chain: **live fetch → CSV cache → synthetic**,
+so it always runs, even offline (in a locked-down sandbox you'll see a `403`
+and a clean fallback message). Set `macro.enabled: true` to pull the
+S&P/Nasdaq/gold/dollar basket (Stooq) as **regime context** — risk-on/off and
+crisis flags that gate crypto trading, not separately traded instruments.
+
+### Regime gating
+
+The rule-based regime classifier labels each bar `trend` / `euphoria` /
+`crisis` / `range`. The Meta Controller uses it: **range → False Breakout**,
+**trend/euphoria → Trend engine**, **crisis → no new entries**. So the
+mean-reversion and trend engines never fight each other.
 
 Outputs:
 - console summary (returns, win rate, R, drawdown, Sharpe/Sortino, ruin prob,

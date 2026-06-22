@@ -18,6 +18,7 @@ from datatypes import Candle, Signal, Trade
 from features.market_features import MarketFeatures
 from risk.risk_engine import RiskEngine
 from strategies.meta_controller import MetaController
+from ml.regime_classifier import classify_series
 
 
 @dataclass
@@ -46,7 +47,14 @@ def run_backtest(
     meta: MetaController,
     risk: RiskEngine,
     cfg: dict,
+    regimes: list[str] | None = None,
+    macro=None,
+    trade_window: tuple[int, int] | None = None,
 ) -> BacktestResult:
+    if regimes is None:
+        regimes = classify_series(mf, cfg)
+    win_start, win_end = (trade_window if trade_window else (0, len(candles)))
+
     costs = cfg.get("costs", {})
     taker = float(costs.get("taker_fee", 0.0004))
     slip = float(costs.get("slippage_bps", 2.0))
@@ -67,6 +75,19 @@ def run_backtest(
     for i in range(n):
         bar = candles[i]
         risk.on_equity(bar.ts, equity)
+
+        # 0) Walk-forward window boundary: stop trading past the test window
+        #    and force-close any residual position at this bar's open.
+        if trade_window is not None and i >= win_end:
+            pending = None
+            if pos is not None:
+                equity = _close_position(
+                    pos, bar.open, "window_end", bar, taker, fill_bps,
+                    funding_8h, bar_seconds, equity, trades, risk
+                )
+                pos = None
+            equity_curve.append((bar.ts, equity))
+            continue
 
         # 1) Fill a pending order at this bar's open.
         if pending is not None and pos is None:
@@ -107,8 +128,13 @@ def run_backtest(
                 pos = None
 
         # 3) If flat and idle, ask the meta controller for a new signal.
-        if pos is None and pending is None and i + 1 < n:
-            context = {"regime": "unknown", "news": {}, "macro": {}}
+        in_window = win_start <= i < win_end
+        if pos is None and pending is None and i + 1 < n and in_window:
+            macro_state = macro.at(bar.ts) if macro is not None else {}
+            context = {"regime": regimes[i], "news": {}, "macro": macro_state}
+            # Macro crisis is an additional, independent risk-off veto.
+            if macro_state.get("crisis_mode"):
+                context["regime"] = "crisis"
             sig = meta.select(i, mf, context)
             if sig is not None:
                 decision = risk.evaluate(

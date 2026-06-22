@@ -107,15 +107,60 @@ def load_csv(path: str) -> list[Candle]:
     return candles
 
 
+def _repo_root() -> str:
+    return os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+
+def _abs(path: str) -> str:
+    return path if os.path.isabs(path) else os.path.join(_repo_root(), path)
+
+
+def _load_exchange(cfg: dict) -> list[Candle]:
+    """Fetch real OHLCV from an exchange, with a CSV cache and a safe
+    fallback chain: live fetch -> cached file -> synthetic data.
+
+    The fallback is what makes the system runnable in offline / locked-down
+    environments while still using real data wherever the network allows.
+    """
+    from data.loaders.exchange_rest import fetch_ohlcv  # local import: optional path
+    from data.storage.database import save_candles_csv
+
+    d = cfg.get("data", {})
+    venue = d.get("venue", "binance")
+    symbol = d.get("symbol", "BTCUSDT")
+    tf = d.get("timeframe", "1h")
+    start_date = d.get("start_date", "2019-01-01")
+    end_date = d.get("end_date") or None
+    cache = _abs(d.get("cache_path", f"data/storage/{venue}_{symbol}_{tf}.csv"))
+
+    try:
+        candles = fetch_ohlcv(venue, symbol, tf, start_date, end_date)
+        if candles:
+            save_candles_csv(candles, cache)
+            print(f"[data] fetched {len(candles)} candles from {venue} {symbol} {tf} "
+                  f"and cached to {os.path.relpath(cache, _repo_root())}")
+            return candles
+        raise RuntimeError("empty response")
+    except Exception as exc:  # network blocked, rate-limited, etc.
+        if os.path.exists(cache):
+            print(f"[data] live fetch failed ({type(exc).__name__}); using cache {cache}")
+            return load_csv(cache)
+        print(f"[data] live fetch failed ({type(exc).__name__}: {str(exc)[:80]}); "
+              "no cache present -> FALLING BACK TO SYNTHETIC data.")
+        return generate_synthetic(
+            bars=int(d.get("bars", 26280)),
+            seed=int(d.get("seed", 17)),
+            start_price=float(d.get("start_price", 20000.0)),
+        )
+
+
 def load_crypto(cfg: dict) -> list[Candle]:
     data_cfg = cfg.get("data", {})
     source = data_cfg.get("source", "synthetic")
     if source == "csv":
-        path = data_cfg.get("csv_path")
-        root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-        if not os.path.isabs(path):
-            path = os.path.join(root, path)
-        return load_csv(path)
+        return load_csv(_abs(data_cfg.get("csv_path")))
+    if source == "exchange":
+        return _load_exchange(cfg)
     return generate_synthetic(
         bars=int(data_cfg.get("bars", 26280)),
         seed=int(data_cfg.get("seed", 17)),
