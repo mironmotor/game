@@ -3,6 +3,7 @@
 Commands:
     python3 main.py [backtest]            # backtest (synthetic by default)
     python3 main.py walkforward           # walk-forward validation (OOS)
+    python3 main.py paper                 # paper trading: news + dashboard
     python3 main.py --source exchange     # pull real data (Binance) if reachable
     python3 main.py --mode conservative   # risk profile override
     python3 main.py --mode godmode_research   # research only, never live
@@ -35,7 +36,7 @@ def _parse_args(argv: list[str]) -> dict:
     i = 0
     while i < len(argv):
         a = argv[i]
-        if a in {"backtest", "walkforward", "selfcheck"}:
+        if a in {"backtest", "walkforward", "paper", "selfcheck"}:
             opts["command"] = a
         elif a == "--mode" and i + 1 < len(argv):
             opts["mode"] = argv[i + 1]; i += 1
@@ -163,6 +164,10 @@ def main(argv: list[str]) -> int:
     _apply_overrides(cfg, opts)
     if opts["command"] == "walkforward":
         return run_walkforward_cmd(cfg)
+    if opts["command"] == "paper":
+        from paper.paper_trader import run_paper
+        run_paper(cfg)
+        return 0
     return run_backtest_cmd(cfg)
 
 

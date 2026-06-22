@@ -19,12 +19,14 @@ from features.market_features import MarketFeatures
 from strategies.base import Strategy
 from strategies.false_breakout_engine import FalseBreakoutEngine
 from strategies.trend_engine import TrendEngine
+from strategies.news_shock_engine import NewsShockEngine
 
+# News Shock may speak in any non-crisis regime; it self-vetoes on chaos.
 _REGIME_ALLOW = {
-    "range": {"false_breakout"},
-    "unknown": {"false_breakout"},
-    "trend": {"trend"},
-    "euphoria": {"trend"},
+    "range": {"false_breakout", "news_shock"},
+    "unknown": {"false_breakout", "news_shock"},
+    "trend": {"trend", "news_shock"},
+    "euphoria": {"trend", "news_shock"},
     "crisis": set(),
 }
 
@@ -42,6 +44,9 @@ class MetaController:
         tr = strat_cfg.get("trend", {})
         if tr.get("enabled", False):
             self.strategies.append(TrendEngine(tr))
+        ns = strat_cfg.get("news_shock", {})
+        if ns.get("enabled", False):
+            self.strategies.append(NewsShockEngine(ns))
 
     def allowed_for(self, regime: str) -> set[str]:
         return _REGIME_ALLOW.get(regime, {"false_breakout"})

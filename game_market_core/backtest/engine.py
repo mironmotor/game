@@ -49,6 +49,7 @@ def run_backtest(
     cfg: dict,
     regimes: list[str] | None = None,
     macro=None,
+    news=None,
     trade_window: tuple[int, int] | None = None,
 ) -> BacktestResult:
     if regimes is None:
@@ -131,9 +132,11 @@ def run_backtest(
         in_window = win_start <= i < win_end
         if pos is None and pending is None and i + 1 < n and in_window:
             macro_state = macro.at(bar.ts) if macro is not None else {}
-            context = {"regime": regimes[i], "news": {}, "macro": macro_state}
-            # Macro crisis is an additional, independent risk-off veto.
-            if macro_state.get("crisis_mode"):
+            news_state = news.at(bar.ts) if news is not None else {}
+            context = {"regime": regimes[i], "news": news_state, "macro": macro_state}
+            # Macro crisis and news chaos are independent risk-off vetoes:
+            # no new entries while the world is on fire.
+            if macro_state.get("crisis_mode") or news_state.get("chaos"):
                 context["regime"] = "crisis"
             sig = meta.select(i, mf, context)
             if sig is not None:

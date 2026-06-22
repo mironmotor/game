@@ -29,6 +29,14 @@ data:
 macro:
   enabled: false                    # set true on a network-enabled machine
 
+# News / world events (GDELT + RSS). Offline -> deterministic synthetic stream
+# aligned to the candle range, so the News Shock Engine stays testable.
+news:
+  enabled: true
+  window_hours: 6                   # aggregation window for the news state
+  rss:                              # optional RSS feeds (titles are scored)
+    # - https://www.coindesk.com/arc/outboundfeeds/rss/
+
 # Execution frictions applied by the backtest. Removing these is one of the
 # most common ways backtests lie; they are mandatory and non-zero.
 costs:
@@ -65,6 +73,14 @@ strategy:
     min_trend_strength: 0.6         # |MACD/ATR| required to call it a trend
     stop_atr: 2.0                   # stop distance in ATRs
     reward_risk: 2.0
+    min_confidence: 0.5
+  news_shock:                       # Stage 3 news-reaction engine
+    enabled: true
+    min_severity: 0.6               # event severity required to act
+    min_novelty: 0.4
+    min_abs_sentiment: 0.35         # too ambiguous -> no trade
+    stop_atr: 2.0
+    reward_risk: 1.5
     min_confidence: 0.5
 
 # Regime classifier (rule baseline). Gates which engine may trade.

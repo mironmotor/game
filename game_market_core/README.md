@@ -78,8 +78,8 @@ markdown report`.
 |---|---|---|
 | **1** | Architecture, config, synthetic data, market features, False Breakout engine, risk engine, backtest, metrics, scam detector, report | ✅ |
 | **2** | Real OHLCV loaders (Binance/Bybit REST + cache + fallback), macro/equities loader (Stooq) as regime context, rule-based regime classifier, Trend engine, regime-gated Meta Controller, walk-forward validation | ✅ |
-| **3** | News layer (GDELT/RSS), real-time websocket feeds, paper trading, web dashboard | ⬜ |
-| **4** | ML meta-controller (regime + trade-filter models), on-chain features, exchange execution adapter behind hard live limits | ⬜ |
+| **3** | News layer (GDELT/RSS + lexicon scoring + synthetic fallback), News Shock Engine with chaos veto, paper trading on the live-feed abstraction, journal + daily/weekly reports + strategy-health HTML dashboard | ✅ |
+| **4** | Live websocket/REST feed, ML meta-controller (regime + trade-filter models), on-chain features, exchange execution adapter behind hard live limits | ⬜ |
 
 ## 4. Data needed
 
@@ -130,6 +130,7 @@ markdown report`.
 cd game_market_core
 python3 main.py                       # backtest on synthetic data
 python3 main.py walkforward           # out-of-sample walk-forward validation
+python3 main.py paper                 # paper trading + news + HTML dashboard
 python3 main.py --source exchange     # pull real Binance history (cache + fallback)
 python3 main.py --mode conservative   # 0.5% risk, 1x leverage
 python3 main.py --mode aggressive     # 1.5x risk (capped 3%/trade)
@@ -150,8 +151,23 @@ crisis flags that gate crypto trading, not separately traded instruments.
 
 The rule-based regime classifier labels each bar `trend` / `euphoria` /
 `crisis` / `range`. The Meta Controller uses it: **range → False Breakout**,
-**trend/euphoria → Trend engine**, **crisis → no new entries**. So the
-mean-reversion and trend engines never fight each other.
+**trend/euphoria → Trend engine**, **crisis → no new entries**, and **News
+Shock may speak in any non-crisis regime**. So the mean-reversion and trend
+engines never fight each other.
+
+### News & paper trading
+
+`python3 main.py paper` runs the **same** engine as backtest (so results are
+comparable) but through the live-feed abstraction (`ReplayFeed`), with news
+wired in. The news layer pulls **GDELT + RSS** (titles scored by a transparent
+lexicon → sentiment/severity/novelty/entities); offline it falls back to a
+deterministic synthetic stream aligned to the candle range. The **News Shock
+Engine** trades only high-severity, high-novelty, directional events and
+**refuses on news chaos** (contradictory strong events) — which is also an
+independent risk-off veto for every engine. Outputs land in `reports/output/`:
+`dashboard.html` (strategy-health snapshot), `paper_report.md` (daily/weekly +
+health), and `paper_journal.csv`. Swapping `ReplayFeed` for a real
+websocket/REST feed (Stage 4) is the only change needed to go live.
 
 Outputs:
 - console summary (returns, win rate, R, drawdown, Sharpe/Sortino, ruin prob,
