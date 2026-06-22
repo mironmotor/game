@@ -19,6 +19,7 @@ from features.market_features import MarketFeatures
 from risk.risk_engine import RiskEngine
 from strategies.meta_controller import MetaController
 from ml.regime_classifier import classify_series
+from ml.feature_vector import build_vector
 
 
 @dataclass
@@ -50,6 +51,8 @@ def run_backtest(
     regimes: list[str] | None = None,
     macro=None,
     news=None,
+    onchain=None,
+    trade_filter=None,
     trade_window: tuple[int, int] | None = None,
 ) -> BacktestResult:
     if regimes is None:
@@ -92,7 +95,7 @@ def run_backtest(
 
         # 1) Fill a pending order at this bar's open.
         if pending is not None and pos is None:
-            sig, qty = pending
+            sig, qty, fv = pending
             pending = None
             is_buy = sig.side == "long"
             entry_fill = _adverse(bar.open, is_buy, fill_bps)
@@ -102,7 +105,7 @@ def run_backtest(
                 "side": sig.side, "qty": qty, "entry_fill": entry_fill,
                 "stop": sig.stop, "tp": sig.take_profit, "entry_ts": bar.ts,
                 "entry_index": i, "fees": entry_fee, "strategy": sig.strategy,
-                "reason": sig.reason, "init_risk": init_risk,
+                "reason": sig.reason, "init_risk": init_risk, "features": fv,
             }
             risk.register_open(bar.ts)
 
@@ -133,19 +136,26 @@ def run_backtest(
         if pos is None and pending is None and i + 1 < n and in_window:
             macro_state = macro.at(bar.ts) if macro is not None else {}
             news_state = news.at(bar.ts) if news is not None else {}
-            context = {"regime": regimes[i], "news": news_state, "macro": macro_state}
+            onchain_state = onchain.at(bar.ts) if onchain is not None else {}
+            context = {"regime": regimes[i], "news": news_state,
+                       "macro": macro_state, "onchain": onchain_state}
             # Macro crisis and news chaos are independent risk-off vetoes:
             # no new entries while the world is on fire.
             if macro_state.get("crisis_mode") or news_state.get("chaos"):
                 context["regime"] = "crisis"
             sig = meta.select(i, mf, context)
             if sig is not None:
-                decision = risk.evaluate(
-                    ts=bar.ts, equity=equity, entry=sig.entry,
-                    stop=sig.stop, spread_bps=spread,
-                )
-                if decision.allow:
-                    pending = (sig, decision.qty)
+                fv = build_vector(i, mf, context, sig)
+                # ML meta-model veto (only acts when the model is approved).
+                if trade_filter is not None and not trade_filter.should_trade(fv):
+                    pass
+                else:
+                    decision = risk.evaluate(
+                        ts=bar.ts, equity=equity, entry=sig.entry,
+                        stop=sig.stop, spread_bps=spread,
+                    )
+                    if decision.allow:
+                        pending = (sig, decision.qty, fv)
 
         equity_curve.append((bar.ts, equity))
 
@@ -199,7 +209,7 @@ def _close_position(pos, exit_price, exit_reason, bar, taker, fill_bps,
         entry_price=pos["entry_fill"], exit_price=exit_fill, qty=qty,
         fees=fees + funding, pnl=pnl, r_multiple=r, strategy=pos["strategy"],
         reason=pos["reason"], exit_reason=exit_reason, equity_after=equity,
-        duration_bars=held_bars,
+        duration_bars=held_bars, features=pos.get("features", []),
     ))
     risk.register_close(bar.ts, pnl, equity, bar_seconds)
     return equity

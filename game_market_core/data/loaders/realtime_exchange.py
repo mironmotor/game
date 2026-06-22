@@ -42,12 +42,37 @@ class ReplayFeed(ExchangeFeed):
 
 
 class RestPollFeed(ExchangeFeed):
-    """Live feed via periodic REST polling (Stage 4 stub).
+    """Live feed via periodic REST polling (Stage 4).
 
-    Plan: poll the venue's klines endpoint each bar close and yield finalized
-    candles. Implemented on top of ``data.loaders.exchange_rest`` so it reuses
-    the same venue connectors. Websocket streaming follows.
+    Polls the venue's klines endpoint and yields only FINALIZED candles (the
+    most recent, still-forming bar is held back until it closes). Reuses the
+    same venue connectors as the historical loader. ``max_polls`` bounds the
+    loop so it is safe to demo; ``None`` polls indefinitely. Websocket
+    streaming is the next upgrade behind the same interface.
     """
 
+    def __init__(self, venue: str = "binance", poll_seconds: int = 60,
+                 max_polls: int | None = None):
+        self.venue = venue
+        self.poll_seconds = poll_seconds
+        self.max_polls = max_polls
+
     def stream_candles(self, symbol: str, timeframe: str) -> Iterator[Candle]:
-        raise NotImplementedError("Live REST/websocket feed arrives in Stage 4.")
+        import time
+        from data.loaders.exchange_rest import fetch_recent
+
+        last_ts = 0
+        polls = 0
+        while self.max_polls is None or polls < self.max_polls:
+            polls += 1
+            candles = fetch_recent(self.venue, symbol, timeframe, limit=50)
+            # Drop the last (still-forming) candle; emit newly closed ones.
+            for c in candles[:-1]:
+                if c.ts > last_ts:
+                    last_ts = c.ts
+                    yield c
+            if self.max_polls is None or polls < self.max_polls:
+                time.sleep(self.poll_seconds)
+
+    def order_book(self, symbol: str) -> dict:
+        raise NotImplementedError("Order book streaming arrives with websockets.")

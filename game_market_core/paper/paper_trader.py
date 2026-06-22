@@ -21,10 +21,12 @@ from config import load_config
 from data.loaders.crypto_loader import load_crypto
 from data.loaders.macro_loader import load_macro
 from data.loaders.news_loader import load_news
+from data.loaders.onchain_loader import load_onchain
 from data.loaders.realtime_exchange import ReplayFeed
 from features.market_features import MarketFeatures
 from features.macro_features import MacroContext
 from features.news_features import NewsContext
+from features.onchain_features import OnchainContext
 from strategies.meta_controller import MetaController
 from risk.risk_engine import RiskEngine
 from backtest.engine import run_backtest
@@ -72,9 +74,9 @@ def _health(result, risk, news_chaos_bars: int) -> dict:
     }
 
 
-def run_paper(cfg: dict | None = None) -> dict:
+def run_paper(cfg: dict | None = None, use_ml: bool = False) -> dict:
     cfg = cfg or load_config()
-    print("== GAME MARKET CORE — Paper Trading (Stage 3) ==")
+    print("== GAME MARKET CORE — Paper Trading ==")
 
     # Data arrives through the live-feed abstraction.
     feed = ReplayFeed(load_crypto(cfg))
@@ -94,14 +96,24 @@ def run_paper(cfg: dict | None = None) -> dict:
     news_ctx = NewsContext(events) if events else None
     news_chaos_bars = (sum(1 for c in candles if news_ctx.at(c.ts).get("chaos"))
                        if news_ctx else 0)
+    onchain_series = load_onchain(cfg)
+    onchain = OnchainContext(onchain_series) if onchain_series else None
+
+    trade_filter = None
+    if use_ml:
+        from ml.training_pipeline import load_model
+        trade_filter = load_model()
+        state = ("active" if (trade_filter and trade_filter.approved) else "INERT/missing")
+        print(f"[ml] trade filter: {state}")
 
     meta = MetaController(cfg)
     risk = RiskEngine(cfg)
     print(f"Engines: {[s.name for s in meta.strategies]} | news events: {len(events)} | "
           f"chaos bars: {news_chaos_bars}")
 
-    result = run_backtest(candles, mf, meta, risk, cfg,
-                          regimes=regimes, macro=macro, news=news_ctx)
+    result = run_backtest(candles, mf, meta, risk, cfg, regimes=regimes,
+                          macro=macro, news=news_ctx, onchain=onchain,
+                          trade_filter=trade_filter)
     metrics = compute_metrics(result)
     flags = detect(metrics, cfg)
     health = _health(result, risk, news_chaos_bars)

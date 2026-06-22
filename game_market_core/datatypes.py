@@ -48,3 +48,4 @@ class Trade:
     exit_reason: str          # "take_profit" | "stop" | "end_of_data"
     equity_after: float = 0.0
     duration_bars: int = 0
+    features: list = field(default_factory=list)  # ML feature snapshot at entry

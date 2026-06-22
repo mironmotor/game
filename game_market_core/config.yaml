@@ -37,6 +37,18 @@ news:
   rss:                              # optional RSS feeds (titles are scored)
     # - https://www.coindesk.com/arc/outboundfeeds/rss/
 
+# On-chain network data (blockchain.info charts). Neutral when offline.
+onchain:
+  enabled: false                    # set true on a network-enabled machine
+
+# Execution adapter — DRY-RUN by default. Real orders require EVERY gate:
+# execution.live + i_understand_risk + non-godmode risk mode + API keys in env
+# + a venue implementation (intentionally not shipped). See execution/.
+execution:
+  live: false
+  i_understand_risk: false
+  venue: binance
+
 # Execution frictions applied by the backtest. Removing these is one of the
 # most common ways backtests lie; they are mandatory and non-zero.
 costs:

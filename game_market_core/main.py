@@ -4,6 +4,9 @@ Commands:
     python3 main.py [backtest]            # backtest (synthetic by default)
     python3 main.py walkforward           # walk-forward validation (OOS)
     python3 main.py paper                 # paper trading: news + dashboard
+    python3 main.py train                 # train + OOS-gate the ML trade filter
+    python3 main.py backtest --ml         # apply the approved ML filter
+    python3 main.py livecheck             # probe the live REST feed (safe)
     python3 main.py --source exchange     # pull real data (Binance) if reachable
     python3 main.py --mode conservative   # risk profile override
     python3 main.py --mode godmode_research   # research only, never live
@@ -19,8 +22,10 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from config import load_config  # noqa: E402
 from data.loaders.crypto_loader import load_crypto  # noqa: E402
 from data.loaders.macro_loader import load_macro  # noqa: E402
+from data.loaders.onchain_loader import load_onchain  # noqa: E402
 from features.market_features import MarketFeatures  # noqa: E402
 from features.macro_features import MacroContext  # noqa: E402
+from features.onchain_features import OnchainContext  # noqa: E402
 from strategies.meta_controller import MetaController  # noqa: E402
 from risk.risk_engine import RiskEngine  # noqa: E402
 from backtest.engine import run_backtest  # noqa: E402
@@ -32,16 +37,18 @@ from data.storage.database import save_trades_csv  # noqa: E402
 
 
 def _parse_args(argv: list[str]) -> dict:
-    opts = {"command": "backtest", "mode": None, "source": None}
+    opts = {"command": "backtest", "mode": None, "source": None, "ml": False}
     i = 0
     while i < len(argv):
         a = argv[i]
-        if a in {"backtest", "walkforward", "paper", "selfcheck"}:
+        if a in {"backtest", "walkforward", "paper", "train", "livecheck", "selfcheck"}:
             opts["command"] = a
         elif a == "--mode" and i + 1 < len(argv):
             opts["mode"] = argv[i + 1]; i += 1
         elif a == "--source" and i + 1 < len(argv):
             opts["source"] = argv[i + 1]; i += 1
+        elif a == "--ml":
+            opts["ml"] = True
         i += 1
     return opts
 
@@ -59,8 +66,8 @@ def _build_features(candles, cfg):
                           sr_lookback=int(sc.get("sr_lookback", 48)))
 
 
-def run_backtest_cmd(cfg: dict) -> int:
-    print("== GAME MARKET CORE — Stage 2 ==")
+def run_backtest_cmd(cfg: dict, use_ml: bool = False) -> int:
+    print("== GAME MARKET CORE — Backtest ==")
     print(f"Data source: {cfg.get('data', {}).get('source')} | "
           f"symbol: {cfg.get('data', {}).get('symbol')} | "
           f"timeframe: {cfg.get('data', {}).get('timeframe')}")
@@ -69,6 +76,20 @@ def run_backtest_cmd(cfg: dict) -> int:
     print(f"Loaded {len(candles)} candles.")
     macro_series = load_macro(cfg)
     macro = MacroContext(macro_series) if macro_series else None
+    onchain_series = load_onchain(cfg)
+    onchain = OnchainContext(onchain_series) if onchain_series else None
+
+    trade_filter = None
+    if use_ml:
+        from ml.training_pipeline import load_model
+        trade_filter = load_model()
+        if trade_filter is None:
+            print("[ml] no trained model found — run `python3 main.py train` first. "
+                  "Continuing without ML filter.")
+        else:
+            print(f"[ml] trade filter loaded (approved={trade_filter.approved}, "
+                  f"threshold={trade_filter.threshold:.2f}) — "
+                  f"{'active' if trade_filter.approved else 'INERT'}")
 
     mf = _build_features(candles, cfg)
     meta = MetaController(cfg)
@@ -77,7 +98,8 @@ def run_backtest_cmd(cfg: dict) -> int:
     print(f"Risk mode: {risk.mode} | risk/trade: {risk.risk_per_trade:.2%} | "
           f"max leverage: {risk.max_leverage:g}x | live allowed: {risk.allow_live}")
 
-    result = run_backtest(candles, mf, meta, risk, cfg, macro=macro)
+    result = run_backtest(candles, mf, meta, risk, cfg, macro=macro,
+                          onchain=onchain, trade_filter=trade_filter)
     metrics = compute_metrics(result)
     flags = detect(metrics, cfg)
 
@@ -158,17 +180,49 @@ def run_walkforward_cmd(cfg: dict) -> int:
     return 0
 
 
+def run_livecheck_cmd(cfg: dict) -> int:
+    """Probe the live REST feed and show execution-adapter safety gates.
+    Sends NO orders; in a locked-down sandbox the feed probe fails cleanly."""
+    print("== GAME MARKET CORE — Live check (no orders sent) ==")
+    d = cfg.get("data", {})
+    venue = d.get("venue", "binance")
+    from data.loaders.realtime_exchange import RestPollFeed
+    feed = RestPollFeed(venue=venue, max_polls=1, poll_seconds=0)
+    try:
+        bars = list(feed.stream_candles(d.get("symbol", "BTCUSDT"), d.get("timeframe", "1h")))
+        print(f"[feed] {venue}: received {len(bars)} finalized candle(s) "
+              f"(last close {bars[-1].close if bars else 'n/a'})")
+    except Exception as exc:
+        print(f"[feed] {venue}: live probe failed ({type(exc).__name__}: {str(exc)[:60]}). "
+              "Expected in a locked-down environment.")
+
+    from execution.execution_adapter import ExecutionAdapter
+    risk = RiskEngine(cfg)
+    adapter = ExecutionAdapter(cfg, risk)
+    print(f"[exec] live_enabled = {adapter.live_enabled}")
+    print(f"[exec] gates blocking live: {adapter.gate_reasons()}")
+    res = adapter.place_order({"side": "long", "qty": 0.001, "price": 30000.0})
+    print(f"[exec] sample order -> status={res.status} ({res.reason})")
+    return 0
+
+
 def main(argv: list[str]) -> int:
     opts = _parse_args(argv)
     cfg = load_config()
     _apply_overrides(cfg, opts)
     if opts["command"] == "walkforward":
         return run_walkforward_cmd(cfg)
+    if opts["command"] == "train":
+        from ml.training_pipeline import train
+        train(cfg)
+        return 0
+    if opts["command"] == "livecheck":
+        return run_livecheck_cmd(cfg)
     if opts["command"] == "paper":
         from paper.paper_trader import run_paper
-        run_paper(cfg)
+        run_paper(cfg, use_ml=opts["ml"])
         return 0
-    return run_backtest_cmd(cfg)
+    return run_backtest_cmd(cfg, use_ml=opts["ml"])
 
 
 if __name__ == "__main__":

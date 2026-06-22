@@ -8,6 +8,9 @@ reports/output/*.png
 data/storage/*.csv
 data/storage/*.db
 
+# Trained model artifacts (reproducible via `python3 main.py train`)
+ml/models/*.json
+
 # Python
 __pycache__/
 *.pyc

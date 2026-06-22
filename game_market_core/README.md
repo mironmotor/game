@@ -79,7 +79,8 @@ markdown report`.
 | **1** | Architecture, config, synthetic data, market features, False Breakout engine, risk engine, backtest, metrics, scam detector, report | ✅ |
 | **2** | Real OHLCV loaders (Binance/Bybit REST + cache + fallback), macro/equities loader (Stooq) as regime context, rule-based regime classifier, Trend engine, regime-gated Meta Controller, walk-forward validation | ✅ |
 | **3** | News layer (GDELT/RSS + lexicon scoring + synthetic fallback), News Shock Engine with chaos veto, paper trading on the live-feed abstraction, journal + daily/weekly reports + strategy-health HTML dashboard | ✅ |
-| **4** | Live websocket/REST feed, ML meta-controller (regime + trade-filter models), on-chain features, exchange execution adapter behind hard live limits | ⬜ |
+| **4** | Pure-Python ML trade-filter with strict OOS approval gate, on-chain layer (blockchain.info), live REST polling feed, execution adapter behind hard live limits (dry-run by default) | ✅ |
+| **5+** | Live websocket streaming, learned regime/news models (LightGBM/Transformer) beating the rule baselines OOS, exchange-flow/whale on-chain feeds, real venue order client | ⬜ |
 
 ## 4. Data needed
 
@@ -131,6 +132,9 @@ cd game_market_core
 python3 main.py                       # backtest on synthetic data
 python3 main.py walkforward           # out-of-sample walk-forward validation
 python3 main.py paper                 # paper trading + news + HTML dashboard
+python3 main.py train                 # train + OOS-gate the ML trade filter
+python3 main.py backtest --ml         # apply the approved ML filter (inert if not approved)
+python3 main.py livecheck             # probe live feed + show execution gates (no orders)
 python3 main.py --source exchange     # pull real Binance history (cache + fallback)
 python3 main.py --mode conservative   # 0.5% risk, 1x leverage
 python3 main.py --mode aggressive     # 1.5x risk (capped 3%/trade)
@@ -168,6 +172,30 @@ independent risk-off veto for every engine. Outputs land in `reports/output/`:
 `dashboard.html` (strategy-health snapshot), `paper_report.md` (daily/weekly +
 health), and `paper_journal.csv`. Swapping `ReplayFeed` for a real
 websocket/REST feed (Stage 4) is the only change needed to go live.
+
+### ML trade filter (it must earn the right to act)
+
+`python3 main.py train` collects every executed signal's feature snapshot +
+outcome, time-splits the trades (60% train / 40% test, no shuffling), fits a
+pure-Python logistic regression, tunes its threshold on train only, then
+**gates on test**: the model is marked `approved` *only* if it improves
+out-of-sample expectancy versus taking every signal **and** still takes enough
+trades. Otherwise it ships **inert** (never vetoes). `--ml` loads it; an
+unapproved model changes nothing. So ML can never silently degrade the system,
+and a result that "looks great" on a handful of trades is rejected by design.
+(Learned *regime/news* models are deferred to Stage 5: regime labels are
+currently rule-derived, so there is no independent ground truth to train on
+yet — using the rules to train a regime model would be circular.)
+
+### Going live — the hard gates
+
+Real orders flow only through `execution/execution_adapter.py`, which refuses
+unless **all** hold: `execution.live` + `execution.i_understand_risk` +
+non-`godmode_research` risk mode + `GMC_API_KEY`/`GMC_API_SECRET` in the
+environment + a concrete venue client (intentionally **not** shipped). Default
+is dry-run: orders are validated against risk limits and logged, never sent.
+`python3 main.py livecheck` shows the live-feed status and every gate without
+sending anything.
 
 Outputs:
 - console summary (returns, win rate, R, drawdown, Sharpe/Sortino, ruin prob,

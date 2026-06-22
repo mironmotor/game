@@ -104,6 +104,24 @@ def fetch_bybit(symbol: str, timeframe: str, start_ms: int, end_ms: int) -> list
     return out
 
 
+def fetch_recent(venue: str, symbol: str, timeframe: str, limit: int = 50) -> list[Candle]:
+    """Most recent ``limit`` candles (for live polling). Ascending by time."""
+    if venue == "binance":
+        url = ("https://api.binance.com/api/v3/klines"
+               f"?symbol={symbol}&interval={_BINANCE_TF[timeframe]}&limit={limit}")
+        rows = _get_json(url)
+        return [Candle(int(r[0]) // 1000, float(r[1]), float(r[2]), float(r[3]),
+                       float(r[4]), float(r[5])) for r in rows]
+    if venue == "bybit":
+        url = ("https://api.bybit.com/v5/market/kline"
+               f"?category=spot&symbol={symbol}&interval={_BYBIT_TF[timeframe]}&limit={limit}")
+        rows = (_get_json(url).get("result", {}) or {}).get("list", []) or []
+        rows = sorted(rows, key=lambda r: int(r[0]))
+        return [Candle(int(r[0]) // 1000, float(r[1]), float(r[2]), float(r[3]),
+                       float(r[4]), float(r[5])) for r in rows]
+    raise ValueError(f"unknown venue '{venue}'")
+
+
 _VENUES = {"binance": fetch_binance, "bybit": fetch_bybit}
 
 
