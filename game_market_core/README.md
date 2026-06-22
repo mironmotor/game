@@ -81,7 +81,8 @@ markdown report`.
 | **3** | News layer (GDELT/RSS + lexicon scoring + synthetic fallback), News Shock Engine with chaos veto, paper trading on the live-feed abstraction, journal + daily/weekly reports + strategy-health HTML dashboard | ✅ |
 | **4** | Pure-Python ML trade-filter with strict OOS approval gate, on-chain layer (blockchain.info), live REST polling feed, execution adapter behind hard live limits (dry-run by default) | ✅ |
 | **5** | Live websocket feed (stdlib RFC 6455), learned regime (vol-forecaster) + news-impact models with OOS gates vs baselines, signed venue order client (test-endpoint, fully gated) | ✅ |
-| **6+** | Gradient-boosted/seq models beating the logistic baselines OOS, exchange-flow/whale on-chain feeds, portfolio of symbols, capacity/slippage modeling at size | ⬜ |
+| **6** | Gradient-boosted-trees filter (gated vs logistic + take-all OOS), multi-symbol portfolio backtest with diversification, size-dependent market-impact slippage (capacity), on-chain large-flow proxy | ✅ |
+| **7+** | Sequence models (LSTM/Transformer), keyed exchange-flow/whale feeds, cross-symbol risk budgeting, order-book microstructure | ⬜ |
 
 ## 4. Data needed
 
@@ -134,8 +135,9 @@ python3 main.py                       # backtest on synthetic data
 python3 main.py walkforward           # out-of-sample walk-forward validation
 python3 main.py paper                 # paper trading + news + HTML dashboard
 python3 main.py train                 # train + OOS-gate the ML trade filter
-python3 main.py train all             # also train regime + news-impact models
-python3 main.py backtest --ml         # apply the approved ML filter (inert if not approved)
+python3 main.py train all             # filter + regime + news + gbm models
+python3 main.py backtest --ml         # apply the best approved ML filter (inert if none)
+python3 main.py portfolio             # multi-symbol portfolio backtest
 python3 main.py livecheck             # probe REST + websocket feeds + execution gates
 python3 main.py --source exchange     # pull real Binance history (cache + fallback)
 python3 main.py --mode conservative   # 0.5% risk, 1x leverage
@@ -217,6 +219,26 @@ only reachable once **every** execution gate passes (above) **and**
 then defaults to the exchange **test endpoint** (`execution.test_only: true`,
 validates without executing). Going truly live is a deliberate, auditable
 config change, never a silent default.
+
+### Stage 6 — GBM, portfolio, capacity
+
+* **Gradient-boosted filter** (`ml/gbm.py`): a pure-stdlib GBT trade filter,
+  trained by `python3 main.py train gbm`. It is approved only if it beats BOTH
+  take-all AND the logistic baseline out-of-sample with enough trades;
+  `load_model` then prefers the approved GBM over the logistic filter.
+* **Multi-symbol portfolio** (`python3 main.py portfolio`): runs the engine per
+  symbol on an equal capital slice and combines the equity curves, reporting
+  the **diversification gain** (portfolio max drawdown vs the average
+  single-symbol drawdown).
+* **Capacity / market impact** (`costs.impact_coeff`): fills pay extra slippage
+  that scales with order notional / bar dollar-volume — ~0 bps for small
+  accounts, hundreds of bps at size. This is why an edge can be real yet
+  un-scalable, and why "just add leverage / more capital" fails.
+* **On-chain large-flow proxy**: `OnchainContext` adds a `whale_z` signal
+  (keyed exchange-flow/whale feeds slot in behind their providers later).
+
+See **[QUICKSTART.md](QUICKSTART.md)** for the end-to-end workflow and how to
+switch to real data.
 
 ### Going live — the hard gates
 

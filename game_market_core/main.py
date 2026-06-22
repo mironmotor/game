@@ -4,9 +4,10 @@ Commands:
     python3 main.py [backtest]            # backtest (synthetic by default)
     python3 main.py walkforward           # walk-forward validation (OOS)
     python3 main.py paper                 # paper trading: news + dashboard
-    python3 main.py train                 # train + OOS-gate the ML trade filter
-    python3 main.py backtest --ml         # apply the approved ML filter
-    python3 main.py livecheck             # probe the live REST feed (safe)
+    python3 main.py train [filter|regime|news|gbm|all]   # train + OOS-gate models
+    python3 main.py backtest --ml         # apply the best approved ML filter
+    python3 main.py portfolio             # multi-symbol portfolio backtest
+    python3 main.py livecheck             # probe REST + websocket feeds (safe)
     python3 main.py --source exchange     # pull real data (Binance) if reachable
     python3 main.py --mode conservative   # risk profile override
     python3 main.py --mode godmode_research   # research only, never live
@@ -42,9 +43,10 @@ def _parse_args(argv: list[str]) -> dict:
     i = 0
     while i < len(argv):
         a = argv[i]
-        if a in {"backtest", "walkforward", "paper", "train", "livecheck", "selfcheck"}:
+        if a in {"backtest", "walkforward", "paper", "train", "portfolio",
+                 "livecheck", "selfcheck"}:
             opts["command"] = a
-        elif a in {"filter", "regime", "news", "all"}:
+        elif a in {"filter", "regime", "news", "gbm", "all"}:
             opts["target"] = a
         elif a == "--mode" and i + 1 < len(argv):
             opts["mode"] = argv[i + 1]; i += 1
@@ -183,6 +185,27 @@ def run_walkforward_cmd(cfg: dict) -> int:
     return 0
 
 
+def run_portfolio_cmd(cfg: dict) -> int:
+    print("== GAME MARKET CORE — Multi-symbol Portfolio ==")
+    from backtest.portfolio_backtest import run_portfolio
+    r = run_portfolio(cfg)
+    print(f"Symbols: {r['symbols']}")
+    print("\n-- Per symbol -----------------------------------------------")
+    for sym, ret, dd, n in r["per_symbol"]:
+        print(f"  {sym:10} return {ret:+7.2f}% | maxDD {dd:5.2f}% | trades {n}")
+    p = r["portfolio"]
+    print("\n-- Portfolio ------------------------------------------------")
+    print(f"Total return:   {p['total_return_pct']:+.2f}%")
+    print(f"Avg monthly:    {p['avg_monthly_romi_pct']:+.2f}%")
+    print(f"Max drawdown:   {p['max_drawdown_pct']:.2f}%")
+    print(f"Sharpe/Sortino: {p['sharpe']:.2f} / {p['sortino']:.2f}")
+    print(f"Trades:         {p['num_trades']}")
+    print(f"\nDiversification: avg single-symbol maxDD {r['avg_symbol_max_dd']:.2f}% -> "
+          f"portfolio maxDD {p['max_drawdown_pct']:.2f}% "
+          f"(gain {r['diversification_gain']:+.2f} pts)")
+    return 0
+
+
 def run_livecheck_cmd(cfg: dict) -> int:
     """Probe the live REST feed and show execution-adapter safety gates.
     Sends NO orders; in a locked-down sandbox the feed probe fails cleanly."""
@@ -235,7 +258,12 @@ def main(argv: list[str]) -> int:
         if target in ("news", "all"):
             from ml.news_model import train as train_news
             train_news(cfg)
+        if target in ("gbm", "all"):
+            from ml.training_pipeline import train_gbm
+            train_gbm(cfg)
         return 0
+    if opts["command"] == "portfolio":
+        return run_portfolio_cmd(cfg)
     if opts["command"] == "livecheck":
         return run_livecheck_cmd(cfg)
     if opts["command"] == "paper":

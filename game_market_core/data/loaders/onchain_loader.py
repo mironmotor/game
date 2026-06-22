@@ -24,7 +24,11 @@ _CHARTS = {
     "fees_usd": "transaction-fees-usd",
     "miner_rev": "miners-revenue",
     "active_addr": "n-unique-addresses",
+    "tx_vol_usd": "estimated-transaction-volume-usd",  # large-flow / "whale" proxy
 }
+# NOTE: true exchange inflow/outflow and whale clustering require a keyed
+# provider (Glassnode / CryptoQuant). They slot in here behind their keys;
+# tx_vol_usd is a free, public stand-in for aggregate large flow.
 
 
 def _repo_root() -> str:

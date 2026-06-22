@@ -32,8 +32,11 @@ from backtest.engine import run_backtest
 from ml.regime_classifier import classify_series
 from ml.feature_vector import FEATURE_NAMES
 from ml.trade_filter_model import TradeFilterModel
+from ml.gbm import GradientBoostedClassifier
 
-MODEL_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "models", "trade_filter.json")
+_MODELS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "models")
+MODEL_PATH = os.path.join(_MODELS_DIR, "trade_filter.json")
+GBM_PATH = os.path.join(_MODELS_DIR, "gbm_filter.json")
 
 
 def _collect_trades(cfg: dict):
@@ -114,7 +117,63 @@ def train(cfg: dict | None = None) -> dict:
             "n_train": len(train_set), "n_test": len(test_set), "n_taken": len(taken)}
 
 
-def load_model() -> TradeFilterModel | None:
+def train_gbm(cfg: dict | None = None) -> dict:
+    cfg = cfg or load_config()
+    print("== GAME MARKET CORE — Train GBM filter (Stage 6) ==")
+    trades = _collect_trades(cfg)
+    trades.sort(key=lambda t: t.entry_ts)
+    print(f"Collected {len(trades)} labeled trades.")
+    if len(trades) < 40:
+        print("Too few trades (<40). GBM stays inert.")
+        return {"approved": False, "reason": "too_few_trades"}
+
+    cut = int(len(trades) * 0.6)
+    train_set, test_set = trades[:cut], trades[cut:]
+    X = [t.features for t in train_set]
+    y = [1 if t.pnl > 0 else 0 for t in train_set]
+
+    lr_model = TradeFilterModel(FEATURE_NAMES)
+    lr_model.fit(X, y)
+    lr_thr, _ = _best_threshold(lr_model, train_set)
+
+    gbm = GradientBoostedClassifier(FEATURE_NAMES)
+    gbm.fit(X, y)
+    gbm_thr, _ = _best_threshold(gbm, train_set)
+    gbm.threshold = gbm_thr
+
+    base_exp = _expectancy(test_set)
+    lr_taken = [t for t in test_set if lr_model.predict_proba(t.features) >= lr_thr]
+    gbm_taken = [t for t in test_set if gbm.predict_proba(t.features) >= gbm_thr]
+    lr_exp = _expectancy(lr_taken)
+    gbm_exp = _expectancy(gbm_taken)
+    min_taken = max(15, len(test_set) // 5)
+
+    approved = gbm_exp > base_exp and len(gbm_taken) >= min_taken and gbm_exp >= lr_exp
+    gbm.approved = approved
+    gbm.meta = {"oos_gbm_r": gbm_exp, "oos_logistic_r": lr_exp,
+                "oos_takeall_r": base_exp, "n_taken": len(gbm_taken)}
+    os.makedirs(_MODELS_DIR, exist_ok=True)
+    gbm.save(GBM_PATH)
+
+    print(f"\nOOS take-all expectancy: {base_exp:+.3f} R over {len(test_set)} trades")
+    print(f"OOS logistic filtered:   {lr_exp:+.3f} R over {len(lr_taken)} trades")
+    print(f"OOS GBM filtered:        {gbm_exp:+.3f} R over {len(gbm_taken)} trades")
+    if approved:
+        print("VERDICT: APPROVED — GBM beats take-all AND the logistic baseline OOS.")
+    else:
+        print("VERDICT: REJECTED — GBM does not clear take-all and/or the logistic "
+              "baseline with enough trades. Saved INERT.")
+    print(f"Model saved to: {GBM_PATH}")
+    return {"approved": approved, **gbm.meta}
+
+
+def load_model():
+    """Return the best available APPROVED filter (GBM preferred), else the
+    logistic filter (which is inert unless itself approved), else None."""
+    if os.path.exists(GBM_PATH):
+        m = GradientBoostedClassifier.load(GBM_PATH)
+        if m.approved:
+            return m
     if os.path.exists(MODEL_PATH):
         return TradeFilterModel.load(MODEL_PATH)
     return None

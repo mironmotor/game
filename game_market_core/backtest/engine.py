@@ -42,6 +42,22 @@ def _adverse(price: float, side_is_buy: bool, bps: float) -> float:
     return price * (1 + factor) if side_is_buy else price * (1 - factor)
 
 
+def _impact_bps(qty: float, ref_price: float, bar, coeff: float) -> float:
+    """Size-dependent market impact in bps.
+
+    Impact grows with order notional relative to the bar's dollar volume, so
+    large orders cost more — this is the capacity limit that makes "infinite
+    scaling" impossible. Negligible for small accounts; bites at size.
+    """
+    if coeff <= 0:
+        return 0.0
+    dollar_vol = bar.volume * bar.close
+    if dollar_vol <= 0:
+        return 0.0
+    notional = abs(qty) * ref_price
+    return coeff * (notional / dollar_vol)
+
+
 def run_backtest(
     candles: list[Candle],
     mf: MarketFeatures,
@@ -64,6 +80,7 @@ def run_backtest(
     slip = float(costs.get("slippage_bps", 2.0))
     spread = float(costs.get("spread_bps", 1.0))
     funding_8h = float(costs.get("funding_bps_per_8h", 1.0))
+    impact_coeff = float(costs.get("impact_coeff", 0.0))
     fill_bps = slip + spread  # adverse cost applied to each fill
 
     n = len(candles)
@@ -87,7 +104,7 @@ def run_backtest(
             if pos is not None:
                 equity = _close_position(
                     pos, bar.open, "window_end", bar, taker, fill_bps,
-                    funding_8h, bar_seconds, equity, trades, risk
+                    funding_8h, bar_seconds, equity, trades, risk, impact_coeff
                 )
                 pos = None
             equity_curve.append((bar.ts, equity))
@@ -98,7 +115,8 @@ def run_backtest(
             sig, qty, fv = pending
             pending = None
             is_buy = sig.side == "long"
-            entry_fill = _adverse(bar.open, is_buy, fill_bps)
+            entry_impact = _impact_bps(qty, bar.open, bar, impact_coeff)
+            entry_fill = _adverse(bar.open, is_buy, fill_bps + entry_impact)
             entry_fee = taker * entry_fill * qty
             init_risk = qty * abs(entry_fill - sig.stop)
             pos = {
@@ -127,7 +145,7 @@ def run_backtest(
             if exit_price is not None:
                 equity = _close_position(
                     pos, exit_price, exit_reason, bar, taker, fill_bps,
-                    funding_8h, bar_seconds, equity, trades, risk
+                    funding_8h, bar_seconds, equity, trades, risk, impact_coeff
                 )
                 pos = None
 
@@ -164,7 +182,7 @@ def run_backtest(
         last = candles[-1]
         equity = _close_position(
             pos, last.close, "end_of_data", last, taker, fill_bps,
-            funding_8h, bar_seconds, equity, trades, risk
+            funding_8h, bar_seconds, equity, trades, risk, impact_coeff
         )
         if equity_curve:
             equity_curve[-1] = (last.ts, equity)
@@ -184,10 +202,12 @@ def run_backtest(
 
 
 def _close_position(pos, exit_price, exit_reason, bar, taker, fill_bps,
-                    funding_8h, bar_seconds, equity, trades, risk) -> float:
+                    funding_8h, bar_seconds, equity, trades, risk,
+                    impact_coeff: float = 0.0) -> float:
     is_buy_exit = pos["side"] == "short"  # closing a short = buy
-    exit_fill = _adverse(exit_price, is_buy_exit, fill_bps)
     qty = pos["qty"]
+    exit_impact = _impact_bps(qty, exit_price, bar, impact_coeff)
+    exit_fill = _adverse(exit_price, is_buy_exit, fill_bps + exit_impact)
     exit_fee = taker * exit_fill * qty
 
     if pos["side"] == "long":

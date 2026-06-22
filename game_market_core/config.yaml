@@ -59,6 +59,8 @@ costs:
   slippage_bps: 2.0                 # basis points per fill
   spread_bps: 1.0                   # half-spread cost per fill
   funding_bps_per_8h: 1.0           # rough perpetual funding drag
+  impact_coeff: 500.0               # market-impact: bps = coeff * notional/bar_$vol
+                                    # (negligible for small accounts; bites at size)
 
 risk:
   mode: balanced                    # conservative | balanced | aggressive | godmode_research
@@ -109,6 +111,11 @@ walk_forward:
 
 backtest:
   one_position_at_a_time: true
+
+# Multi-symbol portfolio (python3 main.py portfolio). Offline -> distinct
+# synthetic series per symbol; with source: exchange each is fetched for real.
+portfolio:
+  symbols: [BTCUSDT, ETHUSDT, SOLUSDT, BNBUSDT]
 
 scam_detector:
   min_trades: 30
