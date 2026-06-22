@@ -37,12 +37,15 @@ from data.storage.database import save_trades_csv  # noqa: E402
 
 
 def _parse_args(argv: list[str]) -> dict:
-    opts = {"command": "backtest", "mode": None, "source": None, "ml": False}
+    opts = {"command": "backtest", "mode": None, "source": None, "ml": False,
+            "target": None}
     i = 0
     while i < len(argv):
         a = argv[i]
         if a in {"backtest", "walkforward", "paper", "train", "livecheck", "selfcheck"}:
             opts["command"] = a
+        elif a in {"filter", "regime", "news", "all"}:
+            opts["target"] = a
         elif a == "--mode" and i + 1 < len(argv):
             opts["mode"] = argv[i + 1]; i += 1
         elif a == "--source" and i + 1 < len(argv):
@@ -190,10 +193,19 @@ def run_livecheck_cmd(cfg: dict) -> int:
     feed = RestPollFeed(venue=venue, max_polls=1, poll_seconds=0)
     try:
         bars = list(feed.stream_candles(d.get("symbol", "BTCUSDT"), d.get("timeframe", "1h")))
-        print(f"[feed] {venue}: received {len(bars)} finalized candle(s) "
+        print(f"[rest] {venue}: received {len(bars)} finalized candle(s) "
               f"(last close {bars[-1].close if bars else 'n/a'})")
     except Exception as exc:
-        print(f"[feed] {venue}: live probe failed ({type(exc).__name__}: {str(exc)[:60]}). "
+        print(f"[rest] {venue}: live probe failed ({type(exc).__name__}: {str(exc)[:60]}). "
+              "Expected in a locked-down environment.")
+
+    try:
+        from data.loaders.ws_feed import WebSocketFeed
+        ws = WebSocketFeed(venue="binance", max_messages=1, timeout=4)
+        bar = next(ws.stream_candles(d.get("symbol", "BTCUSDT"), d.get("timeframe", "1h")))
+        print(f"[ws]   binance: streamed 1 finalized candle (close {bar.close})")
+    except Exception as exc:
+        print(f"[ws]   binance: websocket probe failed ({type(exc).__name__}). "
               "Expected in a locked-down environment.")
 
     from execution.execution_adapter import ExecutionAdapter
@@ -213,8 +225,16 @@ def main(argv: list[str]) -> int:
     if opts["command"] == "walkforward":
         return run_walkforward_cmd(cfg)
     if opts["command"] == "train":
-        from ml.training_pipeline import train
-        train(cfg)
+        target = opts["target"] or "filter"
+        if target in ("filter", "all"):
+            from ml.training_pipeline import train
+            train(cfg)
+        if target in ("regime", "all"):
+            from ml.regime_model import train as train_regime
+            train_regime(cfg)
+        if target in ("news", "all"):
+            from ml.news_model import train as train_news
+            train_news(cfg)
         return 0
     if opts["command"] == "livecheck":
         return run_livecheck_cmd(cfg)

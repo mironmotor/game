@@ -34,6 +34,7 @@ macro:
 news:
   enabled: true
   window_hours: 6                   # aggregation window for the news state
+  move_threshold: 0.02              # |move| within K bars = "news impact" label
   rss:                              # optional RSS feeds (titles are scored)
     # - https://www.coindesk.com/arc/outboundfeeds/rss/
 
@@ -48,6 +49,8 @@ execution:
   live: false
   i_understand_risk: false
   venue: binance
+  venue_client_enabled: false       # build the signed order client (needs API keys)
+  test_only: true                   # use exchange TEST endpoint (validates, no execution)
 
 # Execution frictions applied by the backtest. Removing these is one of the
 # most common ways backtests lie; they are mandatory and non-zero.

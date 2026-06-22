@@ -35,10 +35,19 @@ class ExecutionAdapter:
         self.cfg_live = bool(ex.get("live", False))
         self.acknowledged = bool(ex.get("i_understand_risk", False))
         self.venue = ex.get("venue", "binance")
+        self.venue_client_enabled = bool(ex.get("venue_client_enabled", False))
+        self.test_only = bool(ex.get("test_only", True))
         self.risk = risk_engine
         self.has_keys = bool(os.environ.get("GMC_API_KEY") and os.environ.get("GMC_API_SECRET"))
-        # Venue send is not implemented on purpose (see module docstring).
-        self.venue_impl_available = False
+
+        # The venue client is only built when explicitly enabled AND keys exist.
+        self.client = None
+        if self.venue_client_enabled and self.has_keys and self.venue == "binance":
+            from execution.venue_client import BinanceOrderClient
+            self.client = BinanceOrderClient(os.environ["GMC_API_KEY"],
+                                             os.environ["GMC_API_SECRET"],
+                                             test_only=self.test_only)
+        self.venue_impl_available = self.client is not None
 
     @property
     def live_enabled(self) -> bool:
@@ -56,7 +65,7 @@ class ExecutionAdapter:
         if not self.has_keys:
             reasons.append("no API credentials in environment")
         if not self.venue_impl_available:
-            reasons.append("venue send not implemented (deliberate safety stop)")
+            reasons.append("venue client disabled (execution.venue_client_enabled=false)")
         return reasons
 
     def _validate_risk(self, order: dict) -> str | None:
@@ -77,8 +86,14 @@ class ExecutionAdapter:
             return ExecResult("rejected", violation, order)
         if not self.live_enabled:
             return ExecResult("dry_run", "; ".join(self.gate_reasons()), order)
-        # Reaching here would mean every gate passed; we still refuse to send
-        # because no real venue implementation is wired (by design).
-        raise NotImplementedError(
-            "Live order placement is not implemented. Implement the venue "
-            "client explicitly and review risk limits before enabling.")
+        # Every gate passed: route to the venue client. With test_only=True
+        # (default) this validates via the exchange TEST endpoint and executes
+        # nothing — going truly live requires execution.test_only=false too.
+        result = self.client.place_order(
+            symbol=order.get("symbol", "BTCUSDT"),
+            side=order["side"].replace("long", "BUY").replace("short", "SELL"),
+            quantity=abs(order["qty"]),
+            order_type=order.get("type", "MARKET"),
+            price=order.get("price") if order.get("type") == "LIMIT" else None,
+        )
+        return ExecResult("sent", "test endpoint" if self.test_only else "LIVE", order | {"venue_result": result})

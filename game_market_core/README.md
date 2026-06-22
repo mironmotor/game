@@ -80,7 +80,8 @@ markdown report`.
 | **2** | Real OHLCV loaders (Binance/Bybit REST + cache + fallback), macro/equities loader (Stooq) as regime context, rule-based regime classifier, Trend engine, regime-gated Meta Controller, walk-forward validation | ✅ |
 | **3** | News layer (GDELT/RSS + lexicon scoring + synthetic fallback), News Shock Engine with chaos veto, paper trading on the live-feed abstraction, journal + daily/weekly reports + strategy-health HTML dashboard | ✅ |
 | **4** | Pure-Python ML trade-filter with strict OOS approval gate, on-chain layer (blockchain.info), live REST polling feed, execution adapter behind hard live limits (dry-run by default) | ✅ |
-| **5+** | Live websocket streaming, learned regime/news models (LightGBM/Transformer) beating the rule baselines OOS, exchange-flow/whale on-chain feeds, real venue order client | ⬜ |
+| **5** | Live websocket feed (stdlib RFC 6455), learned regime (vol-forecaster) + news-impact models with OOS gates vs baselines, signed venue order client (test-endpoint, fully gated) | ✅ |
+| **6+** | Gradient-boosted/seq models beating the logistic baselines OOS, exchange-flow/whale on-chain feeds, portfolio of symbols, capacity/slippage modeling at size | ⬜ |
 
 ## 4. Data needed
 
@@ -133,8 +134,9 @@ python3 main.py                       # backtest on synthetic data
 python3 main.py walkforward           # out-of-sample walk-forward validation
 python3 main.py paper                 # paper trading + news + HTML dashboard
 python3 main.py train                 # train + OOS-gate the ML trade filter
+python3 main.py train all             # also train regime + news-impact models
 python3 main.py backtest --ml         # apply the approved ML filter (inert if not approved)
-python3 main.py livecheck             # probe live feed + show execution gates (no orders)
+python3 main.py livecheck             # probe REST + websocket feeds + execution gates
 python3 main.py --source exchange     # pull real Binance history (cache + fallback)
 python3 main.py --mode conservative   # 0.5% risk, 1x leverage
 python3 main.py --mode aggressive     # 1.5x risk (capped 3%/trade)
@@ -183,9 +185,38 @@ out-of-sample expectancy versus taking every signal **and** still takes enough
 trades. Otherwise it ships **inert** (never vetoes). `--ml` loads it; an
 unapproved model changes nothing. So ML can never silently degrade the system,
 and a result that "looks great" on a handful of trades is rejected by design.
-(Learned *regime/news* models are deferred to Stage 5: regime labels are
-currently rule-derived, so there is no independent ground truth to train on
-yet — using the rules to train a regime model would be circular.)
+### Learned regime & news models (Stage 5)
+
+`python3 main.py train all` also trains two models with **real, future-derived
+ground truth** (not circular rule-mimicry):
+
+* **regime model** (`ml/regime_model.py`) — forecasts whether the next
+  `horizon` bars will be more volatile than the recent trailing average. Gated
+  against a **persistence** baseline OOS.
+* **news-impact model** (`ml/news_model.py`) — predicts whether a significant
+  price move follows a high-severity event within `K` bars. Gated against a
+  **majority-class** baseline OOS.
+
+Both ship inert unless they beat their baseline out-of-sample. On synthetic
+data they correctly do **not** (regime beats persistence by <1%, news ties
+majority), so they stay inert — the honest result.
+
+### Live websocket feed
+
+`data/loaders/ws_feed.py` is a minimal stdlib RFC 6455 client (handshake +
+frame decode + ping/pong, no `websockets` dependency) that streams finalized
+candles from Binance behind the same `ExchangeFeed` interface. `livecheck`
+probes it. A real exchange-flow/whale on-chain feed and gradient-boosted models
+are the Stage 6 upgrades.
+
+### Real venue order client (still fully gated)
+
+`execution/venue_client.py` builds HMAC-SHA256-signed Binance orders. It is
+only reachable once **every** execution gate passes (above) **and**
+`execution.venue_client_enabled: true` **and** API keys are present — and even
+then defaults to the exchange **test endpoint** (`execution.test_only: true`,
+validates without executing). Going truly live is a deliberate, auditable
+config change, never a silent default.
 
 ### Going live — the hard gates
 
