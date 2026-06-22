@@ -66,8 +66,35 @@ def load_onchain(cfg: dict) -> dict:
                 with open(cache, "r", encoding="utf-8") as fh:
                     r = csv.DictReader(fh)
                     series[name] = [(int(x["ts"]), float(x["value"])) for x in r]
+    series.update(load_keyed_flows(cfg))
     if series:
         print(f"[onchain] loaded series: {', '.join(sorted(series))}")
     else:
         print("[onchain] no data available (offline) -> neutral on-chain features")
     return series
+
+
+def load_keyed_flows(cfg: dict) -> dict:
+    """Keyed exchange-flow / whale feeds (Glassnode / CryptoQuant).
+
+    These require a paid API key, supplied via the environment
+    (GMC_GLASSNODE_KEY / GMC_CRYPTOQUANT_KEY). When a key is present the real
+    endpoint is queried for exchange netflow / whale metrics; otherwise this
+    returns {} and the free ``tx_vol_usd`` proxy in _CHARTS stands in. The hook
+    is wired so adding a key is the only change needed — no code edits.
+    """
+    glass = os.environ.get("GMC_GLASSNODE_KEY")
+    if not glass:
+        return {}
+    out: dict = {}
+    try:
+        url = ("https://api.glassnode.com/v1/metrics/transactions/transfers_volume_exchanges_net"
+               f"?a=BTC&i=24h&api_key={glass}")
+        req = urllib.request.Request(url, headers=_HEADERS)
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+        out["exchange_netflow"] = [(int(p["t"]), float(p.get("v") or 0.0)) for p in data]
+        print("[onchain] keyed exchange-netflow loaded (Glassnode)")
+    except Exception as exc:
+        print(f"[onchain] keyed flow fetch failed ({type(exc).__name__}); using free proxy")
+    return out

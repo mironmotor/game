@@ -82,7 +82,8 @@ markdown report`.
 | **4** | Pure-Python ML trade-filter with strict OOS approval gate, on-chain layer (blockchain.info), live REST polling feed, execution adapter behind hard live limits (dry-run by default) | ✅ |
 | **5** | Live websocket feed (stdlib RFC 6455), learned regime (vol-forecaster) + news-impact models with OOS gates vs baselines, signed venue order client (test-endpoint, fully gated) | ✅ |
 | **6** | Gradient-boosted-trees filter (gated vs logistic + take-all OOS), multi-symbol portfolio backtest with diversification, size-dependent market-impact slippage (capacity), on-chain large-flow proxy | ✅ |
-| **7+** | Sequence models (LSTM/Transformer), keyed exchange-flow/whale feeds, cross-symbol risk budgeting, order-book microstructure | ⬜ |
+| **7** | Sequence model (Elman RNN + BPTT, pure stdlib) gated OOS, cross-symbol risk budgeting (inverse-vol + portfolio kill), order-book microstructure, keyed exchange-flow/whale hook | ✅ |
+| **8+** | Transformer/attention sequence models, full L2 order-book replay, live multi-symbol paper execution, capital-curve compounding study | ⬜ |
 
 ## 4. Data needed
 
@@ -135,9 +136,9 @@ python3 main.py                       # backtest on synthetic data
 python3 main.py walkforward           # out-of-sample walk-forward validation
 python3 main.py paper                 # paper trading + news + HTML dashboard
 python3 main.py train                 # train + OOS-gate the ML trade filter
-python3 main.py train all             # filter + regime + news + gbm models
+python3 main.py train all             # filter + regime + news + gbm + seq models
 python3 main.py backtest --ml         # apply the best approved ML filter (inert if none)
-python3 main.py portfolio             # multi-symbol portfolio backtest
+python3 main.py portfolio             # multi-symbol portfolio (risk parity + kill)
 python3 main.py livecheck             # probe REST + websocket feeds + execution gates
 python3 main.py --source exchange     # pull real Binance history (cache + fallback)
 python3 main.py --mode conservative   # 0.5% risk, 1x leverage
@@ -236,6 +237,26 @@ config change, never a silent default.
   un-scalable, and why "just add leverage / more capital" fails.
 * **On-chain large-flow proxy**: `OnchainContext` adds a `whale_z` signal
   (keyed exchange-flow/whale feeds slot in behind their providers later).
+
+### Stage 7 — sequence model, risk budgeting, microstructure
+
+* **Sequence model** (`ml/seq_model.py`): a tiny Elman RNN trained with real
+  backpropagation-through-time (pure stdlib, no numpy) that reads a window of
+  recent log-returns and predicts the next bar's direction. `python3 main.py
+  train seq`. Approved only if it beats BOTH a majority and a "predict last
+  move" baseline out-of-sample — on near-random returns it does **not** (it
+  ships inert), which is the honest evidence that price is not predictable from
+  price alone.
+* **Cross-symbol risk budgeting** (`portfolio.risk_budget: inverse_vol`):
+  capital is allocated inversely to each symbol's volatility (risk parity), and
+  a **portfolio-level kill** (`portfolio.max_drawdown`) halts the whole book if
+  combined drawdown breaches the cap.
+* **Order-book microstructure** (`data/loaders/orderbook.py`,
+  `features/microstructure.py`): depth-snapshot order-book imbalance and
+  spread, used by the live spread filter; `livecheck` probes it.
+* **Keyed exchange-flow/whale** (`load_keyed_flows`): Glassnode/CryptoQuant
+  netflow loads automatically when `GMC_GLASSNODE_KEY` is set, else the free
+  `whale_z` proxy stands in.
 
 See **[QUICKSTART.md](QUICKSTART.md)** for the end-to-end workflow and how to
 switch to real data.

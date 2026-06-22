@@ -116,6 +116,8 @@ backtest:
 # synthetic series per symbol; with source: exchange each is fetched for real.
 portfolio:
   symbols: [BTCUSDT, ETHUSDT, SOLUSDT, BNBUSDT]
+  risk_budget: inverse_vol          # equal | inverse_vol (volatility risk parity)
+  max_drawdown: 0.20                # portfolio-level kill: halt the whole book
 
 scam_detector:
   min_trades: 30

@@ -46,7 +46,8 @@ class OnchainContext:
             "fees_z": self._z_at("fees_usd", ts),
             "miner_z": self._z_at("miner_rev", ts),
             "activity_z": self._z_at("n_tx", ts),
-            "whale_z": self._z_at("tx_vol_usd", ts),   # large-flow proxy
+            "whale_z": self._z_at("tx_vol_usd", ts),         # free large-flow proxy
+            "exchange_netflow_z": self._z_at("exchange_netflow", ts),  # keyed (Glassnode)
             "available": bool(self._prepared),
         }
 

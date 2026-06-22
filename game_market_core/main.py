@@ -46,7 +46,7 @@ def _parse_args(argv: list[str]) -> dict:
         if a in {"backtest", "walkforward", "paper", "train", "portfolio",
                  "livecheck", "selfcheck"}:
             opts["command"] = a
-        elif a in {"filter", "regime", "news", "gbm", "all"}:
+        elif a in {"filter", "regime", "news", "gbm", "seq", "all"}:
             opts["target"] = a
         elif a == "--mode" and i + 1 < len(argv):
             opts["mode"] = argv[i + 1]; i += 1
@@ -190,6 +190,7 @@ def run_portfolio_cmd(cfg: dict) -> int:
     from backtest.portfolio_backtest import run_portfolio
     r = run_portfolio(cfg)
     print(f"Symbols: {r['symbols']}")
+    print(f"Risk budget: {r['risk_budget']} | weights: {r['weights']}")
     print("\n-- Per symbol -----------------------------------------------")
     for sym, ret, dd, n in r["per_symbol"]:
         print(f"  {sym:10} return {ret:+7.2f}% | maxDD {dd:5.2f}% | trades {n}")
@@ -203,6 +204,8 @@ def run_portfolio_cmd(cfg: dict) -> int:
     print(f"\nDiversification: avg single-symbol maxDD {r['avg_symbol_max_dd']:.2f}% -> "
           f"portfolio maxDD {p['max_drawdown_pct']:.2f}% "
           f"(gain {r['diversification_gain']:+.2f} pts)")
+    if r["portfolio_kill"]:
+        print(f"PORTFOLIO KILL: {p['kill_reason']} — book halted.")
     return 0
 
 
@@ -229,6 +232,16 @@ def run_livecheck_cmd(cfg: dict) -> int:
         print(f"[ws]   binance: streamed 1 finalized candle (close {bar.close})")
     except Exception as exc:
         print(f"[ws]   binance: websocket probe failed ({type(exc).__name__}). "
+              "Expected in a locked-down environment.")
+
+    try:
+        from data.loaders.orderbook import fetch_order_book
+        from features.microstructure import microstructure_state
+        book = fetch_order_book(venue, d.get("symbol", "BTCUSDT"), limit=20)
+        ms = microstructure_state(book)
+        print(f"[book] {venue}: OBI {ms['obi']:+.3f} | spread {ms['spread_bps']:.2f} bps")
+    except Exception as exc:
+        print(f"[book] {venue}: order-book probe failed ({type(exc).__name__}). "
               "Expected in a locked-down environment.")
 
     from execution.execution_adapter import ExecutionAdapter
@@ -261,6 +274,9 @@ def main(argv: list[str]) -> int:
         if target in ("gbm", "all"):
             from ml.training_pipeline import train_gbm
             train_gbm(cfg)
+        if target in ("seq", "all"):
+            from ml.seq_model import train as train_seq
+            train_seq(cfg)
         return 0
     if opts["command"] == "portfolio":
         return run_portfolio_cmd(cfg)
