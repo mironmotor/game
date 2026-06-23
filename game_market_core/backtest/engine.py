@@ -55,7 +55,10 @@ def _impact_bps(qty: float, ref_price: float, bar, coeff: float) -> float:
     if dollar_vol <= 0:
         return 0.0
     notional = abs(qty) * ref_price
-    return coeff * (notional / dollar_vol)
+    # Cap impact at 1000 bps (10%): in a real thin market the order simply
+    # wouldn't fill at size, not at an absurd price. Without this, near-zero
+    # early-history volume produces nonsensical fills and negative equity.
+    return min(coeff * (notional / dollar_vol), 1000.0)
 
 
 def run_backtest(

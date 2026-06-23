@@ -161,6 +161,18 @@ def load_crypto(cfg: dict) -> list[Candle]:
         return load_csv(_abs(data_cfg.get("csv_path")))
     if source == "exchange":
         return _load_exchange(cfg)
+    if source == "coinmetrics":
+        from data.loaders.coinmetrics_loader import load_candles
+        try:
+            return load_candles(cfg)
+        except Exception as exc:
+            print(f"[data] coinmetrics unavailable ({type(exc).__name__}); "
+                  "FALLING BACK TO SYNTHETIC.")
+            return generate_synthetic(
+                bars=int(data_cfg.get("bars", 26280)),
+                seed=int(data_cfg.get("seed", 17)),
+                start_price=float(data_cfg.get("start_price", 20000.0)),
+            )
     return generate_synthetic(
         bars=int(data_cfg.get("bars", 26280)),
         seed=int(data_cfg.get("seed", 17)),

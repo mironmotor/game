@@ -148,11 +148,19 @@ python3 main.py --mode godmode_research  # high leverage, RESEARCH ONLY (no live
 
 ### Real data
 
-`--source exchange` (or `data.source: exchange` in `config.yaml`) fetches real
-OHLCV from `data.venue` (`binance` | `bybit`) over the public REST API — **no
-keys needed**. It follows a safe chain: **live fetch → CSV cache → synthetic**,
-so it always runs, even offline (in a locked-down sandbox you'll see a `403`
-and a clean fallback message). Set `macro.enabled: true` to pull the
+**Default is now `data.source: coinmetrics`** — real daily BTC back to 2010
+from the CoinMetrics community dataset on GitHub (`raw.githubusercontent.com`),
+**no API key needed**, with REAL on-chain series (exchange netflow, active
+addresses, fees). It's reachable even where exchanges are geo-blocked. The raw
+CSV is cached under `data/storage/`, and if GitHub is unreachable it falls back
+to synthetic. Caveat: this dataset is **daily close only** (no intraday wicks),
+so it mainly exercises the Trend engine + regime, not the wick-based False
+Breakout engine. Set `data.cm_asset` (e.g. `eth`) for other assets.
+
+`--source exchange` (or `data.source: exchange`) instead fetches intraday OHLCV
+from `data.venue` (`binance` | `bybit`) over the public REST API — **no keys
+needed** — with the chain **live fetch → CSV cache → synthetic**. Set
+`macro.enabled: true` to pull the
 S&P/Nasdaq/gold/dollar basket (Stooq) as **regime context** — risk-on/off and
 crisis flags that gate crypto trading, not separately traded instruments.
 

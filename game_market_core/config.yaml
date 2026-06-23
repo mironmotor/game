@@ -11,7 +11,7 @@ project:
   romi_target_monthly_high: 300     # percent
 
 data:
-  source: synthetic                 # synthetic | csv | exchange
+  source: coinmetrics               # synthetic | csv | exchange | coinmetrics
   venue: binance                    # binance | bybit  (for source: exchange)
   symbol: BTCUSDT
   timeframe: 1h
@@ -32,7 +32,7 @@ macro:
 # News / world events (GDELT + RSS). Offline -> deterministic synthetic stream
 # aligned to the candle range, so the News Shock Engine stays testable.
 news:
-  enabled: true
+  enabled: false
   window_hours: 6                   # aggregation window for the news state
   move_threshold: 0.02              # |move| within K bars = "news impact" label
   rss:                              # optional RSS feeds (titles are scored)
@@ -40,7 +40,7 @@ news:
 
 # On-chain network data (blockchain.info charts). Neutral when offline.
 onchain:
-  enabled: false                    # set true on a network-enabled machine
+  enabled: true                    # set true on a network-enabled machine
 
 # Execution adapter — DRY-RUN by default. Real orders require EVERY gate:
 # execution.live + i_understand_risk + non-godmode risk mode + API keys in env

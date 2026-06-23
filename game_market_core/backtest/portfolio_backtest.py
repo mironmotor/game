@@ -27,13 +27,18 @@ from ml.regime_classifier import classify_series
 def _load_symbol(cfg: dict, symbol: str, idx: int) -> list[Candle]:
     c = copy.deepcopy(cfg)
     c.setdefault("data", {})["symbol"] = symbol
-    if c["data"].get("source", "synthetic") == "synthetic":
+    src = c["data"].get("source", "synthetic")
+    if src == "synthetic":
         # Distinct series per symbol so the portfolio isn't one asset cloned.
         return generate_synthetic(
             bars=int(c["data"].get("bars", 26280)),
             seed=int(c["data"].get("seed", 17)) + 1000 * (idx + 1),
             start_price=float(c["data"].get("start_price", 20000.0)) * (1 + 0.1 * idx),
         )
+    if src == "coinmetrics":
+        # Map each symbol to its CoinMetrics asset (btc/eth/...) so the
+        # portfolio is real multi-asset; missing assets fall back to synthetic.
+        c["data"]["cm_asset"] = symbol.replace("USDT", "").replace("USD", "").lower()
     return load_crypto(c)
 
 

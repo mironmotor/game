@@ -101,7 +101,10 @@ def compute_metrics(res: BacktestResult) -> dict:
 
     mret = monthly_returns(curve, start)
     months = max(1, len(mret))
-    avg_monthly = ((end / start) ** (1 / months) - 1.0) * 100.0 if start > 0 else 0.0
+    if start > 0 and end > 0:
+        avg_monthly = ((end / start) ** (1 / months) - 1.0) * 100.0
+    else:
+        avg_monthly = -100.0  # equity wiped to <= 0; geometric mean undefined
 
     p_ruin = probability_of_ruin(trades, start)
 

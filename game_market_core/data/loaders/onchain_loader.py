@@ -46,6 +46,15 @@ def _fetch_chart(chart: str) -> list[tuple[int, float]]:
 def load_onchain(cfg: dict) -> dict:
     if not cfg.get("onchain", {}).get("enabled", False):
         return {}
+    # When prices come from CoinMetrics, use its REAL on-chain series too.
+    if cfg.get("data", {}).get("source") == "coinmetrics":
+        from data.loaders.coinmetrics_loader import load_onchain as cm_onchain
+        try:
+            series = cm_onchain(cfg)
+        except Exception:
+            series = {}
+        series.update(load_keyed_flows(cfg))
+        return series
     cache_dir = os.path.join(_repo_root(), "data", "storage")
     os.makedirs(cache_dir, exist_ok=True)
     series: dict = {}
