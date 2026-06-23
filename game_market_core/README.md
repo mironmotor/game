@@ -139,6 +139,8 @@ python3 main.py train                 # train + OOS-gate the ML trade filter
 python3 main.py train all             # filter + regime + news + gbm + seq models
 python3 main.py backtest --ml         # apply the best approved ML filter (inert if none)
 python3 main.py portfolio             # multi-symbol portfolio (risk parity + kill)
+python3 main.py serve                 # live web dashboard at http://127.0.0.1:8000
+python3 main.py serve --ml --port 9000  # served, with the approved ML filter
 python3 main.py livecheck             # probe REST + websocket feeds + execution gates
 python3 main.py --source exchange     # pull real Binance history (cache + fallback)
 python3 main.py --mode conservative   # 0.5% risk, 1x leverage

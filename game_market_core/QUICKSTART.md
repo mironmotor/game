@@ -47,7 +47,13 @@ python3 main.py portfolio
 python3 main.py livecheck
 ```
 
-Open `reports/output/dashboard.html` in a browser after `paper`.
+Open `reports/output/dashboard.html` in a browser after `paper` — or run the
+live web dashboard:
+
+```bash
+python3 main.py serve            # then open http://127.0.0.1:8000
+python3 main.py serve --ml       # with the approved ML filter (run `train` first)
+```
 
 ## 2. Switch to REAL data (network required)
 

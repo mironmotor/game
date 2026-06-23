@@ -7,6 +7,7 @@ Commands:
     python3 main.py train [filter|regime|news|gbm|all]   # train + OOS-gate models
     python3 main.py backtest --ml         # apply the best approved ML filter
     python3 main.py portfolio             # multi-symbol portfolio backtest
+    python3 main.py serve [--port 8000]   # live web dashboard (open in browser)
     python3 main.py livecheck             # probe REST + websocket feeds (safe)
     python3 main.py --source exchange     # pull real data (Binance) if reachable
     python3 main.py --mode conservative   # risk profile override
@@ -39,15 +40,17 @@ from data.storage.database import save_trades_csv  # noqa: E402
 
 def _parse_args(argv: list[str]) -> dict:
     opts = {"command": "backtest", "mode": None, "source": None, "ml": False,
-            "target": None}
+            "target": None, "port": 8000}
     i = 0
     while i < len(argv):
         a = argv[i]
         if a in {"backtest", "walkforward", "paper", "train", "portfolio",
-                 "livecheck", "selfcheck"}:
+                 "livecheck", "serve", "dashboard", "selfcheck"}:
             opts["command"] = a
         elif a in {"filter", "regime", "news", "gbm", "seq", "all"}:
             opts["target"] = a
+        elif a == "--port" and i + 1 < len(argv):
+            opts["port"] = int(argv[i + 1]); i += 1
         elif a == "--mode" and i + 1 < len(argv):
             opts["mode"] = argv[i + 1]; i += 1
         elif a == "--source" and i + 1 < len(argv):
@@ -209,6 +212,56 @@ def run_portfolio_cmd(cfg: dict) -> int:
     return 0
 
 
+def run_serve_cmd(cfg: dict, port: int = 8000, use_ml: bool = True) -> int:
+    """Live visualizer: a stdlib HTTP server (no deps) that regenerates and
+    serves the strategy-health dashboard. Open the printed URL in a browser."""
+    import os
+    from functools import partial
+    from http.server import ThreadingHTTPServer, SimpleHTTPRequestHandler
+    from paper.paper_trader import run_paper
+
+    root = os.path.dirname(os.path.abspath(__file__))
+    out_dir = os.path.join(root, cfg.get("report", {}).get("out_dir", "reports/output"))
+    os.makedirs(out_dir, exist_ok=True)
+
+    print("== GAME MARKET CORE — Dashboard server ==")
+    print("Building dashboard (paper run)...")
+    run_paper(cfg, use_ml=use_ml)
+
+    class Handler(SimpleHTTPRequestHandler):
+        def do_GET(self):
+            if self.path in ("/", "/index.html"):
+                self.path = "/dashboard.html"
+            elif self.path.startswith("/refresh"):
+                # Regenerate from a fresh run, then redirect to the dashboard.
+                try:
+                    run_paper(cfg, use_ml=use_ml)
+                except Exception as exc:  # keep the server alive on errors
+                    print(f"[serve] refresh failed: {exc}")
+                self.send_response(303)
+                self.send_header("Location", "/dashboard.html")
+                self.end_headers()
+                return
+            return super().do_GET()
+
+        def log_message(self, *args):  # quiet access log
+            pass
+
+    handler = partial(Handler, directory=out_dir)
+    srv = ThreadingHTTPServer(("127.0.0.1", port), handler)
+    url = f"http://127.0.0.1:{port}"
+    print(f"\nServing dashboard at:  {url}")
+    print(f"Force a fresh run at:  {url}/refresh")
+    print("Press Ctrl-C to stop.")
+    try:
+        srv.serve_forever()
+    except KeyboardInterrupt:
+        print("\nStopped.")
+    finally:
+        srv.server_close()
+    return 0
+
+
 def run_livecheck_cmd(cfg: dict) -> int:
     """Probe the live REST feed and show execution-adapter safety gates.
     Sends NO orders; in a locked-down sandbox the feed probe fails cleanly."""
@@ -280,6 +333,8 @@ def main(argv: list[str]) -> int:
         return 0
     if opts["command"] == "portfolio":
         return run_portfolio_cmd(cfg)
+    if opts["command"] in ("serve", "dashboard"):
+        return run_serve_cmd(cfg, port=opts["port"], use_ml=opts["ml"])
     if opts["command"] == "livecheck":
         return run_livecheck_cmd(cfg)
     if opts["command"] == "paper":
