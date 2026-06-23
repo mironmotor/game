@@ -75,7 +75,10 @@ def load_candles(cfg: dict) -> list[Candle]:
     candles: list[Candle] = []
     prev_close = None
     for r in rows:
+        # Newer assets use ReferenceRate instead of PriceUSD.
         close = _fnum(r, "PriceUSD")
+        if close is None:
+            close = _fnum(r, "ReferenceRate")
         if close is None or close <= 0:
             continue
         open_ = prev_close if prev_close is not None else close

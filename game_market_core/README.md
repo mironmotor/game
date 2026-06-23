@@ -159,9 +159,18 @@ to synthetic. Caveat: this dataset is **daily close only** (no intraday wicks),
 so it mainly exercises the Trend engine + regime, not the wick-based False
 Breakout engine. Set `data.cm_asset` (e.g. `eth`) for other assets.
 
-`--source exchange` (or `data.source: exchange`) instead fetches intraday OHLCV
-from `data.venue` (`binance` | `bybit`) over the public REST API — **no keys
-needed** — with the chain **live fetch → CSV cache → synthetic**. Set
+**For intraday (1h/15m) real data** — needed so the wick-based False Breakout
+engine fires — fetch from an exchange where it's reachable:
+
+```bash
+python3 main.py --source exchange --venue bybit --timeframe 1h
+python3 main.py --source exchange --venue binance --timeframe 15m
+```
+
+`--venue`/`--timeframe` override config. No keys needed; chain is **live fetch
+→ CSV cache → synthetic**. If your network blocks one venue (Binance is often
+geo-blocked), try `bybit`, or drop a CSV (`ts,open,high,low,close,volume`) at
+`data/storage/<symbol>_<tf>.csv` and run `--source csv`. Set
 `macro.enabled: true` to pull the
 S&P/Nasdaq/gold/dollar basket (Stooq) as **regime context** — risk-on/off and
 crisis flags that gate crypto trading, not separately traded instruments.

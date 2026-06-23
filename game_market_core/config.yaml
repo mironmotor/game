@@ -115,7 +115,7 @@ backtest:
 # Multi-symbol portfolio (python3 main.py portfolio). Offline -> distinct
 # synthetic series per symbol; with source: exchange each is fetched for real.
 portfolio:
-  symbols: [BTCUSDT, ETHUSDT, SOLUSDT, BNBUSDT]
+  symbols: [BTCUSDT, ETHUSDT, LTCUSDT, XRPUSDT, BCHUSDT, BNBUSDT]
   risk_budget: inverse_vol          # equal | inverse_vol (volatility risk parity)
   max_drawdown: 0.20                # portfolio-level kill: halt the whole book
 

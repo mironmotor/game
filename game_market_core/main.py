@@ -40,7 +40,7 @@ from data.storage.database import save_trades_csv  # noqa: E402
 
 def _parse_args(argv: list[str]) -> dict:
     opts = {"command": "backtest", "mode": None, "source": None, "ml": False,
-            "target": None, "port": 8000}
+            "target": None, "port": 8000, "venue": None, "timeframe": None}
     i = 0
     while i < len(argv):
         a = argv[i]
@@ -55,6 +55,10 @@ def _parse_args(argv: list[str]) -> dict:
             opts["mode"] = argv[i + 1]; i += 1
         elif a == "--source" and i + 1 < len(argv):
             opts["source"] = argv[i + 1]; i += 1
+        elif a == "--venue" and i + 1 < len(argv):
+            opts["venue"] = argv[i + 1]; i += 1
+        elif a == "--timeframe" and i + 1 < len(argv):
+            opts["timeframe"] = argv[i + 1]; i += 1
         elif a == "--ml":
             opts["ml"] = True
         i += 1
@@ -66,6 +70,10 @@ def _apply_overrides(cfg: dict, opts: dict) -> None:
         cfg.setdefault("risk", {})["mode"] = opts["mode"]
     if opts.get("source"):
         cfg.setdefault("data", {})["source"] = opts["source"]
+    if opts.get("venue"):
+        cfg.setdefault("data", {})["venue"] = opts["venue"]
+    if opts.get("timeframe"):
+        cfg.setdefault("data", {})["timeframe"] = opts["timeframe"]
 
 
 def _build_features(candles, cfg):
@@ -161,30 +169,31 @@ def run_walkforward_cmd(cfg: dict) -> int:
         print(f"Walk-forward error: {wf['error']}")
         return 1
 
-    print(f"\nFolds: {wf['n_folds']}  |  OOS total return: {wf['oos_total_return_pct']}%")
+    print(f"\nFolds: {wf['n_folds']}  |  OOS total return: {wf['oos_total_return_pct']}%  "
+          f"|  embargo {wf['embargo_bars']} bars  |  top-{wf['top_k']} ensemble")
     s = wf["oos_trade_stats"]
     print(f"OOS trades: {s['n']} | winrate {s['winrate']:.1%} | avg R {s['avg_r']:.3f} | "
           f"PF {s['profit_factor']:.2f}")
-    print("\nPer fold (in-sample train score -> out-of-sample return):")
+    print("\nPer fold (in-sample -> out-of-sample, top-K ensemble):")
     for f in wf["folds"]:
         print(f"  fold {f['fold']}: IS {f['is_train_score_pct']:+.2f}%  ->  "
               f"OOS {f['oos_return_pct']:+.2f}%  "
-              f"({f['oos_trades']} trades, params {f['best_params']})")
+              f"(~{f['oos_trades']} trades, top param {f['best_params']})")
 
-    is_mean = sum(f["is_train_score_pct"] for f in wf["folds"]) / max(1, len(wf["folds"]))
-    oos_mean = sum(f["oos_return_pct"] for f in wf["folds"]) / max(1, len(wf["folds"]))
-    print(f"\nMean IS {is_mean:+.2f}% vs mean OOS {oos_mean:+.2f}% per fold.")
+    is_mean = wf["mean_is_pct"]
+    oos_mean = wf["mean_oos_pct"]
+    eff = wf["oos_efficiency"]
+    print(f"\nMean IS {is_mean:+.2f}% vs mean OOS {oos_mean:+.2f}% per fold "
+          f"| OOS efficiency {eff:.2f} (1.0 = generalizes perfectly)")
     if oos_mean <= 0:
-        if is_mean > 0:
-            print("VERDICT: no edge out-of-sample — in-sample profit was overfitting. "
-                  "Do not trade this.")
-        else:
-            print("VERDICT: no edge in-sample OR out-of-sample. Strategy/params reject. "
-                  "(Expected on synthetic data — proves the validator works.)")
-    elif oos_mean < 0.4 * is_mean:
-        print("VERDICT: large in-sample/out-of-sample gap — fragile, not trustworthy yet.")
+        print("VERDICT: no edge out-of-sample. Do not trade.")
+    elif eff >= 0.6:
+        print("VERDICT: edge generalizes well OOS (efficiency >= 0.6). Promising — "
+              "still needs paper trading before live.")
+    elif eff >= 0.3:
+        print("VERDICT: edge partially survives OOS. Usable with caution; reduce risk.")
     else:
-        print("VERDICT: edge partially survives OOS. Still needs paper trading before live.")
+        print("VERDICT: large in-sample/out-of-sample gap — fragile, not trustworthy yet.")
     return 0
 
 
