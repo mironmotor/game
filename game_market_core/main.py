@@ -40,12 +40,12 @@ from data.storage.database import save_trades_csv  # noqa: E402
 
 def _parse_args(argv: list[str]) -> dict:
     opts = {"command": "backtest", "mode": None, "source": None, "ml": False,
-            "target": None, "port": 8000, "venue": None, "timeframe": None}
+            "max_on": False, "target": None, "port": 8000, "venue": None, "timeframe": None}
     i = 0
     while i < len(argv):
         a = argv[i]
         if a in {"backtest", "walkforward", "paper", "train", "portfolio",
-                 "livecheck", "serve", "dashboard", "selfcheck"}:
+                 "livecheck", "serve", "dashboard", "max", "selfcheck"}:
             opts["command"] = a
         elif a in {"filter", "regime", "news", "gbm", "seq", "all"}:
             opts["target"] = a
@@ -61,6 +61,8 @@ def _parse_args(argv: list[str]) -> dict:
             opts["timeframe"] = argv[i + 1]; i += 1
         elif a == "--ml":
             opts["ml"] = True
+        elif a == "--max":
+            opts["max_on"] = True
         i += 1
     return opts
 
@@ -221,7 +223,7 @@ def run_portfolio_cmd(cfg: dict) -> int:
     return 0
 
 
-def run_serve_cmd(cfg: dict, port: int = 8000, use_ml: bool = True) -> int:
+def run_serve_cmd(cfg: dict, port: int = 8000, use_ml: bool = True, use_max: bool = False) -> int:
     """Live visualizer: a stdlib HTTP server (no deps) that regenerates and
     serves the strategy-health dashboard. Open the printed URL in a browser."""
     import os
@@ -235,7 +237,7 @@ def run_serve_cmd(cfg: dict, port: int = 8000, use_ml: bool = True) -> int:
 
     print("== GAME MARKET CORE — Dashboard server ==")
     print("Building dashboard (paper run)...")
-    run_paper(cfg, use_ml=use_ml)
+    run_paper(cfg, use_ml=use_ml, use_max=use_max)
 
     class Handler(SimpleHTTPRequestHandler):
         def do_GET(self):
@@ -244,7 +246,7 @@ def run_serve_cmd(cfg: dict, port: int = 8000, use_ml: bool = True) -> int:
             elif self.path.startswith("/refresh"):
                 # Regenerate from a fresh run, then redirect to the dashboard.
                 try:
-                    run_paper(cfg, use_ml=use_ml)
+                    run_paper(cfg, use_ml=use_ml, use_max=use_max)
                 except Exception as exc:  # keep the server alive on errors
                     print(f"[serve] refresh failed: {exc}")
                 self.send_response(303)
@@ -343,12 +345,12 @@ def main(argv: list[str]) -> int:
     if opts["command"] == "portfolio":
         return run_portfolio_cmd(cfg)
     if opts["command"] in ("serve", "dashboard"):
-        return run_serve_cmd(cfg, port=opts["port"], use_ml=opts["ml"])
+        return run_serve_cmd(cfg, port=opts["port"], use_ml=opts["ml"], use_max=opts["max_on"])
     if opts["command"] == "livecheck":
         return run_livecheck_cmd(cfg)
-    if opts["command"] == "paper":
+    if opts["command"] in ("paper", "max"):
         from paper.paper_trader import run_paper
-        run_paper(cfg, use_ml=opts["ml"])
+        run_paper(cfg, use_ml=opts["ml"], use_max=opts["max_on"] or opts["command"] == "max")
         return 0
     return run_backtest_cmd(cfg, use_ml=opts["ml"])
 

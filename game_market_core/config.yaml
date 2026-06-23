@@ -52,6 +52,13 @@ execution:
   venue_client_enabled: false       # build the signed order client (needs API keys)
   test_only: true                   # use exchange TEST endpoint (validates, no execution)
 
+# Max17 advisor — second-opinion risk critic + natural-language desk note.
+# NOT a price oracle: it can only veto risky trades and explain decisions.
+max:
+  enabled: false                    # or pass --max ; `max` command turns it on
+  llm: false                        # true -> use Max's local Ollama LLM for the note
+  model: qwen2.5:0.5b               # Ollama model (only if llm: true and Ollama running)
+
 # Execution frictions applied by the backtest. Removing these is one of the
 # most common ways backtests lie; they are mandatory and non-zero.
 costs:

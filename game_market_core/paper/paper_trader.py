@@ -74,7 +74,7 @@ def _health(result, risk, news_chaos_bars: int) -> dict:
     }
 
 
-def run_paper(cfg: dict | None = None, use_ml: bool = False) -> dict:
+def run_paper(cfg: dict | None = None, use_ml: bool = False, use_max: bool = False) -> dict:
     cfg = cfg or load_config()
     print("== GAME MARKET CORE — Paper Trading ==")
 
@@ -106,6 +106,13 @@ def run_paper(cfg: dict | None = None, use_ml: bool = False) -> dict:
         state = ("active" if (trade_filter and trade_filter.approved) else "INERT/missing")
         print(f"[ml] trade filter: {state}")
 
+    advisor = None
+    if use_max or cfg.get("max", {}).get("enabled", False):
+        from integrations.max_bridge import MaxAdvisor
+        advisor = MaxAdvisor(cfg)
+        advisor.enabled = True
+        print(f"[max] advisor active (llm={'on' if advisor.use_llm else 'off'})")
+
     meta = MetaController(cfg)
     risk = RiskEngine(cfg)
     print(f"Engines: {[s.name for s in meta.strategies]} | news events: {len(events)} | "
@@ -113,7 +120,11 @@ def run_paper(cfg: dict | None = None, use_ml: bool = False) -> dict:
 
     result = run_backtest(candles, mf, meta, risk, cfg, regimes=regimes,
                           macro=macro, news=news_ctx, onchain=onchain,
-                          trade_filter=trade_filter)
+                          trade_filter=trade_filter, advisor=advisor)
+    max_note = advisor.explain() if advisor is not None else None
+    if max_note:
+        print(f"[max] {max_note['verdict']} | vetoes: {max_note['veto_count']} | "
+              f"{max_note['rationale'][:80]}")
     metrics = compute_metrics(result)
     flags = detect(metrics, cfg)
     health = _health(result, risk, news_chaos_bars)
@@ -133,6 +144,7 @@ def run_paper(cfg: dict | None = None, use_ml: bool = False) -> dict:
         "source": cfg.get("data", {}).get("source", "synthetic"),
         "target_low": cfg["project"]["romi_target_monthly_low"],
         "target_high": cfg["project"]["romi_target_monthly_high"],
+        "max_note": max_note,
     }
     dash_path = render_html(dash_state, os.path.join(out_dir, "dashboard.html"))
     report_path = _write_paper_report(out_dir, metrics, flags, health, daily, weekly, cfg)

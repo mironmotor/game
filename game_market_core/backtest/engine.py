@@ -72,6 +72,7 @@ def run_backtest(
     news=None,
     onchain=None,
     trade_filter=None,
+    advisor=None,
     trade_window: tuple[int, int] | None = None,
 ) -> BacktestResult:
     if regimes is None:
@@ -168,9 +169,21 @@ def run_backtest(
             if sig is not None:
                 fv = build_vector(i, mf, context, sig)
                 # ML meta-model veto (only acts when the model is approved).
-                if trade_filter is not None and not trade_filter.should_trade(fv):
-                    pass
-                else:
+                ml_ok = (trade_filter is None) or trade_filter.should_trade(fv)
+                # Max risk-critic veto (second opinion; can only block).
+                max_ok = True
+                if advisor is not None and advisor.enabled:
+                    mctx = {
+                        "ts": bar.ts, "regime": context["regime"], "side": sig.side,
+                        "strategy": sig.strategy, "confidence": sig.confidence,
+                        "news": context.get("news"), "onchain": context.get("onchain"),
+                        "macro": context.get("macro"),
+                        "risk_temp": risk.state.risk_temperature(),
+                        "drawdown": risk.state.drawdown(),
+                        "loss_streak": risk.state.loss_streak,
+                    }
+                    max_ok = advisor.advise(mctx)["verdict"] != "SKIP"
+                if ml_ok and max_ok:
                     decision = risk.evaluate(
                         ts=bar.ts, equity=equity, entry=sig.entry,
                         stop=sig.stop, spread_bps=spread,

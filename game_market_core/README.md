@@ -277,6 +277,28 @@ config change, never a silent default.
   netflow loads automatically when `GMC_GLASSNODE_KEY` is set, else the free
   `whale_z` proxy stands in.
 
+### Max integration (the Game's cognitive core)
+
+`integrations/max_bridge.py` wires the **Max core (`mark17`)** into the trading
+loop — honestly, as a *risk second opinion + desk analyst*, never a price
+oracle:
+
+* a **Max-style risk critic** (transparent thresholds, same spirit as
+  `mark17/critic.py`) vetoes trades on ORTHOGONAL real signals — on-chain
+  exchange netflow contradicting the direction, news chaos, crisis regime — and
+  notes low risk-temperature. It can only block/down-weight, never invent edge.
+* **Max's real LLM bridge** (`mark17.llm_bridge`, local Ollama) writes a
+  natural-language desk note explaining the call. Offline it degrades to a
+  deterministic explanation — no dependency.
+
+```bash
+python3 main.py max            # run with Max active; prints his verdict + vetoes
+python3 main.py serve --max    # dashboard with a "Max desk note" panel
+```
+Turn on the LLM note by setting `max.llm: true` (needs Ollama running locally:
+`ollama serve && ollama pull qwen2.5:0.5b`). Max is opt-in; without `--max`/
+`max.enabled` nothing changes.
+
 See **[QUICKSTART.md](QUICKSTART.md)** for the end-to-end workflow and how to
 switch to real data.
 

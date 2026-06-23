@@ -38,6 +38,18 @@ def render_html(state: dict, path: str) -> str:
     trades = state["recent_trades"]
     eq = state["equity_sample"]
 
+    mn = state.get("max_note")
+    max_html = ""
+    if mn:
+        vcolor = {"TRADE": "#16c784", "CAUTION": "#f0a020", "SKIP": "#ea3943"}.get(mn["verdict"], "#888")
+        max_html = (
+            '<h2>Max desk note</h2><div class="card">'
+            f'<div style="margin-bottom:8px"><span class="sev" style="background:{vcolor}">'
+            f'{html.escape(mn["verdict"])}</span> '
+            f'<span class="k">vetoes: {mn.get("veto_count", 0)} · LLM: {html.escape(str(mn.get("llm_status","")))}</span></div>'
+            f'<div style="font-size:13px;line-height:1.5">{html.escape(mn["rationale"])}</div></div>'
+        )
+
     metric_rows = "".join([
         _row("Data source", str(state.get("source", "synthetic"))),
         _row("Risk mode", f"{m['risk_mode']} (live allowed: {m['allow_live']})"),
@@ -103,6 +115,7 @@ def render_html(state: dict, path: str) -> str:
  <div class="card"><h2 style="margin-top:0">Performance</h2><table>{metric_rows}</table></div>
  <div class="card"><h2 style="margin-top:0">Strategy health</h2><table>{health_rows}</table></div>
 </div>
+{max_html}
 <h2>Integrity checks</h2>
 <div class="card"><ul>{flag_items}</ul></div>
 <h2>Recent trades</h2>
