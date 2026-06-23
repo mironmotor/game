@@ -14,6 +14,16 @@ cd game_market_core
 python3 main.py            # should print a backtest summary on synthetic data
 ```
 
+### Run EVERYTHING with one command
+
+```bash
+cd game_market_core
+./run_quickstart.sh        # runs all 7 steps below, prints ✓/✗ per step
+```
+
+This needs no pip installs, no network, and no API keys. When it finishes, open
+`reports/output/dashboard.html` in a browser.
+
 ## 1. The honest workflow (run in this order)
 
 ```bash
