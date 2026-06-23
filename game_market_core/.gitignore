@@ -1,6 +1,7 @@
 # Generated artifacts (reproducible via `python3 main.py`)
 reports/output/*.md
 reports/output/*.csv
+reports/output/*.html
 reports/output/*.png
 !reports/output/.gitkeep
 
