@@ -406,6 +406,14 @@ function HudContent() {
       >
         ◉
       </button>
+      <a
+        href="/market"
+        className="fixed bottom-[124px] right-4 z-20 flex h-12 w-12 items-center justify-center rounded-full border border-emerald-300/30 bg-[#0a0818]/80 text-lg shadow-[0_0_22px_rgba(16,199,132,0.2)] backdrop-blur-md transition hover:scale-105 hover:border-emerald-300/60"
+        title="Market Core — торговый дашборд (paper)"
+        aria-label="Открыть Market Core"
+      >
+        📈
+      </a>
       <VoiceSignature
         open={voiceOpen}
         onClose={() => setVoiceOpen(false)}
