@@ -40,7 +40,8 @@ from data.storage.database import save_trades_csv  # noqa: E402
 
 def _parse_args(argv: list[str]) -> dict:
     opts = {"command": "backtest", "mode": None, "source": None, "ml": False,
-            "max_on": False, "target": None, "port": 8000, "venue": None, "timeframe": None}
+            "max_on": False, "max_llm": False, "target": None, "port": 8000,
+            "venue": None, "timeframe": None}
     i = 0
     while i < len(argv):
         a = argv[i]
@@ -63,6 +64,9 @@ def _parse_args(argv: list[str]) -> dict:
             opts["ml"] = True
         elif a == "--max":
             opts["max_on"] = True
+        elif a == "--max-llm":
+            opts["max_on"] = True
+            opts["max_llm"] = True
         i += 1
     return opts
 
@@ -76,6 +80,8 @@ def _apply_overrides(cfg: dict, opts: dict) -> None:
         cfg.setdefault("data", {})["venue"] = opts["venue"]
     if opts.get("timeframe"):
         cfg.setdefault("data", {})["timeframe"] = opts["timeframe"]
+    if opts.get("max_llm"):
+        cfg.setdefault("max", {}).update({"enabled": True, "llm": True})
 
 
 def _build_features(candles, cfg):
@@ -311,6 +317,8 @@ def run_livecheck_cmd(cfg: dict) -> int:
     from execution.execution_adapter import ExecutionAdapter
     risk = RiskEngine(cfg)
     adapter = ExecutionAdapter(cfg, risk)
+    print(f"[exec] venue={adapter.venue} | testnet={adapter.testnet} | "
+          f"test_only={adapter.test_only} | keys={'yes' if adapter.has_keys else 'no'}")
     print(f"[exec] live_enabled = {adapter.live_enabled}")
     print(f"[exec] gates blocking live: {adapter.gate_reasons()}")
     res = adapter.place_order({"side": "long", "qty": 0.001, "price": 30000.0})

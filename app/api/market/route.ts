@@ -17,11 +17,12 @@ function errorHtml(message: string): string {
 </body></html>`;
 }
 
-function buildDashboard(useMl: boolean, useMax: boolean): Promise<void> {
+function buildDashboard(useMl: boolean, useMax: boolean, useLlm: boolean): Promise<void> {
   return new Promise((resolve, reject) => {
     const args = ['main.py', 'paper'];
     if (useMl) args.push('--ml');
-    if (useMax) args.push('--max');
+    if (useLlm) args.push('--max-llm');
+    else if (useMax) args.push('--max');
 
     const child = spawn(process.env.PYTHON_BIN || 'python3', args, {
       cwd: CORE_DIR,
@@ -53,9 +54,10 @@ export async function GET(request: Request) {
   const url = new URL(request.url);
   const useMl = url.searchParams.get('ml') === '1';
   const useMax = url.searchParams.get('max') === '1';
+  const useLlm = url.searchParams.get('llm') === '1';
 
   try {
-    await buildDashboard(useMl, useMax);
+    await buildDashboard(useMl, useMax, useLlm);
     const html = await readFile(DASHBOARD, 'utf-8');
     return new NextResponse(html, {
       status: 200,

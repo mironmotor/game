@@ -50,7 +50,8 @@ execution:
   i_understand_risk: false
   venue: binance
   venue_client_enabled: false       # build the signed order client (needs API keys)
-  test_only: true                   # use exchange TEST endpoint (validates, no execution)
+  test_only: true                   # Binance: use TEST endpoint (validates, no execution)
+  testnet: true                     # Bybit: route to TESTNET (fake money, safe to send)
 
 # Max17 advisor — second-opinion risk critic + natural-language desk note.
 # NOT a price oracle: it can only veto risky trades and explain decisions.

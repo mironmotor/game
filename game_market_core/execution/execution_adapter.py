@@ -36,17 +36,21 @@ class ExecutionAdapter:
         self.acknowledged = bool(ex.get("i_understand_risk", False))
         self.venue = ex.get("venue", "binance")
         self.venue_client_enabled = bool(ex.get("venue_client_enabled", False))
-        self.test_only = bool(ex.get("test_only", True))
+        self.test_only = bool(ex.get("test_only", True))   # Binance: TEST endpoint
+        self.testnet = bool(ex.get("testnet", True))        # Bybit: testnet base URL
         self.risk = risk_engine
         self.has_keys = bool(os.environ.get("GMC_API_KEY") and os.environ.get("GMC_API_SECRET"))
 
         # The venue client is only built when explicitly enabled AND keys exist.
         self.client = None
-        if self.venue_client_enabled and self.has_keys and self.venue == "binance":
-            from execution.venue_client import BinanceOrderClient
-            self.client = BinanceOrderClient(os.environ["GMC_API_KEY"],
-                                             os.environ["GMC_API_SECRET"],
-                                             test_only=self.test_only)
+        if self.venue_client_enabled and self.has_keys:
+            key, secret = os.environ["GMC_API_KEY"], os.environ["GMC_API_SECRET"]
+            if self.venue == "binance":
+                from execution.venue_client import BinanceOrderClient
+                self.client = BinanceOrderClient(key, secret, test_only=self.test_only)
+            elif self.venue == "bybit":
+                from execution.venue_client import BybitOrderClient
+                self.client = BybitOrderClient(key, secret, testnet=self.testnet)
         self.venue_impl_available = self.client is not None
 
     @property
@@ -86,14 +90,20 @@ class ExecutionAdapter:
             return ExecResult("rejected", violation, order)
         if not self.live_enabled:
             return ExecResult("dry_run", "; ".join(self.gate_reasons()), order)
-        # Every gate passed: route to the venue client. With test_only=True
-        # (default) this validates via the exchange TEST endpoint and executes
-        # nothing — going truly live requires execution.test_only=false too.
+        # Every gate passed: route to the venue client. Defaults keep it safe —
+        # Binance uses the TEST endpoint (test_only), Bybit uses TESTNET fake
+        # money. Going truly live requires test_only=false / testnet=false.
+        is_limit = str(order.get("type", "market")).lower() == "limit"
+        side = "BUY" if order["side"] in ("long", "BUY", "Buy") else "SELL"
+        if self.venue == "bybit":
+            otype = "Limit" if is_limit else "Market"
+            reason = "bybit testnet" if self.testnet else "bybit LIVE (real money)"
+        else:
+            otype = "LIMIT" if is_limit else "MARKET"
+            reason = "binance test endpoint" if self.test_only else "binance LIVE (real money)"
         result = self.client.place_order(
-            symbol=order.get("symbol", "BTCUSDT"),
-            side=order["side"].replace("long", "BUY").replace("short", "SELL"),
-            quantity=abs(order["qty"]),
-            order_type=order.get("type", "MARKET"),
-            price=order.get("price") if order.get("type") == "LIMIT" else None,
+            symbol=order.get("symbol", "BTCUSDT"), side=side,
+            quantity=abs(order["qty"]), order_type=otype,
+            price=order.get("price") if is_limit else None,
         )
-        return ExecResult("sent", "test endpoint" if self.test_only else "LIVE", order | {"venue_result": result})
+        return ExecResult("sent", reason, order | {"venue_result": result})

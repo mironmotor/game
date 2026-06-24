@@ -119,3 +119,28 @@ place a live order by design.
 export GMC_API_KEY=...   GMC_API_SECRET=...
 python3 main.py livecheck        # confirm every gate before trusting it
 ```
+
+### The honest $20 path (Bybit testnet first → tiny mainnet)
+
+1. **Testnet (fake money, zero risk).** Make a Bybit **testnet** key at
+   testnet.bybit.com, then:
+   ```yaml
+   execution: { live: true, i_understand_risk: true, venue: bybit,
+                venue_client_enabled: true, testnet: true }
+   ```
+   ```bash
+   export GMC_API_KEY=<testnet key>  GMC_API_SECRET=<testnet secret>
+   python3 main.py livecheck         # should show venue=bybit testnet=true, live_enabled=true
+   ```
+   Orders now hit Bybit **testnet** — real plumbing, play funds.
+2. **Paper-match for a week or two** and confirm fills behave like the backtest.
+3. **Only then** mainnet with a tiny balance (e.g. $20): set `testnet: false`,
+   use real Bybit keys, keep risk `conservative` (0.5%/trade ≈ $0.10). At $20
+   this is to watch real orders flow, **not** to earn — the edge is ~0.4%/mo.
+   `godmode_research` can never place a live order.
+
+## 5. In the Game app (Next.js)
+
+The dashboard is embedded as a tab: run `npm run dev`, open the 📈 button in the
+HUD (or go to `/market`). Toggle ML filter / Max advisor / Max LLM live. The
+`/api/market` route runs the Python and returns the dashboard.

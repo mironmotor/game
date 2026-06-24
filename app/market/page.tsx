@@ -5,16 +5,18 @@ import { useMemo, useState } from 'react';
 export default function MarketPage() {
   const [ml, setMl] = useState(true);
   const [max, setMax] = useState(true);
+  const [llm, setLlm] = useState(false);
   const [nonce, setNonce] = useState(0);
   const [loading, setLoading] = useState(true);
 
   const src = useMemo(() => {
     const params = new URLSearchParams();
     if (ml) params.set('ml', '1');
-    if (max) params.set('max', '1');
+    if (max || llm) params.set('max', '1');
+    if (llm) params.set('llm', '1');
     params.set('n', String(nonce));
     return `/api/market?${params.toString()}`;
-  }, [ml, max, nonce]);
+  }, [ml, max, llm, nonce]);
 
   const refresh = () => {
     setLoading(true);
@@ -41,6 +43,10 @@ export default function MarketPage() {
           <label className="flex cursor-pointer items-center gap-1.5">
             <input type="checkbox" checked={max} onChange={(e) => setMax(e.target.checked)} />
             Max advisor
+          </label>
+          <label className="flex cursor-pointer items-center gap-1.5" title="Needs Ollama running locally">
+            <input type="checkbox" checked={llm} onChange={(e) => setLlm(e.target.checked)} />
+            Max LLM
           </label>
           <button
             type="button"

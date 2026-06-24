@@ -294,10 +294,21 @@ oracle:
 ```bash
 python3 main.py max            # run with Max active; prints his verdict + vetoes
 python3 main.py serve --max    # dashboard with a "Max desk note" panel
+python3 main.py max --max-llm  # use Max's local Ollama LLM for the note
 ```
-Turn on the LLM note by setting `max.llm: true` (needs Ollama running locally:
-`ollama serve && ollama pull qwen2.5:0.5b`). Max is opt-in; without `--max`/
-`max.enabled` nothing changes.
+`--max-llm` (or `max.llm: true`) uses Max's local Ollama (`ollama serve &&
+ollama pull qwen2.5:0.5b`); offline it degrades to a deterministic note. Max is
+opt-in; without `--max`/`max.enabled` nothing changes.
+
+**In the Game app:** the dashboard is a Next.js tab — `npm run dev`, then the 📈
+HUD button or `/market`, with live ML/Max/LLM toggles (`app/market`,
+`app/api/market`).
+
+**Going live (Bybit testnet → tiny mainnet):** `execution/venue_client.py` also
+has a Bybit v5 signed client. Set `execution.venue: bybit`, `testnet: true` to
+route to Bybit **testnet** (fake money) once every gate passes; flip
+`testnet: false` for a tiny real balance only after a paper-match. See
+**QUICKSTART.md → the honest $20 path**.
 
 See **[QUICKSTART.md](QUICKSTART.md)** for the end-to-end workflow and how to
 switch to real data.
