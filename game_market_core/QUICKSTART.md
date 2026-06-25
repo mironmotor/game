@@ -141,6 +141,16 @@ python3 main.py livecheck        # confirm every gate before trusting it
 
 ## 5. In the Game app (Next.js)
 
-The dashboard is embedded as a tab: run `npm run dev`, open the 📈 button in the
-HUD (or go to `/market`). Toggle ML filter / Max advisor / Max LLM live. The
-`/api/market` route runs the Python and returns the dashboard.
+The Game app is a **static export** (`output: 'export'`, basePath `/game`), so
+it has no server API routes. The dashboard tab embeds the live Python server:
+
+```bash
+# terminal 1: the Game
+npm run dev                         # http://localhost:3000/game (or 3001)
+
+# terminal 2: the dashboard server
+cd game_market_core && python3 main.py serve --ml --max   # http://127.0.0.1:8000
+```
+
+Then open `http://localhost:3000/game/market` (or the 📈 HUD button). The tab
+iframes the server; use the address box if your port differs.

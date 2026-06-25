@@ -2,28 +2,25 @@
 
 import { useMemo, useState } from 'react';
 
-// next.config.ts sets basePath '/game'; iframe/fetch srcs are NOT auto-prefixed
-// (only next/link and router are), so prefix the API path explicitly.
+// next.config.ts sets basePath '/game'.
 const BASE = '/game';
+const DEFAULT_URL = 'http://127.0.0.1:8000';
 
+// This app is a static export (output: 'export'), so server API routes do not
+// run. Instead we embed the live Python dashboard server: in a terminal run
+//   cd game_market_core && python3 main.py serve   (optionally --ml --max)
+// then this tab shows it inside the Game.
 export default function MarketPage() {
-  const [ml, setMl] = useState(true);
-  const [max, setMax] = useState(true);
-  const [llm, setLlm] = useState(false);
+  const [url, setUrl] = useState(DEFAULT_URL);
+  const [active, setActive] = useState(DEFAULT_URL);
   const [nonce, setNonce] = useState(0);
   const [loading, setLoading] = useState(true);
 
-  const src = useMemo(() => {
-    const params = new URLSearchParams();
-    if (ml) params.set('ml', '1');
-    if (max || llm) params.set('max', '1');
-    if (llm) params.set('llm', '1');
-    params.set('n', String(nonce));
-    return `${BASE}/api/market?${params.toString()}`;
-  }, [ml, max, llm, nonce]);
+  const src = useMemo(() => `${active}/?n=${nonce}`, [active, nonce]);
 
-  const refresh = () => {
+  const connect = () => {
     setLoading(true);
+    setActive(url);
     setNonce((n) => n + 1);
   };
 
@@ -37,43 +34,46 @@ export default function MarketPage() {
           ← HUD
         </a>
         <h1 className="text-base font-semibold">GAME MARKET CORE</h1>
-        <span className="text-xs text-[#9aa4b2]">live strategy dashboard · paper · not financial advice</span>
+        <span className="text-xs text-[#9aa4b2]">live dashboard · paper · not financial advice</span>
 
-        <div className="ml-auto flex items-center gap-4 text-sm">
-          <label className="flex cursor-pointer items-center gap-1.5">
-            <input type="checkbox" checked={ml} onChange={(e) => setMl(e.target.checked)} />
-            ML filter
-          </label>
-          <label className="flex cursor-pointer items-center gap-1.5">
-            <input type="checkbox" checked={max} onChange={(e) => setMax(e.target.checked)} />
-            Max advisor
-          </label>
-          <label className="flex cursor-pointer items-center gap-1.5" title="Needs Ollama running locally">
-            <input type="checkbox" checked={llm} onChange={(e) => setLlm(e.target.checked)} />
-            Max LLM
-          </label>
+        <div className="ml-auto flex items-center gap-2 text-sm">
+          <input
+            value={url}
+            onChange={(e) => setUrl(e.target.value)}
+            onKeyDown={(e) => e.key === 'Enter' && connect()}
+            className="w-56 rounded-md border border-[#232a33] bg-[#161b22] px-2 py-1 text-xs"
+            spellCheck={false}
+          />
           <button
             type="button"
-            onClick={refresh}
+            onClick={connect}
             className="rounded-md border border-emerald-300/40 px-3 py-1 text-emerald-200 transition hover:border-emerald-300/70"
           >
-            {loading ? 'Building…' : 'Refresh'}
+            {loading ? 'Loading…' : 'Reload'}
           </button>
+          <a
+            href={active}
+            target="_blank"
+            rel="noreferrer"
+            className="rounded-md border border-[#232a33] px-3 py-1 text-[#9aa4b2] transition hover:text-white"
+          >
+            ↗ open
+          </a>
         </div>
       </header>
 
-      {loading && (
-        <div className="px-4 py-2 text-xs text-[#9aa4b2]">
-          Building dashboard from real data (first run fetches BTC history; can take a few seconds)…
-        </div>
-      )}
+      <div className="border-b border-[#232a33] bg-[#0b0f14] px-4 py-2 text-xs text-[#9aa4b2]">
+        Start the server first:{' '}
+        <code className="text-emerald-300">cd game_market_core &amp;&amp; python3 main.py serve --ml --max</code>{' '}
+        — then click Reload. If the panel is blank, the server isn&apos;t running on that address.
+      </div>
 
       <iframe
         key={src}
         src={src}
         title="Market Core dashboard"
         onLoad={() => setLoading(false)}
-        className="h-[calc(100vh-58px)] w-full border-0"
+        className="h-[calc(100vh-90px)] w-full border-0"
       />
     </main>
   );

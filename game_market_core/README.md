@@ -300,9 +300,11 @@ python3 main.py max --max-llm  # use Max's local Ollama LLM for the note
 ollama pull qwen2.5:0.5b`); offline it degrades to a deterministic note. Max is
 opt-in; without `--max`/`max.enabled` nothing changes.
 
-**In the Game app:** the dashboard is a Next.js tab — `npm run dev`, then the 📈
-HUD button or `/market`, with live ML/Max/LLM toggles (`app/market`,
-`app/api/market`).
+**In the Game app:** the dashboard is a Next.js tab at `/game/market` (📈 HUD
+button). Because the app is a static export (`output: 'export'`, no server API
+routes), the tab embeds the live Python dashboard server: run
+`cd game_market_core && python3 main.py serve --ml --max`, then open the tab —
+it iframes `http://127.0.0.1:8000`.
 
 **Going live (Bybit testnet → tiny mainnet):** `execution/venue_client.py` also
 has a Bybit v5 signed client. Set `execution.venue: bybit`, `testnet: true` to
