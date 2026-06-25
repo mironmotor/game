@@ -295,7 +295,13 @@ oracle:
 python3 main.py max            # run with Max active; prints his verdict + vetoes
 python3 main.py serve --max    # dashboard with a "Max desk note" panel
 python3 main.py max --max-llm  # use Max's local Ollama LLM for the note
+python3 main.py live --ml --max   # NON-STOP: re-trades every bar, dashboard auto-refreshes
 ```
+
+`live` runs continuously and re-renders the dashboard on every bar (🟢 LIVE
+badge, auto-refresh). With `source: exchange` it polls the venue in real time;
+otherwise it replays history at `--speed` bars/tick so you can watch it trade.
+A live loop does not change the edge — it just runs it in real time.
 `--max-llm` (or `max.llm: true`) uses Max's local Ollama (`ollama serve &&
 ollama pull qwen2.5:0.5b`); offline it degrades to a deterministic note. Max is
 opt-in; without `--max`/`max.enabled` nothing changes.

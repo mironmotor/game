@@ -41,17 +41,19 @@ from data.storage.database import save_trades_csv  # noqa: E402
 def _parse_args(argv: list[str]) -> dict:
     opts = {"command": "backtest", "mode": None, "source": None, "ml": False,
             "max_on": False, "max_llm": False, "target": None, "port": 8000,
-            "venue": None, "timeframe": None}
+            "venue": None, "timeframe": None, "speed": 60}
     i = 0
     while i < len(argv):
         a = argv[i]
         if a in {"backtest", "walkforward", "paper", "train", "portfolio",
-                 "livecheck", "serve", "dashboard", "max", "selfcheck"}:
+                 "livecheck", "serve", "dashboard", "max", "live", "selfcheck"}:
             opts["command"] = a
         elif a in {"filter", "regime", "news", "gbm", "seq", "all"}:
             opts["target"] = a
         elif a == "--port" and i + 1 < len(argv):
             opts["port"] = int(argv[i + 1]); i += 1
+        elif a == "--speed" and i + 1 < len(argv):
+            opts["speed"] = int(argv[i + 1]); i += 1
         elif a == "--mode" and i + 1 < len(argv):
             opts["mode"] = argv[i + 1]; i += 1
         elif a == "--source" and i + 1 < len(argv):
@@ -352,6 +354,11 @@ def main(argv: list[str]) -> int:
         return 0
     if opts["command"] == "portfolio":
         return run_portfolio_cmd(cfg)
+    if opts["command"] == "live":
+        from paper.live_trader import run_live
+        run_live(cfg, use_ml=opts["ml"], use_max=opts["max_on"],
+                 speed=opts["speed"], port=opts["port"])
+        return 0
     if opts["command"] in ("serve", "dashboard"):
         return run_serve_cmd(cfg, port=opts["port"], use_ml=opts["ml"], use_max=opts["max_on"])
     if opts["command"] == "livecheck":
