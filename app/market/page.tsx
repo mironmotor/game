@@ -2,6 +2,10 @@
 
 import { useMemo, useState } from 'react';
 
+// next.config.ts sets basePath '/game'; iframe/fetch srcs are NOT auto-prefixed
+// (only next/link and router are), so prefix the API path explicitly.
+const BASE = '/game';
+
 export default function MarketPage() {
   const [ml, setMl] = useState(true);
   const [max, setMax] = useState(true);
@@ -15,7 +19,7 @@ export default function MarketPage() {
     if (max || llm) params.set('max', '1');
     if (llm) params.set('llm', '1');
     params.set('n', String(nonce));
-    return `/api/market?${params.toString()}`;
+    return `${BASE}/api/market?${params.toString()}`;
   }, [ml, max, llm, nonce]);
 
   const refresh = () => {
@@ -27,7 +31,7 @@ export default function MarketPage() {
     <main className="min-h-screen bg-[#0e1117] text-[#e6e6e6]">
       <header className="flex flex-wrap items-center gap-3 border-b border-[#232a33] px-4 py-3">
         <a
-          href="/"
+          href={`${BASE}/`}
           className="rounded-md border border-cyan-300/30 px-3 py-1 text-sm text-cyan-200 transition hover:border-cyan-300/60"
         >
           ← HUD

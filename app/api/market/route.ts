@@ -3,8 +3,10 @@ import path from 'node:path';
 import { readFile } from 'node:fs/promises';
 import { NextResponse } from 'next/server';
 
+// NOTE: this server route runs the Python and works under `npm run dev`. The
+// app is configured for static export (output: 'export'), so for a deployed
+// build the dashboard would instead be served as a pre-generated static file.
 export const runtime = 'nodejs';
-export const dynamic = 'force-dynamic';
 
 const CORE_DIR = path.join(process.cwd(), 'game_market_core');
 const DASHBOARD = path.join(CORE_DIR, 'reports', 'output', 'dashboard.html');
