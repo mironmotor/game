@@ -19,6 +19,23 @@ View your app in AI Studio: https://ai.studio/apps/dcf78fd2-d064-4f32-a65f-e4dbd
 3. Run the app:
    `npm run dev`
 
+## Воронка — Big Idea Generator
+
+A creative "funnel" that turns raw inputs into one Big Idea. Open `/funnel`
+(there is also a floating link on the home screen).
+
+How it works — a two-stage funnel that runs fully client-side against the
+OpenRouter/Gemini API (uses `NEXT_PUBLIC_OPENROUTER_API_KEY` or
+`NEXT_PUBLIC_GEMINI_API_KEY`):
+
+1. **Top (wide)** — you pour in optional seeds: domain, audience, trend, twist.
+2. **Middle (narrowing)** — the model spits out many raw "sparks" (idea fragments).
+3. **Bottom (one idea)** — the sparks are synthesized into a single structured
+   Big Idea: name, tagline, problem, solution, who-for, why-now, unfair
+   advantage, first step, plus boldness/scale scores.
+
+Code: `lib/funnel.ts`, `components/funnel/FunnelApp.tsx`, `app/funnel/page.tsx`.
+
 ## Max17 bridge
 
 `mark17` is the internal package name for the Max17 cognitive core.
