@@ -70,3 +70,35 @@
   padding: 8px 16px; font-size: 10px; color: rgba(150, 200, 190, 0.55);
   border-top: 1px solid rgba(0, 255, 200, 0.12); text-align: center; z-index: 3;
 }
+
+.evo-pulse { border-color: rgba(255,93,143,0.5) !important; color: #ff9fd0 !important; }
+.evo-pulse:hover { background: rgba(255,93,143,0.18) !important; }
+
+/* Панель телеметрии */
+.evo-panel {
+  position: absolute; top: 14px; right: 14px; width: 230px; z-index: 4;
+  background: rgba(6,8,20,0.78); backdrop-filter: blur(8px);
+  border: 1px solid rgba(0,255,200,0.22); border-radius: 12px;
+  padding: 12px 14px; font-size: 11px; color: #cfeee6;
+  box-shadow: 0 8px 30px rgba(0,0,0,0.4);
+}
+.evo-panel-title {
+  font-family: var(--font-hud-display, sans-serif); letter-spacing: 0.16em;
+  font-size: 10px; color: #00ffc8; margin-bottom: 8px;
+}
+.evo-metric { display: flex; justify-content: space-between; align-items: baseline; margin-top: 8px; }
+.evo-metric span { color: rgba(170,210,200,0.7); }
+.evo-metric b { color: #eafff8; font-size: 12px; }
+.evo-meter { height: 4px; border-radius: 4px; background: rgba(255,255,255,0.08); overflow: hidden; margin-top: 3px; }
+.evo-meter-fill { height: 100%; border-radius: 4px; transition: width 0.3s ease; }
+
+.evo-log-title { margin-top: 14px; }
+.evo-log { display: flex; flex-direction: column; gap: 4px; max-height: 150px; overflow: hidden; }
+.evo-log-item { font-size: 10px; line-height: 1.35; color: rgba(200,235,225,0.85); }
+.evo-log-item.dim { color: rgba(150,200,190,0.4); }
+.evo-log-ts { color: rgba(0,255,200,0.6); }
+
+@media (max-width: 720px) {
+  .evo-panel { position: static; width: auto; margin: 10px; }
+  .evo-canvas-wrap { overflow-y: auto; }
+}
