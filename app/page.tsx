@@ -7,6 +7,12 @@ export default function Home() {
       <HudApp />
       <div className="fixed bottom-4 right-4 z-50 flex flex-col items-end gap-2">
         <Link
+          href="/autoplan"
+          className="rounded-full border border-[#ffb14e]/40 bg-[#ffb14e]/10 px-4 py-2 text-xs font-semibold uppercase tracking-wider text-[#ffb14e] backdrop-blur transition hover:bg-[#ffb14e]/20"
+        >
+          △∞ Автоплан · ядро Max
+        </Link>
+        <Link
           href="/evolution"
           className="rounded-full border border-[#c9a0ff]/40 bg-[#c9a0ff]/10 px-4 py-2 text-xs font-semibold uppercase tracking-wider text-[#c9a0ff] backdrop-blur transition hover:bg-[#c9a0ff]/20"
         >

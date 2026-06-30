@@ -13,6 +13,7 @@ const ALLOWED_EVENTS = new Set([
   'system_state',
   'sleep_consolidation',
   'voice_state',
+  'auto_plan',
 ]);
 
 const DEFAULT_RESPONSE = {
