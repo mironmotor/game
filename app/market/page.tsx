@@ -6,10 +6,15 @@ import { useMemo, useState } from 'react';
 const BASE = '/game';
 const DEFAULT_URL = 'http://127.0.0.1:8000';
 
-// This app is a static export (output: 'export'), so server API routes do not
-// run. Instead we embed the live Python dashboard server: in a terminal run
+// Server mode is on (see next.config.ts), so app/api/** route handlers DO
+// run here. This page still embeds the Python dashboard server directly
+// (rather than spawning python3 from a Vercel serverless function) because
+// that spawn is not reliably available in a Node serverless runtime and has
+// no persistent process/port across invocations. Run it in a terminal:
 //   cd game_market_core && python3 main.py serve   (optionally --ml --max)
-// then this tab shows it inside the Game.
+// then this tab shows it inside the Game. This works today when the Game and
+// the dashboard server run on the same machine (local dev); making it visible
+// to remote visitors on the deployed site needs an always-on hosted backend.
 export default function MarketPage() {
   const [url, setUrl] = useState(DEFAULT_URL);
   const [active, setActive] = useState(DEFAULT_URL);

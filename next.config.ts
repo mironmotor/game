@@ -16,7 +16,11 @@ const nextConfig: NextConfig = {
       { protocol: 'https', hostname: 'images.unsplash.com', port: '', pathname: '/**' },
     ],
   },
-  output: 'export',
+  // Server mode (no output: 'export') so Route Handlers under app/api/**
+  // (Max17 bridge, etc.) actually execute on Vercel instead of 404ing as
+  // static files. Vercel auto-detects Next.js and runs it as a Node
+  // serverless app; no vercel.json/firebase.json in this repo pin a static
+  // build, so this doesn't require any deploy-config changes.
   basePath: '/game',
   assetPrefix: '/game',
   transpilePackages: ['motion'],
