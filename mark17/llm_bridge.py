@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import urllib.error
 import urllib.request
 from dataclasses import dataclass
@@ -38,10 +39,24 @@ class LlmBridge:
         self._checked = False
         self._available = False
 
+        # Provider selection: "ollama" (local, default) or "openrouter" (hosted).
+        self.provider = os.environ.get("MAX17_LLM_PROVIDER", "ollama").strip().lower()
+        self.openrouter_key = os.environ.get("OPENROUTER_API_KEY", "").strip()
+        self.openrouter_url = "https://openrouter.ai/api/v1/chat/completions"
+        env_model = os.environ.get("MAX17_LLM_MODEL", "").strip()
+        if env_model:
+            self.model = env_model
+        elif self.provider == "openrouter":
+            self.model = "google/gemini-2.0-flash-exp:free"
+
     def check(self) -> bool:
         if not self.enabled:
             self._available = False
             return False
+        if self.provider == "openrouter":
+            self._available = bool(self.openrouter_key)
+            self._checked = True
+            return self._available
         try:
             req = urllib.request.Request(f"{self.host}/api/tags", method="GET")
             with urllib.request.urlopen(req, timeout=3) as resp:
@@ -81,6 +96,9 @@ class LlmBridge:
                 model=self.model,
                 status="skipped",
             )
+
+        if self.provider == "openrouter":
+            return self._ask_openrouter(prompt, force=force)
 
         if not self.available and not force:
             return LlmResponse(
@@ -125,6 +143,54 @@ class LlmBridge:
             return LlmResponse(
                 ok=False,
                 text=f"Ollama error: {e}",
+                model=self.model,
+                status="error",
+                latency_ms=round((_time.time() - t0) * 1000, 1),
+            )
+
+    def _ask_openrouter(self, prompt: str, *, force: bool = False) -> LlmResponse:
+        import time as _time
+
+        if not self.openrouter_key:
+            return LlmResponse(
+                ok=False,
+                text="Нет OPENROUTER_API_KEY — LLM недоступен, используется детерминированный fallback.",
+                model=self.model,
+                status="offline",
+            )
+        body = {
+            "model": self.model,
+            "messages": [{"role": "user", "content": prompt}],
+            "temperature": 0.3,
+            "max_tokens": 300,
+        }
+        data = json.dumps(body).encode("utf-8")
+        req = urllib.request.Request(
+            self.openrouter_url,
+            data=data,
+            headers={
+                "Content-Type": "application/json",
+                "Authorization": f"Bearer {self.openrouter_key}",
+            },
+            method="POST",
+        )
+        t0 = _time.time()
+        try:
+            with urllib.request.urlopen(req, timeout=TIMEOUT_SEC) as resp:
+                raw = json.loads(resp.read().decode())
+            text = str(raw.get("choices", [{}])[0].get("message", {}).get("content", "")).strip()
+            ms = (_time.time() - t0) * 1000
+            return LlmResponse(
+                ok=bool(text),
+                text=text or "(пустой ответ)",
+                model=self.model,
+                status="ok",
+                latency_ms=round(ms, 1),
+            )
+        except Exception as e:
+            return LlmResponse(
+                ok=False,
+                text=f"OpenRouter error: {e}",
                 model=self.model,
                 status="error",
                 latency_ms=round((_time.time() - t0) * 1000, 1),

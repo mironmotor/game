@@ -162,3 +162,51 @@ Optional environment variables:
 PYTHON_BIN=python3
 MAX17_STATE_DIR=/absolute/path/to/state
 ```
+
+### Deploy Max17 to production (Vercel + hosted bridge)
+
+The frontend deploys as a Next.js app on Vercel, but **Vercel serverless functions
+cannot spawn `python3`**, so `/autoplan` and `/maxgraph` need the Max17 core to run
+somewhere with Python. The bridge (`mark17/server.py`) wraps the exact same logic
+behind HTTP; `/api/max17` proxies to it when `MAX17_BRIDGE_URL` is set.
+
+**1. Deploy the bridge (Railway example)**
+
+```bash
+# From the repo root — the Dockerfile builds the mark17 package.
+# Railway: New Project → Deploy from Repo → set Dockerfile path to mark17/Dockerfile
+#   (or: railway up  with the Dockerfile)
+```
+
+On the **bridge service** set env:
+
+```bash
+MAX17_BRIDGE_TOKEN=<long-random-secret>
+MAX17_LLM_ENABLED=true
+MAX17_LLM_PROVIDER=openrouter
+OPENROUTER_API_KEY=<your key>            # same one used by the funnel
+MAX17_LLM_MODEL=google/gemini-2.0-flash-exp:free   # optional
+# Mount a volume at /data so memory + synapses persist.
+```
+
+Verify: `curl https://<bridge-host>/health` → `{"ok": true, ...}`.
+
+**2. Point Vercel at the bridge**
+
+In the **Vercel project** env (Production):
+
+```bash
+MAX17_BRIDGE_URL=https://<bridge-host>     # no trailing slash
+MAX17_BRIDGE_TOKEN=<same secret as above>
+NEXT_PUBLIC_GEMINI_API_KEY=<key>           # for the Voronka funnel (client side)
+```
+
+Redeploy. Now `/autoplan` builds real plans and `/maxgraph` shows the real synapse
+graph in production. Locally nothing changes: leave `MAX17_BRIDGE_URL` unset and
+`npm run dev` spawns `python3` directly.
+
+Run the bridge locally (to test the same path):
+
+```bash
+python3 -m mark17.server            # listens on :8000, GET /health, POST /event
+```

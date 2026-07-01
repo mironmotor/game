@@ -121,7 +121,12 @@ export async function POST(request: Request) {
   }
 
   try {
-    const result = await runMax17Bridge(body);
+    // On a hosted frontend (e.g. Vercel) there is no python3 to spawn, so proxy
+    // the event to a remote Max17 bridge (mark17/server.py) when configured.
+    // Locally (`npm run dev`), MAX17_BRIDGE_URL is unset and we spawn python3.
+    const result = process.env.MAX17_BRIDGE_URL
+      ? await proxyToRemoteBridge(body)
+      : await runMax17Bridge(body);
     const status = result.ok === false ? 502 : 200;
     return NextResponse.json(
       {
@@ -132,5 +137,30 @@ export async function POST(request: Request) {
     );
   } catch (error) {
     return errorResponse('Max17 bridge failed', 502, error instanceof Error ? error.message : String(error));
+  }
+}
+
+async function proxyToRemoteBridge(event: unknown): Promise<Record<string, unknown>> {
+  const base = String(process.env.MAX17_BRIDGE_URL).replace(/\/$/, '');
+  const token = process.env.MAX17_BRIDGE_TOKEN;
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 20000);
+  try {
+    const res = await fetch(`${base}/event`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      },
+      body: JSON.stringify(event),
+      signal: controller.signal,
+    });
+    const payload = (await res.json()) as Record<string, unknown>;
+    if (!res.ok && !payload.error) {
+      payload.error = `Remote Max17 bridge returned ${res.status}`;
+    }
+    return payload;
+  } finally {
+    clearTimeout(timeout);
   }
 }
