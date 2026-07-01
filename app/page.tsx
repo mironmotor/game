@@ -7,6 +7,12 @@ export default function Home() {
       <HudApp />
       <div className="fixed bottom-4 right-4 z-50 flex flex-col items-end gap-2">
         <Link
+          href="/maxgraph"
+          className="rounded-full border border-[#4ea8ff]/40 bg-[#4ea8ff]/10 px-4 py-2 text-xs font-semibold uppercase tracking-wider text-[#4ea8ff] backdrop-blur transition hover:bg-[#4ea8ff]/20"
+        >
+          △∞ Синапс-граф Max
+        </Link>
+        <Link
           href="/autoplan"
           className="rounded-full border border-[#ffb14e]/40 bg-[#ffb14e]/10 px-4 py-2 text-xs font-semibold uppercase tracking-wider text-[#ffb14e] backdrop-blur transition hover:bg-[#ffb14e]/20"
         >

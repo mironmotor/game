@@ -14,6 +14,7 @@ const ALLOWED_EVENTS = new Set([
   'sleep_consolidation',
   'voice_state',
   'auto_plan',
+  'synapse_graph',
 ]);
 
 const DEFAULT_RESPONSE = {

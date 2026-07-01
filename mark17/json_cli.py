@@ -39,6 +39,7 @@ ALLOWED_EVENTS = frozenset(
         "sleep_consolidation",
         "voice_state",
         "auto_plan",
+        "synapse_graph",
     }
 )
 
@@ -246,6 +247,9 @@ def normalize(result: dict[str, Any]) -> dict[str, Any]:
     plan = result.get("plan")
     if isinstance(plan, dict):
         normalized["plan"] = plan
+    graph = result.get("graph")
+    if isinstance(graph, dict):
+        normalized["graph"] = graph
     return normalized
 
 
@@ -303,6 +307,8 @@ def _handle_event(event: Event, args: argparse.Namespace, state_dir: Path) -> di
         return _handle_voice_state(event, brain, vector_memory, synapse_graph, state_dir)
     if event.type == "auto_plan":
         return _handle_auto_plan(event, brain, vector_memory, synapse_graph)
+    if event.type == "synapse_graph":
+        return _handle_synapse_graph(event, synapse_graph)
 
     result = brain.handle(event)
     _merge_memory(
@@ -337,6 +343,28 @@ def _handle_event(event: Event, args: argparse.Namespace, state_dir: Path) -> di
         vector_memory.remember(event, result["self_evaluation"])
     brain.plasticity.save()
     return result
+
+
+def _handle_synapse_graph(event: Event, synapse_graph: SynapseGraph) -> dict[str, Any]:
+    """Read-only export of the real Max synapse graph for visualization."""
+    try:
+        limit = int(event.payload.get("limit", 400))
+    except (TypeError, ValueError):
+        limit = 400
+    graph = synapse_graph.get_graph(limit=max(1, min(2000, limit)))
+    stats = graph.get("stats", {})
+    return {
+        "ok": True,
+        "event_type": event.type,
+        "route": "synapse_graph",
+        "graph": graph,
+        "memory": {"hint": f"synapse graph: {stats.get('shown_synapses', 0)}/{stats.get('total_synapses', 0)} synapses, {stats.get('nodes', 0)} nodes"},
+        "plasticity": {"confidence": 1.0 if stats.get("total_synapses") else 0.0, "action": "synapse_graph_read", "learned": False},
+        "llm": {"status": "skipped", "text": "Синапс-граф прочитан из ядра Max, без LLM.", "latency_ms": 0.0},
+        "decision": {"reason": "synapse graph export", "confidence": 1.0},
+        "next_adaptation": "Реальные синапсы ядра Max растут по мере использования системы.",
+        "self_evaluation": {"score": 1.0, "reason": "synapse graph export", "store_memory": False, "reinforce": "synapse_graph"},
+    }
 
 
 def _handle_auto_plan(

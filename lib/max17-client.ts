@@ -114,6 +114,28 @@ export interface Max17Plan {
   principle?: string;
 }
 
+export interface Max17GraphNode {
+  id: string;
+  type: string;
+  label: string;
+  degree: number;
+}
+
+export interface Max17GraphEdge {
+  source: string;
+  target: string;
+  relation: string;
+  weight: number;
+  evidence: number;
+  summary?: string;
+}
+
+export interface Max17Graph {
+  nodes?: Max17GraphNode[];
+  edges?: Max17GraphEdge[];
+  stats?: { total_synapses?: number; shown_synapses?: number; nodes?: number };
+}
+
 export interface Max17Response {
   ok?: boolean;
   route: string;
@@ -128,6 +150,7 @@ export interface Max17Response {
   self_evaluation?: Max17SelfEvaluation;
   voice?: Max17VoiceState;
   plan?: Max17Plan;
+  graph?: Max17Graph;
   raw?: Record<string, unknown>;
   error?: string;
   details?: unknown;
