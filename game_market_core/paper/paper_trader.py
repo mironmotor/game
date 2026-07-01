@@ -123,7 +123,12 @@ def run_paper(cfg: dict | None = None, use_ml: bool = False, use_max: bool = Fal
                           trade_filter=trade_filter, advisor=advisor)
     max_note = advisor.explain() if advisor is not None else None
     if max_note:
-        print(f"[max] {max_note['verdict']} | vetoes: {max_note['veto_count']} | "
+        guard = ""
+        if max_note.get("halted"):
+            guard = " | CIRCUIT BREAKER HALTED"
+        elif max_note.get("profit_locked"):
+            guard = f" | PROFIT LOCKED (month {max_note['month_return_pct']:+.1f}%)"
+        print(f"[max] {max_note['verdict']} | vetoes: {max_note['veto_count']}{guard} | "
               f"{max_note['rationale'][:80]}")
     metrics = compute_metrics(result)
     flags = detect(metrics, cfg)

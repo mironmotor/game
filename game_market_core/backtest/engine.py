@@ -104,6 +104,8 @@ def run_backtest(
     for i in range(n):
         bar = candles[i]
         risk.on_equity(bar.ts, equity)
+        if advisor is not None and advisor.enabled:
+            advisor.on_equity(bar.ts, equity)
 
         # 0) Walk-forward window boundary: stop trading past the test window
         #    and force-close any residual position at this bar's open.

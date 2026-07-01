@@ -42,8 +42,22 @@ def render_html(state: dict, path: str) -> str:
     max_html = ""
     if mn:
         vcolor = {"TRADE": "#16c784", "CAUTION": "#f0a020", "SKIP": "#ea3943"}.get(mn["verdict"], "#888")
+        halted = mn.get("halted")
+        locked = mn.get("profit_locked")
+        guard_bits = []
+        if halted:
+            guard_bits.append('<span class="sev" style="background:#ea3943">CIRCUIT BREAKER HALTED</span>')
+        elif locked:
+            guard_bits.append('<span class="sev" style="background:#16c784">PROFIT LOCKED</span>')
+        month_ret = mn.get("month_return_pct")
+        target = mn.get("monthly_target_pct")
+        if month_ret is not None:
+            guard_bits.append(f'<span class="k">month-to-date: {month_ret:+.1f}% '
+                              f'(target {target:.0f}%)</span>')
+        guard_html = f'<div style="margin-bottom:8px">{" · ".join(guard_bits)}</div>' if guard_bits else ""
         max_html = (
             '<h2>Max desk note</h2><div class="card">'
+            f'{guard_html}'
             f'<div style="margin-bottom:8px"><span class="sev" style="background:{vcolor}">'
             f'{html.escape(mn["verdict"])}</span> '
             f'<span class="k">vetoes: {mn.get("veto_count", 0)} · LLM: {html.escape(str(mn.get("llm_status","")))}</span></div>'

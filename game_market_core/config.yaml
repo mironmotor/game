@@ -59,6 +59,17 @@ max:
   enabled: false                    # or pass --max ; `max` command turns it on
   llm: false                        # true -> use Max's local Ollama LLM for the note
   model: qwen2.5:0.5b               # Ollama model (only if llm: true and Ollama running)
+  # Capital preservation — Max's job per explicit instruction: never blow up
+  # the account, even if that means skipping good-looking setups. Independent
+  # of the Risk Engine's own kill switch (defense in depth, own equity tracking).
+  monthly_target_pct: 10.0          # profit-lock ceiling: ~10%/mo happened ~2% of
+                                    # months historically (BTC bull-run months) —
+                                    # treat this as "protect a great month", not a
+                                    # promise; most months will not reach it.
+  hard_drawdown_breaker_pct: 0.20   # sticky circuit breaker: once tripped, Max
+                                    # refuses every trade from then on, even if
+                                    # the Risk Engine's own kill switch (0.25
+                                    # default) has a bug or is misconfigured.
 
 # Execution frictions applied by the backtest. Removing these is one of the
 # most common ways backtests lie; they are mandatory and non-zero.

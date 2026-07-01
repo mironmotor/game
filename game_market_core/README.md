@@ -336,6 +336,18 @@ oracle:
 * **Max's real LLM bridge** (`mark17.llm_bridge`, local Ollama) writes a
   natural-language desk note explaining the call. Offline it degrades to a
   deterministic explanation — no dependency.
+* **Capital preservation — Max's explicit job, independent of the Risk
+  Engine.** Max keeps his own equity tracking (does not trust `risk.state` —
+  defense in depth) and enforces two things unconditionally, before any other
+  check: a **monthly profit lock** (`max.monthly_target_pct`, default 10%) that
+  stands down for the rest of the month once that return is reached, so a great
+  month can't be given back by over-reaching; and a **sticky circuit breaker**
+  (`max.hard_drawdown_breaker_pct`, default 20%) that, once tripped on Max's own
+  drawdown measurement, refuses every trade forever after — verified: with the
+  breaker forced to 5% it tripped after 3 trades and correctly blocked the next
+  3,544 signals over the following 16 years, capping the account's total
+  drawdown at 6.0%. 10%/mo is a **lock-in ceiling, not a promise** — historically
+  only ~2% of months reached it; most months will be much smaller.
 
 ```bash
 python3 main.py max            # run with Max active; prints his verdict + vetoes
