@@ -91,6 +91,51 @@ export interface Max17VoiceState {
   }>;
 }
 
+export interface Max17PlanTask {
+  id: string;
+  desc: string;
+  mgr: 'MGR-1' | 'MGR-2' | 'MGR-3';
+  xp: number;
+  status?: string;
+  scheduledTime?: string;
+  deadline?: string;
+  reality_check?: string;
+}
+
+export interface Max17Plan {
+  ok?: boolean;
+  goal?: string;
+  domain?: string;
+  horizon_days?: number;
+  tasks?: Max17PlanTask[];
+  total_xp?: number;
+  first_move?: string;
+  summary?: string;
+  principle?: string;
+}
+
+export interface Max17GraphNode {
+  id: string;
+  type: string;
+  label: string;
+  degree: number;
+}
+
+export interface Max17GraphEdge {
+  source: string;
+  target: string;
+  relation: string;
+  weight: number;
+  evidence: number;
+  summary?: string;
+}
+
+export interface Max17Graph {
+  nodes?: Max17GraphNode[];
+  edges?: Max17GraphEdge[];
+  stats?: { total_synapses?: number; shown_synapses?: number; nodes?: number };
+}
+
 export interface Max17Response {
   ok?: boolean;
   route: string;
@@ -104,13 +149,17 @@ export interface Max17Response {
   consolidation?: Max17Consolidation;
   self_evaluation?: Max17SelfEvaluation;
   voice?: Max17VoiceState;
+  plan?: Max17Plan;
+  graph?: Max17Graph;
   raw?: Record<string, unknown>;
   error?: string;
   details?: unknown;
 }
 
+const BASE_PATH = process.env.NEXT_PUBLIC_BASE_PATH ?? '';
+
 export async function sendMax17Event(event: Record<string, unknown>): Promise<Max17Response> {
-  const response = await fetch('/api/max17', {
+  const response = await fetch(`${BASE_PATH}/api/max17`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',

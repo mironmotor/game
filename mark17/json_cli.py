@@ -26,6 +26,7 @@ from mark17.vector_memory import VectorMemory
 from mark17.synapse_graph import SynapseGraph
 from mark17.consolidation import ConsolidationEngine
 from mark17.voice_state import VoiceProfiles, process_voice_event
+from mark17.planner import build_plan
 
 ALLOWED_EVENTS = frozenset(
     {
@@ -37,6 +38,8 @@ ALLOWED_EVENTS = frozenset(
         "system_state",
         "sleep_consolidation",
         "voice_state",
+        "auto_plan",
+        "synapse_graph",
     }
 )
 
@@ -72,6 +75,9 @@ def _as_event(data: dict[str, Any]) -> Event:
     elif event_type == "voice_state":
         payload["user_id"] = str(data.get("user_id") or data.get("user") or "anon")
         payload["context"] = str(data.get("context") or data.get("text") or "")
+    elif event_type == "auto_plan":
+        goal = data.get("goal") or data.get("message") or data.get("text") or ""
+        payload["goal"] = str(goal)
 
     return Event(
         type=event_type,
@@ -238,6 +244,12 @@ def normalize(result: dict[str, Any]) -> dict[str, Any]:
     voice = result.get("voice")
     if isinstance(voice, dict):
         normalized["voice"] = voice
+    plan = result.get("plan")
+    if isinstance(plan, dict):
+        normalized["plan"] = plan
+    graph = result.get("graph")
+    if isinstance(graph, dict):
+        normalized["graph"] = graph
     return normalized
 
 
@@ -293,6 +305,10 @@ def _handle_event(event: Event, args: argparse.Namespace, state_dir: Path) -> di
         return _handle_sleep_consolidation(event, brain, vector_memory, synapse_graph)
     if event.type == "voice_state":
         return _handle_voice_state(event, brain, vector_memory, synapse_graph, state_dir)
+    if event.type == "auto_plan":
+        return _handle_auto_plan(event, brain, vector_memory, synapse_graph)
+    if event.type == "synapse_graph":
+        return _handle_synapse_graph(event, synapse_graph)
 
     result = brain.handle(event)
     _merge_memory(
@@ -323,6 +339,102 @@ def _handle_event(event: Event, args: argparse.Namespace, state_dir: Path) -> di
             ),
             hint=evaluation.reason,
             action="self_evaluation",
+        )
+        vector_memory.remember(event, result["self_evaluation"])
+    brain.plasticity.save()
+    return result
+
+
+def _handle_synapse_graph(event: Event, synapse_graph: SynapseGraph) -> dict[str, Any]:
+    """Read-only export of the real Max synapse graph for visualization."""
+    try:
+        limit = int(event.payload.get("limit", 400))
+    except (TypeError, ValueError):
+        limit = 400
+    graph = synapse_graph.get_graph(limit=max(1, min(2000, limit)))
+    stats = graph.get("stats", {})
+    return {
+        "ok": True,
+        "event_type": event.type,
+        "route": "synapse_graph",
+        "graph": graph,
+        "memory": {"hint": f"synapse graph: {stats.get('shown_synapses', 0)}/{stats.get('total_synapses', 0)} synapses, {stats.get('nodes', 0)} nodes"},
+        "plasticity": {"confidence": 1.0 if stats.get("total_synapses") else 0.0, "action": "synapse_graph_read", "learned": False},
+        "llm": {"status": "skipped", "text": "Синапс-граф прочитан из ядра Max, без LLM.", "latency_ms": 0.0},
+        "decision": {"reason": "synapse graph export", "confidence": 1.0},
+        "next_adaptation": "Реальные синапсы ядра Max растут по мере использования системы.",
+        "self_evaluation": {"score": 1.0, "reason": "synapse graph export", "store_memory": False, "reinforce": "synapse_graph"},
+    }
+
+
+def _handle_auto_plan(
+    event: Event,
+    brain: Mark17Brain,
+    vector_memory: VectorMemory,
+    synapse_graph: SynapseGraph,
+) -> dict[str, Any]:
+    """Deterministically decompose a goal into an MGR plan on the Max core."""
+    goal = str(event.payload.get("goal") or "").strip()
+    try:
+        horizon = int(event.payload.get("horizon_days", 0))
+    except (TypeError, ValueError):
+        horizon = 0
+
+    plan = build_plan(goal, horizon_days=horizon)
+
+    # Pull any related past experience for this goal.
+    recalled = [
+        {
+            "id": hit.id,
+            "event_type": hit.event_type,
+            "importance": round(hit.importance, 3),
+            "score": round(hit.score, 3),
+            "summary": hit.content.get("hint") or hit.signature[:120],
+        }
+        for hit in (brain.memory.recall(goal, limit=3) if goal else [])
+    ]
+    semantic = [hit.to_dict() for hit in (vector_memory.recall(goal, limit=3) if goal else [])]
+
+    confidence = round(min(1.0, 0.5 + 0.1 * len(plan.get("tasks", []))), 3) if plan.get("ok") else 0.0
+    result: dict[str, Any] = {
+        "ok": bool(plan.get("ok")),
+        "event_type": event.type,
+        "route": "auto_plan",
+        "plan": plan,
+        "memory": {"recalled": recalled, "semantic": semantic, "hint": plan.get("summary")},
+        "plasticity": {
+            "confidence": confidence,
+            "action": "auto_plan",
+            "learned": bool(plan.get("ok")),
+        },
+        "llm": {"status": "skipped", "text": "Автоплан собран детерминированно ядром Max, без LLM.", "latency_ms": 0.0},
+        "decision": {"reason": plan.get("summary", ""), "confidence": confidence},
+        "next_adaptation": plan.get("first_move") and f"Начни с малого: {plan['first_move']}." or plan.get("summary", ""),
+        "self_evaluation": {
+            "score": confidence,
+            "reason": f"auto_plan built {len(plan.get('tasks', []))} tasks for goal",
+            "store_memory": bool(plan.get("ok")),
+            "reinforce": "auto_plan",
+        },
+    }
+    result["synapses"] = synapse_graph.update_from_event(event, result, result["self_evaluation"])
+
+    # Remember that this goal was planned, so future recall can connect to it.
+    if plan.get("ok"):
+        brain.memory.remember(
+            Event(
+                type="remember",
+                payload={
+                    "note": plan.get("summary", ""),
+                    "goal": goal,
+                    "domain": plan.get("domain"),
+                    "total_xp": plan.get("total_xp"),
+                    "reinforce": "auto_plan",
+                },
+                source="planner",
+            ),
+            hint=plan.get("summary", ""),
+            action="auto_plan",
         )
         vector_memory.remember(event, result["self_evaluation"])
     brain.plasticity.save()
