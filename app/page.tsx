@@ -7,6 +7,12 @@ export default function Home() {
       <HudApp />
       <div className="fixed bottom-4 right-4 z-50 flex flex-col items-end gap-2">
         <Link
+          href="/splats"
+          className="rounded-full border border-[#be78ff]/40 bg-[#be78ff]/10 px-4 py-2 text-xs font-semibold uppercase tracking-wider text-[#be78ff] backdrop-blur transition hover:bg-[#be78ff]/20"
+        >
+          △∞ Брейнданс · 4D сплаты
+        </Link>
+        <Link
           href="/attractor"
           className="rounded-full border border-[#d9b8ff]/40 bg-[#d9b8ff]/10 px-4 py-2 text-xs font-semibold uppercase tracking-wider text-[#d9b8ff] backdrop-blur transition hover:bg-[#d9b8ff]/20"
         >
