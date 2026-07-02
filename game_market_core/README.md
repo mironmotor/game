@@ -83,7 +83,8 @@ markdown report`.
 | **5** | Live websocket feed (stdlib RFC 6455), learned regime (vol-forecaster) + news-impact models with OOS gates vs baselines, signed venue order client (test-endpoint, fully gated) | ✅ |
 | **6** | Gradient-boosted-trees filter (gated vs logistic + take-all OOS), multi-symbol portfolio backtest with diversification, size-dependent market-impact slippage (capacity), on-chain large-flow proxy | ✅ |
 | **7** | Sequence model (Elman RNN + BPTT, pure stdlib) gated OOS, cross-symbol risk budgeting (inverse-vol + portfolio kill), order-book microstructure, keyed exchange-flow/whale hook | ✅ |
-| **8+** | Transformer/attention sequence models, full L2 order-book replay, live multi-symbol paper execution, capital-curve compounding study | ⬜ |
+| **8** | Max17 integration (risk critic + LLM desk note), non-stop live loop with auto-refreshing dashboard, Bybit testnet execution path, trade-lifecycle management (breakeven/partial-tp/ATR-trailing) | ✅ |
+| **9+** | Transformer/attention sequence models, full L2 order-book replay, live multi-symbol paper execution, capital-curve compounding study | ⬜ |
 
 ## 4. Data needed
 
@@ -277,6 +278,51 @@ config change, never a silent default.
   netflow loads automatically when `GMC_GLASSNODE_KEY` is set, else the free
   `whale_z` proxy stands in.
 
+### Stage 8 — trade lifecycle, Max integration, live loop, testnet path
+
+* **Trade lifecycle** (`risk.trade_lifecycle` in `config.yaml`, logic in
+  `backtest/engine.py`): breakeven stop + ATR trailing stop, ported from the
+  MT4 EA's breakeven/firstCut/deepTrailing model — instead of every trend
+  trade being capped at a fixed R:R, the trailing stop takes over once the
+  trade is favorable and lets it ride the move, only ever tightening the stop.
+  **This was tuned by an honest grid search + walk-forward check on real BTC,
+  not guessed**, and a first version was found to make things WORSE (total
+  return and Sharpe both dropped) until the bug — the fixed take-profit was
+  still capping the trade even after trailing activated — was found and fixed
+  (trailing now replaces the fixed TP once active). The measured, honest
+  result on real BTC (2010–2026) vs the old fixed-TP baseline:
+
+  | | old (fixed TP) | new (breakeven + 4x-ATR trail) |
+  |---|---|---|
+  | Full-history total return | +137.9% | **+311.9%** |
+  | Avg monthly ROMI | 0.45% | **0.74%** |
+  | Profit factor | 1.40 | **1.90** |
+  | Max drawdown | 15.4% | **14.9%** |
+  | Walk-forward OOS total return | +111.8% | **+222.0%** |
+  | Walk-forward OOS avg R / PF | 0.31 / 1.55 | **0.76 / 2.21** |
+  | Walk-forward OOS efficiency | 0.32 | 0.26 (slightly worse ratio) |
+
+  Read this honestly: absolute OOS return and profit factor roughly doubled,
+  but the OOS-efficiency *ratio* (how much of the in-sample gain survives
+  out-of-sample) got slightly worse — letting winners run also inflates
+  in-sample results, and the weak fold (the 2024–26 regime shift) is still
+  weak. This is a real, measured improvement, not a bigger promise: still
+  ~0.7%/mo, nowhere near 100–300%/mo, and it needs paper trading before any
+  live capital just like everything else here. Tighter trailing (2.5x ATR)
+  and partial-take-profit variants were also tested and measured **worse**
+  (lower Sharpe/return) on this data — don't assume more complexity helps
+  without measuring it, which is the whole point of this repo.
+* **Max17 integration** (`integrations/max_bridge.py`): the Game's Max core as
+  a risk second opinion (vetoes on real on-chain/news signals, never invents
+  edge) plus a natural-language desk note via Max's local Ollama LLM
+  (`--max`, `--max-llm`), and a Bybit **testnet** execution path
+  (`execution/venue_client.py`) behind the same hard gates for a $-scale live
+  dry-run. See the section below and **QUICKSTART.md**.
+* **Non-stop live loop** (`python3 main.py live`): re-trades every new bar and
+  serves a self-refreshing dashboard (🟢 LIVE badge) — real time against a
+  reachable exchange, or a watchable history replay otherwise. Does not change
+  the edge; just runs it continuously.
+
 ### Max integration (the Game's cognitive core)
 
 `integrations/max_bridge.py` wires the **Max core (`mark17`)** into the trading
@@ -290,12 +336,30 @@ oracle:
 * **Max's real LLM bridge** (`mark17.llm_bridge`, local Ollama) writes a
   natural-language desk note explaining the call. Offline it degrades to a
   deterministic explanation — no dependency.
+* **Capital preservation — Max's explicit job, independent of the Risk
+  Engine.** Max keeps his own equity tracking (does not trust `risk.state` —
+  defense in depth) and enforces two things unconditionally, before any other
+  check: a **monthly profit lock** (`max.monthly_target_pct`, default 10%) that
+  stands down for the rest of the month once that return is reached, so a great
+  month can't be given back by over-reaching; and a **sticky circuit breaker**
+  (`max.hard_drawdown_breaker_pct`, default 20%) that, once tripped on Max's own
+  drawdown measurement, refuses every trade forever after — verified: with the
+  breaker forced to 5% it tripped after 3 trades and correctly blocked the next
+  3,544 signals over the following 16 years, capping the account's total
+  drawdown at 6.0%. 10%/mo is a **lock-in ceiling, not a promise** — historically
+  only ~2% of months reached it; most months will be much smaller.
 
 ```bash
 python3 main.py max            # run with Max active; prints his verdict + vetoes
 python3 main.py serve --max    # dashboard with a "Max desk note" panel
 python3 main.py max --max-llm  # use Max's local Ollama LLM for the note
+python3 main.py live --ml --max   # NON-STOP: re-trades every bar, dashboard auto-refreshes
 ```
+
+`live` runs continuously and re-renders the dashboard on every bar (🟢 LIVE
+badge, auto-refresh). With `source: exchange` it polls the venue in real time;
+otherwise it replays history at `--speed` bars/tick so you can watch it trade.
+A live loop does not change the edge — it just runs it in real time.
 `--max-llm` (or `max.llm: true`) uses Max's local Ollama (`ollama serve &&
 ollama pull qwen2.5:0.5b`); offline it degrades to a deterministic note. Max is
 opt-in; without `--max`/`max.enabled` nothing changes.

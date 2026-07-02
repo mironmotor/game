@@ -42,8 +42,22 @@ def render_html(state: dict, path: str) -> str:
     max_html = ""
     if mn:
         vcolor = {"TRADE": "#16c784", "CAUTION": "#f0a020", "SKIP": "#ea3943"}.get(mn["verdict"], "#888")
+        halted = mn.get("halted")
+        locked = mn.get("profit_locked")
+        guard_bits = []
+        if halted:
+            guard_bits.append('<span class="sev" style="background:#ea3943">CIRCUIT BREAKER HALTED</span>')
+        elif locked:
+            guard_bits.append('<span class="sev" style="background:#16c784">PROFIT LOCKED</span>')
+        month_ret = mn.get("month_return_pct")
+        target = mn.get("monthly_target_pct")
+        if month_ret is not None:
+            guard_bits.append(f'<span class="k">month-to-date: {month_ret:+.1f}% '
+                              f'(target {target:.0f}%)</span>')
+        guard_html = f'<div style="margin-bottom:8px">{" · ".join(guard_bits)}</div>' if guard_bits else ""
         max_html = (
             '<h2>Max desk note</h2><div class="card">'
+            f'{guard_html}'
             f'<div style="margin-bottom:8px"><span class="sev" style="background:{vcolor}">'
             f'{html.escape(mn["verdict"])}</span> '
             f'<span class="k">vetoes: {mn.get("veto_count", 0)} · LLM: {html.escape(str(mn.get("llm_status","")))}</span></div>'
@@ -91,7 +105,16 @@ def render_html(state: dict, path: str) -> str:
         for t in trades
     )
 
-    doc = f"""<!doctype html><html><head><meta charset="utf-8">
+    live = bool(state.get("live"))
+    refresh_sec = int(state.get("refresh_sec", 3))
+    live_meta = f'<meta http-equiv="refresh" content="{refresh_sec}">' if live else ''
+    live_badge = (
+        f'<span style="color:#16c784;font-weight:600">🟢 LIVE</span> · '
+        f'updated {time.strftime("%H:%M:%S UTC", time.gmtime())} · '
+        f'bar {state.get("bar_index", "?")}/{state.get("bar_total", "?")} · '
+        if live else ''
+    )
+    doc = f"""<!doctype html><html><head><meta charset="utf-8">{live_meta}
 <title>GAME MARKET CORE — Dashboard</title>
 <style>
  body{{font-family:-apple-system,Segoe UI,Roboto,sans-serif;background:#0e1117;color:#e6e6e6;margin:0;padding:24px}}
@@ -107,7 +130,7 @@ def render_html(state: dict, path: str) -> str:
  .banner{{background:#23282f;border-left:4px solid #f0a020;padding:10px 14px;border-radius:6px;font-size:13px}}
 </style></head><body>
 <h1>GAME MARKET CORE — Strategy Health Dashboard</h1>
-<div class="sub">Generated {time.strftime('%Y-%m-%d %H:%M:%S UTC', time.gmtime())} · PAPER TRADING (simulated fills) · not financial advice</div>
+<div class="sub">{live_badge}Generated {time.strftime('%Y-%m-%d %H:%M:%S UTC', time.gmtime())} · PAPER TRADING (simulated fills) · not financial advice</div>
 <div class="banner">Target framing: {state['target_low']}–{state['target_high']}% ROMI/mo is treated as a hypothesis to disprove. Measured avg monthly ROMI: <b>{m['avg_monthly_romi_pct']:.2f}%</b>.</div>
 <h2>Equity curve</h2>
 <div class="card">{_sparkline(eq)}</div>

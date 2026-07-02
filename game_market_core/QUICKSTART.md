@@ -98,6 +98,17 @@ edge usually lands in the single-digits-to-low-tens of percent per month
 *before* degradation — with real drawdowns. **Sustained 100–300%/mo at safe
 risk is not a credible target**, and every report says so.
 
+## 3.5 Trade lifecycle (breakeven + trailing) is on by default
+
+`risk.trade_lifecycle.enabled: true` lets winning trend trades run past the
+fixed take-profit via a breakeven stop + ATR trailing stop (ported from the
+MT4 EA's lifecycle model), instead of capping every trade at a fixed R:R. This
+was grid-searched and walk-forward-checked on real BTC, not guessed: it roughly
+doubles OOS total return and profit factor vs the old fixed-TP behavior — see
+the table in README.md → "Stage 8". Set `enabled: false` to get the old
+behavior back, or re-run the grid search in `backtest/engine.py`'s tuning
+approach on your own data before trusting these exact numbers.
+
 ## 4. Going live (deliberately hard)
 
 Real orders flow only through `execution/execution_adapter.py` and require ALL:
