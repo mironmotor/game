@@ -100,6 +100,10 @@ function runMax17Bridge(event: unknown) {
   });
 }
 
+function remoteBridgeUrl() {
+  return (process.env.MAX17_REMOTE_BRIDGE_URL || process.env.MAX17_BRIDGE_URL || '').trim().replace(/\/+$/, '');
+}
+
 export async function POST(request: Request) {
   let body: Record<string, unknown>;
 
@@ -124,7 +128,7 @@ export async function POST(request: Request) {
     // On a hosted frontend (e.g. Vercel) there is no python3 to spawn, so proxy
     // the event to a remote Max17 bridge (mark17/server.py) when configured.
     // Locally (`npm run dev`), MAX17_BRIDGE_URL is unset and we spawn python3.
-    const result = process.env.MAX17_BRIDGE_URL
+    const result = remoteBridgeUrl()
       ? await proxyToRemoteBridge(body)
       : await runMax17Bridge(body);
     const status = result.ok === false ? 502 : 200;
@@ -141,16 +145,18 @@ export async function POST(request: Request) {
 }
 
 async function proxyToRemoteBridge(event: unknown): Promise<Record<string, unknown>> {
-  const base = String(process.env.MAX17_BRIDGE_URL).replace(/\/$/, '');
-  const token = process.env.MAX17_BRIDGE_TOKEN;
+  const base = remoteBridgeUrl();
+  const token = process.env.MAX17_REMOTE_BRIDGE_TOKEN || process.env.MAX17_BRIDGE_TOKEN;
+  const bridgePath =
+    process.env.MAX17_BRIDGE_PATH || (process.env.MAX17_REMOTE_BRIDGE_URL ? '/api/max17' : '/event');
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 20000);
   try {
-    const res = await fetch(`${base}/event`, {
+    const res = await fetch(`${base}${bridgePath.startsWith('/') ? bridgePath : `/${bridgePath}`}`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        ...(token ? { Authorization: `Bearer ${token}`, 'x-max17-bridge-token': token } : {}),
       },
       body: JSON.stringify(event),
       signal: controller.signal,
