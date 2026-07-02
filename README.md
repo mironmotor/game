@@ -210,3 +210,19 @@ Run the bridge locally (to test the same path):
 ```bash
 python3 -m mark17.server            # listens on :8000, GET /health, POST /event
 ```
+
+**Variant B: bridge on your Mac (one command)**
+
+Instead of Railway, host the core on your own machine (uses your local Ollama
+model when it is running, e.g. Qwen on an M-series Mac):
+
+```bash
+bash mark17/run_bridge_mac.sh
+```
+
+The script checks python3/numpy, detects Ollama (enables LLM routing through it
+when alive, deterministic mode otherwise), generates MAX17_BRIDGE_TOKEN, starts
+`mark17.server`, opens a `cloudflared` quick tunnel (`brew install cloudflared`)
+and prints the resulting `MAX17_BRIDGE_URL` + ready-to-paste `vercel env add`
+commands. Ctrl+C stops everything. The tunnel only lives while the script runs
+and the Mac is awake — use Railway (Variant A) for 24/7.
