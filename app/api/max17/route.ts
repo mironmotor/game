@@ -3,6 +3,7 @@ import path from 'node:path';
 import { NextResponse } from 'next/server';
 
 export const runtime = 'nodejs';
+export const maxDuration = 60;
 
 const ALLOWED_EVENTS = new Set([
   'user_message',
@@ -150,7 +151,11 @@ async function proxyToRemoteBridge(event: unknown): Promise<Record<string, unkno
   const bridgePath =
     process.env.MAX17_BRIDGE_PATH || (process.env.MAX17_REMOTE_BRIDGE_URL ? '/api/max17' : '/event');
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 20000);
+  const timeoutMs = Math.min(
+    Number(process.env.MAX17_REMOTE_BRIDGE_TIMEOUT_MS || process.env.MAX17_BRIDGE_TIMEOUT_MS || 55000),
+    55000,
+  );
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
   try {
     const res = await fetch(`${base}${bridgePath.startsWith('/') ? bridgePath : `/${bridgePath}`}`, {
       method: 'POST',
