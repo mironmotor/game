@@ -67,6 +67,23 @@
 .ap-desc { margin-top: 8px; font-size: 14px; color: #eafff8; }
 .ap-rc { margin-top: 6px; font-size: 12px; color: rgba(170,210,200,0.75); line-height: 1.4; }
 
+.ap-brain {
+  margin-top: 16px; border: 1px solid rgba(78,168,255,0.3); border-radius: 12px;
+  padding: 14px 16px; background: linear-gradient(180deg, rgba(78,168,255,0.07), transparent);
+}
+.ap-brain-head { font-size: 13px; color: #cfe6ff; }
+.ap-brain-head b { color: #4ea8ff; }
+.ap-brain-syn { display: flex; gap: 10px; align-items: baseline; margin-top: 8px; font-size: 11px; }
+.ap-brain-w { color: #4ea8ff; font-weight: 700; min-width: 34px; }
+.ap-brain-rel { color: rgba(180,210,240,0.7); white-space: nowrap; }
+.ap-brain-sum { color: rgba(210,230,250,0.85); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ap-brain-link {
+  display: inline-block; margin-top: 12px; font-size: 12px; color: #4ea8ff;
+  border: 1px solid rgba(78,168,255,0.35); border-radius: 8px; padding: 6px 12px;
+  text-decoration: none; transition: background 0.15s ease;
+}
+.ap-brain-link:hover { background: rgba(78,168,255,0.12); }
+
 .ap-principle {
   margin-top: 18px; font-size: 11px; color: rgba(150,200,190,0.6);
   border-top: 1px solid rgba(0,255,200,0.12); padding-top: 12px; text-align: center; font-style: italic;

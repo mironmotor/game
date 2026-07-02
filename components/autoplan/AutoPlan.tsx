@@ -1,7 +1,8 @@
 'use client';
 
 import { useState } from 'react';
-import { sendMax17Event, type Max17Plan, type Max17PlanTask } from '@/lib/max17-client';
+import Link from 'next/link';
+import { sendMax17Event, type Max17Plan, type Max17PlanTask, type Max17Synapses } from '@/lib/max17-client';
 import './autoplan.css';
 
 const MGR_META: Record<string, { label: string; color: string }> = {
@@ -32,6 +33,7 @@ export default function AutoPlan() {
   const [horizon, setHorizon] = useState(0);
   const [plan, setPlan] = useState<Max17Plan | null>(null);
   const [meta, setMeta] = useState<{ confidence: number; adaptation: string } | null>(null);
+  const [synapses, setSynapses] = useState<Max17Synapses | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
 
@@ -41,11 +43,13 @@ export default function AutoPlan() {
     setError('');
     setPlan(null);
     setMeta(null);
+    setSynapses(null);
     try {
       const res = await sendMax17Event({ type: 'auto_plan', goal: goal.trim(), horizon_days: horizon });
       if (res.plan && res.plan.ok) {
         setPlan(res.plan);
         setMeta({ confidence: res.confidence, adaptation: res.next_adaptation });
+        setSynapses(res.synapses ?? null);
       } else {
         setError(res.plan?.summary || res.error || 'Ядро Max не собрало план.');
       }
@@ -109,6 +113,22 @@ export default function AutoPlan() {
             <div className="ap-tasks">
               {(plan.tasks ?? []).map((t) => <TaskCard key={t.id} t={t} />)}
             </div>
+
+            {synapses && (synapses.updated ?? 0) > 0 && (
+              <div className="ap-brain">
+                <div className="ap-brain-head">
+                  🧠 Мозг Max вырос: <b>+{synapses.updated}</b> синапсов
+                </div>
+                {(synapses.top ?? []).slice(0, 3).map((s) => (
+                  <div className="ap-brain-syn" key={s.id}>
+                    <span className="ap-brain-w">{(s.weight ?? 0).toFixed(2)}</span>
+                    <span className="ap-brain-rel">{s.source_type} → {s.target_type}</span>
+                    <span className="ap-brain-sum">{s.summary}</span>
+                  </div>
+                ))}
+                <Link href="/maxgraph" className="ap-brain-link">Смотреть весь синапс-граф →</Link>
+              </div>
+            )}
 
             {plan.principle && <div className="ap-principle">{plan.principle}</div>}
           </div>
