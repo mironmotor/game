@@ -218,14 +218,22 @@
   transition: width 0.6s ease;
 }
 
-/* ── Ядро: многослойный энерго-орб ── */
+/* ── Ядро: многослойный энерго-орб (кнопка голосового вызова) ── */
 .hud-orb {
   position: relative;
   width: 118px;
   height: 118px;
   display: grid;
   place-items: center;
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  transition: transform 0.12s ease;
 }
+
+.hud-orb:active { transform: scale(0.94); }
 
 .hud-orb > * {
   position: absolute;
@@ -311,6 +319,44 @@
 @keyframes hud-core {
   0%, 100% { transform: scale(1); filter: hue-rotate(0deg) brightness(1); }
   50% { transform: scale(1.08); filter: hue-rotate(28deg) brightness(1.12); }
+}
+
+/* треугольник по центру ядра */
+.hud-orb-tri {
+  position: relative;
+  z-index: 2;
+  width: 0;
+  height: 0;
+  border-left: 11px solid transparent;
+  border-right: 11px solid transparent;
+  border-bottom: 19px solid rgba(20, 8, 40, 0.9);
+  filter: drop-shadow(0 0 6px rgba(168, 85, 247, 0.8));
+  transform: translateY(-1px);
+  transition: transform 0.25s ease, border-bottom-color 0.25s ease;
+  border-radius: 0;
+}
+
+.hud-orb:hover .hud-orb-tri { transform: translateY(-1px) scale(1.12); }
+
+.hud-orb.listening .hud-orb-tri {
+  border-bottom-color: #00f2ff;
+  filter: drop-shadow(0 0 10px rgba(0, 242, 255, 1));
+}
+
+/* сонар-кольца «режима уха» — расходятся от ядра, когда слушает */
+.hud-orb-sonar {
+  inset: 18px;
+  border: 1.5px solid rgba(0, 242, 255, 0.7);
+  animation: hud-sonar 1.6s ease-out infinite;
+  pointer-events: none;
+}
+
+.hud-orb-sonar.s2 { animation-delay: 0.5s; border-color: rgba(168, 85, 247, 0.6); }
+.hud-orb-sonar.s3 { animation-delay: 1s; border-color: rgba(217, 70, 239, 0.5); }
+
+@keyframes hud-sonar {
+  0% { transform: scale(0.55); opacity: 0.9; }
+  100% { transform: scale(2.6); opacity: 0; }
 }
 
 /* режим прослушивания — ускоряем всё и подсвечиваем цианом */

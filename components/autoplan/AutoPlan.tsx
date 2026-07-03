@@ -54,10 +54,20 @@ export default function AutoPlan() {
         setError(res.plan?.summary || res.error || 'Ядро Max не собрало план.');
       }
     } catch (e: unknown) {
-      setError(
-        (e instanceof Error ? e.message : 'Ошибка') +
-          ' · Автоплан работает на Python-ядре Max через /api/max17 — нужен `npm run dev` (не статический деплой).',
-      );
+      let diag = '';
+      try {
+        const h = await fetch(`${process.env.NEXT_PUBLIC_BASE_PATH ?? ''}/api/max17`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ type: 'bridge_health' }),
+        }).then((r) => r.json());
+        diag = h.configured
+          ? h.reachable
+            ? ` · Мост (${h.url_host}) отвечает — проблема в самом событии.`
+            : ` · Мост задан (${h.url_host}), но НЕ отвечает: ${h.hint ?? 'туннель/сервер упал.'}`
+          : ` · ${h.hint ?? 'Мост не сконфигурирован.'}`;
+      } catch { /* диагностика недоступна */ }
+      setError((e instanceof Error ? e.message : 'Ошибка') + diag);
     } finally {
       setBusy(false);
     }

@@ -305,7 +305,13 @@ export function GameHud({
         </div>
 
         <div className="hud-col-center">
-          <div className={`hud-orb ${isListening ? 'listening' : ''}`} aria-hidden>
+          <button
+            type="button"
+            className={`hud-orb ${isListening ? 'listening' : ''}`}
+            onClick={onToggleListen}
+            aria-label={isListening ? 'Выключить режим уха' : 'Голосовой вызов — режим уха'}
+            aria-pressed={isListening}
+          >
             <span className="hud-orb-halo" />
             <span className="hud-orb-ring1" />
             <span className="hud-orb-ring2" />
@@ -313,7 +319,15 @@ export function GameHud({
               <i /><i /><i /><i /><i /><i />
             </span>
             <span className="hud-orb-core" />
-          </div>
+            <span className="hud-orb-tri" />
+            {isListening && (
+              <>
+                <span className="hud-orb-sonar" />
+                <span className="hud-orb-sonar s2" />
+                <span className="hud-orb-sonar s3" />
+              </>
+            )}
+          </button>
           <p className="hud-prompt">{promptText}</p>
           <div className="hud-input-bar">
             <button

@@ -105,6 +105,49 @@ function remoteBridgeUrl() {
   return (process.env.MAX17_REMOTE_BRIDGE_URL || process.env.MAX17_BRIDGE_URL || '').trim().replace(/\/+$/, '');
 }
 
+// Диагностика моста: POST {type:"bridge_health"} — сконфигурирован ли удалённый
+// мост и жив ли он. (GET нельзя: ломает output:export для GitHub Pages.)
+async function bridgeHealth() {
+  const base = remoteBridgeUrl();
+  if (!base) {
+    return NextResponse.json({
+      ok: true,
+      bridge: 'local-python',
+      configured: false,
+      hint: 'MAX17_BRIDGE_URL не задан — события пойдут через локальный python3 (работает в `npm run dev`; на Vercel задай MAX17_BRIDGE_URL + MAX17_BRIDGE_TOKEN в env и сделай Redeploy).',
+    });
+  }
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 6000);
+  try {
+    const res = await fetch(`${base}/health`, { signal: controller.signal });
+    const payload = (await res.json().catch(() => ({}))) as Record<string, unknown>;
+    return NextResponse.json({
+      ok: res.ok && payload.ok !== false,
+      bridge: 'remote',
+      configured: true,
+      reachable: res.ok,
+      url_host: new URL(base).host,
+      remote: payload,
+    });
+  } catch (error) {
+    return NextResponse.json(
+      {
+        ok: false,
+        bridge: 'remote',
+        configured: true,
+        reachable: false,
+        url_host: (() => { try { return new URL(base).host; } catch { return base; } })(),
+        error: error instanceof Error ? error.message : String(error),
+        hint: 'Мост задан, но не отвечает: туннель/сервер mark17 упал или Мак уснул. Перезапусти bash mark17/run_bridge_mac.sh (или мигрируй на Railway для 24/7).',
+      },
+      { status: 502 },
+    );
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
 export async function POST(request: Request) {
   let body: Record<string, unknown>;
 
@@ -119,6 +162,9 @@ export async function POST(request: Request) {
   }
 
   const eventType = String(body.type || body.event || '');
+  if (eventType === 'bridge_health') {
+    return bridgeHealth();
+  }
   if (!ALLOWED_EVENTS.has(eventType)) {
     return errorResponse(`Unsupported event type: ${eventType || '(missing)'}`, 400, {
       allowed: Array.from(ALLOWED_EVENTS),
