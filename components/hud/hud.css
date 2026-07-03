@@ -218,31 +218,106 @@
   transition: width 0.6s ease;
 }
 
+/* ── Ядро: многослойный энерго-орб ── */
 .hud-orb {
-  width: 56px;
-  height: 56px;
+  position: relative;
+  width: 118px;
+  height: 118px;
+  display: grid;
+  place-items: center;
+}
+
+.hud-orb > * {
+  position: absolute;
   border-radius: 50%;
-  background: radial-gradient(circle at 35% 30%, #fff 0%, rgba(255, 255, 255, 0.85) 25%, rgba(200, 220, 255, 0.4) 60%, transparent 70%);
-  box-shadow: 0 0 40px rgba(255, 255, 255, 0.5), 0 0 80px rgba(168, 85, 247, 0.35);
-  animation: hud-orb-pulse 2.5s ease-in-out infinite;
 }
 
-@keyframes hud-orb-pulse {
-  0%,
-  100% {
-    transform: scale(1);
-    opacity: 0.95;
-  }
-  50% {
-    transform: scale(1.06);
-    opacity: 1;
-  }
+/* пульсирующее гало */
+.hud-orb-halo {
+  inset: -34px;
+  background: radial-gradient(circle,
+    rgba(0, 242, 255, 0.22) 0%,
+    rgba(168, 85, 247, 0.16) 40%,
+    transparent 70%);
+  filter: blur(10px);
+  animation: hud-halo 3.2s ease-in-out infinite;
 }
 
-.hud-orb.listening {
-  animation: hud-orb-pulse 0.8s ease-in-out infinite;
-  box-shadow: 0 0 50px rgba(0, 242, 255, 0.6), 0 0 90px rgba(168, 85, 247, 0.5);
+@keyframes hud-halo {
+  0%, 100% { transform: scale(1); opacity: 0.8; }
+  50% { transform: scale(1.18); opacity: 1; }
 }
+
+/* энерго-кольцо: вращающийся градиентный обод */
+.hud-orb-ring1 {
+  inset: 0;
+  background: conic-gradient(from 0deg,
+    transparent 0deg, rgba(0, 242, 255, 0.9) 60deg, transparent 130deg,
+    rgba(168, 85, 247, 0.9) 220deg, transparent 300deg, transparent 360deg);
+  -webkit-mask: radial-gradient(farthest-side, transparent calc(100% - 3px), #000 calc(100% - 2px));
+  mask: radial-gradient(farthest-side, transparent calc(100% - 3px), #000 calc(100% - 2px));
+  animation: hud-spin 4s linear infinite;
+  filter: drop-shadow(0 0 6px rgba(0, 242, 255, 0.7));
+}
+
+/* встречное пунктирное кольцо */
+.hud-orb-ring2 {
+  inset: 12px;
+  border: 1px dashed rgba(217, 70, 239, 0.55);
+  animation: hud-spin-rev 9s linear infinite;
+}
+
+@keyframes hud-spin { to { transform: rotate(360deg); } }
+@keyframes hud-spin-rev { to { transform: rotate(-360deg); } }
+
+/* орбитальные частицы */
+.hud-orb-particles {
+  inset: -6px;
+  animation: hud-spin 7s linear infinite;
+}
+
+.hud-orb-particles i {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: #9ff5ff;
+  box-shadow: 0 0 8px rgba(0, 242, 255, 0.9);
+}
+
+.hud-orb-particles i:nth-child(1) { transform: rotate(0deg) translateX(62px); }
+.hud-orb-particles i:nth-child(2) { transform: rotate(60deg) translateX(62px); background: #e9b8ff; box-shadow: 0 0 8px rgba(168,85,247,0.9); }
+.hud-orb-particles i:nth-child(3) { transform: rotate(120deg) translateX(62px); }
+.hud-orb-particles i:nth-child(4) { transform: rotate(180deg) translateX(62px); background: #ff9df0; box-shadow: 0 0 8px rgba(217,70,239,0.9); }
+.hud-orb-particles i:nth-child(5) { transform: rotate(240deg) translateX(62px); }
+.hud-orb-particles i:nth-child(6) { transform: rotate(300deg) translateX(62px); background: #e9b8ff; box-shadow: 0 0 8px rgba(168,85,247,0.9); }
+
+/* само ядро: живая сфера с дыханием и переливом */
+.hud-orb-core {
+  width: 62px;
+  height: 62px;
+  background:
+    radial-gradient(circle at 32% 28%, rgba(255, 255, 255, 1) 0%, rgba(255, 255, 255, 0.9) 18%, rgba(190, 225, 255, 0.55) 45%, rgba(150, 120, 255, 0.25) 68%, transparent 76%),
+    radial-gradient(circle at 68% 72%, rgba(168, 85, 247, 0.5) 0%, transparent 55%);
+  box-shadow:
+    0 0 34px rgba(255, 255, 255, 0.65),
+    0 0 70px rgba(0, 242, 255, 0.4),
+    0 0 110px rgba(168, 85, 247, 0.4);
+  animation: hud-core 2.8s ease-in-out infinite;
+}
+
+@keyframes hud-core {
+  0%, 100% { transform: scale(1); filter: hue-rotate(0deg) brightness(1); }
+  50% { transform: scale(1.08); filter: hue-rotate(28deg) brightness(1.12); }
+}
+
+/* режим прослушивания — ускоряем всё и подсвечиваем цианом */
+.hud-orb.listening .hud-orb-core { animation-duration: 0.8s; box-shadow: 0 0 40px rgba(0, 242, 255, 0.85), 0 0 90px rgba(0, 242, 255, 0.5), 0 0 130px rgba(168, 85, 247, 0.5); }
+.hud-orb.listening .hud-orb-ring1 { animation-duration: 1.2s; }
+.hud-orb.listening .hud-orb-particles { animation-duration: 2s; }
+.hud-orb.listening .hud-orb-halo { animation-duration: 1s; }
 
 .hud-prompt {
   font-size: 13px;
@@ -436,6 +511,12 @@
     flex-direction: column;
     overflow-y: auto;
     height: 100%;
+    -webkit-overflow-scrolling: touch;
+    overscroll-behavior: contain;
+    touch-action: pan-y;
+    padding: 12px 12px calc(env(safe-area-inset-bottom, 0px) + 96px);
+    gap: 12px;
+    pointer-events: auto;
   }
 
   .hud-col-left,
@@ -445,8 +526,30 @@
     flex-shrink: 0;
   }
 
+  .hud-col-center {
+    order: -1; /* ядро и ввод — первыми на телефоне */
+    padding: 18px 0 6px;
+    gap: 12px;
+  }
+
+  .hud-orb { width: 96px; height: 96px; }
+  .hud-orb-core { width: 52px; height: 52px; }
+  .hud-orb-particles i { transform-origin: center; }
+  .hud-orb-particles i:nth-child(1) { transform: rotate(0deg) translateX(50px); }
+  .hud-orb-particles i:nth-child(2) { transform: rotate(60deg) translateX(50px); }
+  .hud-orb-particles i:nth-child(3) { transform: rotate(120deg) translateX(50px); }
+  .hud-orb-particles i:nth-child(4) { transform: rotate(180deg) translateX(50px); }
+  .hud-orb-particles i:nth-child(5) { transform: rotate(240deg) translateX(50px); }
+  .hud-orb-particles i:nth-child(6) { transform: rotate(300deg) translateX(50px); }
+
+  .hud-time { font-size: 2rem; }
+  .hud-rank-number { font-size: 1.6rem; }
+  .hud-input-bar { width: 100%; padding: 10px 14px; }
+  .hud-input-bar input { font-size: 16px; } /* iOS: не зумить при фокусе */
+
   .hud-nav {
     flex-wrap: wrap;
-    gap: 16px;
+    gap: 14px;
+    padding-bottom: env(safe-area-inset-bottom, 0px);
   }
 }

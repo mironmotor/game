@@ -19,6 +19,13 @@ export const metadata: Metadata = {
   description: 'Геймифицированный HUD с AGI-ассистентом',
 };
 
+export const viewport = {
+  width: 'device-width',
+  initialScale: 1,
+  viewportFit: 'cover' as const,
+  themeColor: '#0a0818',
+};
+
 export default function RootLayout({children}: {children: React.ReactNode}) {
   return (
     <html lang="ru" className={`${orbitron.variable} ${robotoMono.variable}`}>
