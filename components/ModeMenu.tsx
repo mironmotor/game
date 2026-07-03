@@ -7,6 +7,7 @@ import Link from 'next/link';
 // По умолчанию свёрнуто — на телефоне ничего не перекрывает и не мешает скроллу.
 
 const MODES: { href: string; label: string; c: string }[] = [
+  { href: '/neurodance', label: 'Хаос Нейро Дэнс', c: '#a855f7' },
   { href: '/splats', label: 'Брейнданс · 4D сплаты', c: '#be78ff' },
   { href: '/attractor', label: 'Хаос-аттрактор · 3D', c: '#d9b8ff' },
   { href: '/handbrain', label: 'Нейро-рука · камера', c: '#ff6ae0' },
