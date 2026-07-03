@@ -1,0 +1,23 @@
+{
+  "name": "GAME — Reality Creator",
+  "short_name": "GAME",
+  "description": "Геймифицированный HUD с AGI-ассистентом: воронка идей, нейро-визуализаторы, автоплан на ядре Max.",
+  "id": "/",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#0a0818",
+  "theme_color": "#0a0818",
+  "lang": "ru",
+  "icons": [
+    { "src": "/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ],
+  "shortcuts": [
+    { "name": "Хаос Нейро Дэнс", "url": "/neurodance", "icons": [{ "src": "/icon-192.png", "sizes": "192x192" }] },
+    { "name": "Брейнданс · 4D сплаты", "url": "/splats", "icons": [{ "src": "/icon-192.png", "sizes": "192x192" }] },
+    { "name": "Воронка → Big Idea", "url": "/funnel", "icons": [{ "src": "/icon-192.png", "sizes": "192x192" }] }
+  ]
+}

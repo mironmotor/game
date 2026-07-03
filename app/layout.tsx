@@ -1,6 +1,7 @@
 import type {Metadata} from 'next';
 import { Orbitron, Roboto_Mono } from 'next/font/google';
 import './globals.css';
+import RegisterSW from '@/components/RegisterSW';
 
 const orbitron = Orbitron({
   subsets: ['latin'],
@@ -17,6 +18,16 @@ const robotoMono = Roboto_Mono({
 export const metadata: Metadata = {
   title: 'GAME — Reality Creator',
   description: 'Геймифицированный HUD с AGI-ассистентом',
+  manifest: '/manifest.webmanifest',
+  icons: {
+    icon: '/icon-192.png',
+    apple: '/icon-180.png',
+  },
+  appleWebApp: {
+    capable: true,
+    statusBarStyle: 'black-translucent',
+    title: 'GAME',
+  },
 };
 
 export const viewport = {
@@ -52,6 +63,7 @@ export default function RootLayout({children}: {children: React.ReactNode}) {
         ` }} />
       </head>
       <body className="font-mono bg-[#0a0818] text-white antialiased" suppressHydrationWarning>
+        <RegisterSW />
         {children}
       </body>
     </html>
