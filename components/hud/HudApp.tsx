@@ -130,6 +130,9 @@ function HudContent() {
   const [voiceOpen, setVoiceOpen] = useState(false);
   const [conversationContext, setConversationContext] = useState('');
   const recognitionRef = useRef<SpeechRecognition | null>(null);
+  const micRef = useRef<{ stream: MediaStream; ctx: AudioContext } | null>(null);
+  const earModeRef = useRef<() => void>(() => {});
+  const [srAvailable, setSrAvailable] = useState(true);
   const systemStateSentRef = useRef(false);
   const knownTaskIdsRef = useRef<Set<string>>(new Set());
   const emittedFailedTaskIdsRef = useRef<Set<string>>(new Set());
@@ -142,6 +145,7 @@ function HudContent() {
   useEffect(() => {
     if (typeof window === 'undefined') return;
     const SR = window.SpeechRecognition ?? window.webkitSpeechRecognition;
+    setSrAvailable(!!SR);
     if (!SR) return;
 
     const rec = new SR();
@@ -161,22 +165,66 @@ function HudContent() {
       }
     };
 
-    rec.onerror = () => setIsListening(false);
+    rec.onerror = (event: Event & { error?: string }) => {
+      setIsListening(false);
+      // На iOS/некоторых браузерах SR есть, но сервис падает сразу (network /
+      // service-not-allowed). Тогда честно включаем микрофон — режим уха.
+      const code = event.error ?? '';
+      if (code && code !== 'aborted' && code !== 'no-speech') {
+        setSrAvailable(false);
+        earModeRef.current();
+      }
+    };
     rec.onend = () => setIsListening(false);
     recognitionRef.current = rec;
   }, []);
 
-  const toggleListen = useCallback(() => {
-    const rec = recognitionRef.current;
-    if (!rec) return;
-    if (isListening) {
-      rec.stop();
-      setIsListening(false);
-    } else {
-      setIsListening(true);
-      rec.start();
+  const stopMicFallback = useCallback(() => {
+    if (micRef.current) {
+      micRef.current.stream.getTracks().forEach((t) => t.stop());
+      micRef.current.ctx.close().catch(() => {});
+      micRef.current = null;
     }
-  }, [isListening]);
+  }, []);
+
+  const toggleListen = useCallback(async () => {
+    if (isListening) {
+      try { recognitionRef.current?.stop(); } catch { /* уже остановлен */ }
+      stopMicFallback();
+      setIsListening(false);
+      return;
+    }
+
+    const rec = recognitionRef.current;
+    if (rec) {
+      try {
+        rec.start();
+        setIsListening(true);
+        return;
+      } catch { /* InvalidState и т.п. — падаем в фолбэк ниже */ }
+    }
+
+    await startEarMode();
+  }, [isListening, stopMicFallback]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Фолбэк «режим уха»: браузер не умеет распознавание (iPhone и др.) —
+  // честно включаем микрофон, чтобы кнопка реально работала и слушала.
+  const startEarMode = useCallback(async () => {
+    if (micRef.current) return;
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const Ctx = window.AudioContext ?? (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
+      const ctx = new Ctx();
+      ctx.createMediaStreamSource(stream); // держим граф живым
+      micRef.current = { stream, ctx };
+      setIsListening(true);
+    } catch {
+      setAgiMessage('Микрофон недоступен: разреши доступ к микрофону для этого сайта (нужен HTTPS) и попробуй ещё раз.');
+    }
+  }, []);
+
+  useEffect(() => { earModeRef.current = () => { void startEarMode(); }; }, [startEarMode]);
+  useEffect(() => () => stopMicFallback(), [stopMicFallback]);
 
   const emitMax17HudEvent = useCallback(
     async (event: Max17HudEvent, surfaceState = false) => {
@@ -353,7 +401,9 @@ function HudContent() {
   }, [balance, emitMax17HudEvent, energy, focus, isLoaded, pendingTasks.length, reputationLevel, tasks]);
 
   const promptText = isListening
-    ? 'Слушаю вас...'
+    ? srAvailable
+      ? 'Слушаю вас...'
+      : 'Режим уха: микрофон включён (распознавание речи в этом браузере недоступно)'
     : isLoading
       ? 'Думаю над ответом...'
       : 'Я слушаю. Что нужно сделать?';

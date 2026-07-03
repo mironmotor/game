@@ -218,11 +218,11 @@
   transition: width 0.6s ease;
 }
 
-/* ── Ядро: многослойный энерго-орб (кнопка голосового вызова) ── */
+/* ── Ядро: кнопка с canvas-сферой из частиц ── */
 .hud-orb {
   position: relative;
-  width: 118px;
-  height: 118px;
+  width: 150px;
+  height: 150px;
   display: grid;
   place-items: center;
   background: none;
@@ -235,117 +235,51 @@
 
 .hud-orb:active { transform: scale(0.94); }
 
-.hud-orb > * {
+.hud-orb-canvas {
   position: absolute;
-  border-radius: 50%;
-}
-
-/* пульсирующее гало */
-.hud-orb-halo {
-  inset: -34px;
-  background: radial-gradient(circle,
-    rgba(0, 242, 255, 0.22) 0%,
-    rgba(168, 85, 247, 0.16) 40%,
-    transparent 70%);
-  filter: blur(10px);
-  animation: hud-halo 3.2s ease-in-out infinite;
-}
-
-@keyframes hud-halo {
-  0%, 100% { transform: scale(1); opacity: 0.8; }
-  50% { transform: scale(1.18); opacity: 1; }
-}
-
-/* энерго-кольцо: вращающийся градиентный обод */
-.hud-orb-ring1 {
   inset: 0;
-  background: conic-gradient(from 0deg,
-    transparent 0deg, rgba(0, 242, 255, 0.9) 60deg, transparent 130deg,
-    rgba(168, 85, 247, 0.9) 220deg, transparent 300deg, transparent 360deg);
-  -webkit-mask: radial-gradient(farthest-side, transparent calc(100% - 3px), #000 calc(100% - 2px));
-  mask: radial-gradient(farthest-side, transparent calc(100% - 3px), #000 calc(100% - 2px));
-  animation: hud-spin 4s linear infinite;
-  filter: drop-shadow(0 0 6px rgba(0, 242, 255, 0.7));
-}
-
-/* встречное пунктирное кольцо */
-.hud-orb-ring2 {
-  inset: 12px;
-  border: 1px dashed rgba(217, 70, 239, 0.55);
-  animation: hud-spin-rev 9s linear infinite;
-}
-
-@keyframes hud-spin { to { transform: rotate(360deg); } }
-@keyframes hud-spin-rev { to { transform: rotate(-360deg); } }
-
-/* орбитальные частицы */
-.hud-orb-particles {
-  inset: -6px;
-  animation: hud-spin 7s linear infinite;
-}
-
-.hud-orb-particles i {
-  position: absolute;
-  top: 50%;
-  left: 50%;
-  width: 5px;
-  height: 5px;
+  width: 100%;
+  height: 100%;
   border-radius: 50%;
-  background: #9ff5ff;
-  box-shadow: 0 0 8px rgba(0, 242, 255, 0.9);
+  filter: drop-shadow(0 0 26px rgba(168, 85, 247, 0.45));
 }
 
-.hud-orb-particles i:nth-child(1) { transform: rotate(0deg) translateX(62px); }
-.hud-orb-particles i:nth-child(2) { transform: rotate(60deg) translateX(62px); background: #e9b8ff; box-shadow: 0 0 8px rgba(168,85,247,0.9); }
-.hud-orb-particles i:nth-child(3) { transform: rotate(120deg) translateX(62px); }
-.hud-orb-particles i:nth-child(4) { transform: rotate(180deg) translateX(62px); background: #ff9df0; box-shadow: 0 0 8px rgba(217,70,239,0.9); }
-.hud-orb-particles i:nth-child(5) { transform: rotate(240deg) translateX(62px); }
-.hud-orb-particles i:nth-child(6) { transform: rotate(300deg) translateX(62px); background: #e9b8ff; box-shadow: 0 0 8px rgba(168,85,247,0.9); }
-
-/* само ядро: живая сфера с дыханием и переливом */
-.hud-orb-core {
-  width: 62px;
-  height: 62px;
-  background:
-    radial-gradient(circle at 32% 28%, rgba(255, 255, 255, 1) 0%, rgba(255, 255, 255, 0.9) 18%, rgba(190, 225, 255, 0.55) 45%, rgba(150, 120, 255, 0.25) 68%, transparent 76%),
-    radial-gradient(circle at 68% 72%, rgba(168, 85, 247, 0.5) 0%, transparent 55%);
-  box-shadow:
-    0 0 34px rgba(255, 255, 255, 0.65),
-    0 0 70px rgba(0, 242, 255, 0.4),
-    0 0 110px rgba(168, 85, 247, 0.4);
-  animation: hud-core 2.8s ease-in-out infinite;
+.hud-orb.listening .hud-orb-canvas {
+  filter: drop-shadow(0 0 34px rgba(0, 242, 255, 0.6));
 }
 
-@keyframes hud-core {
-  0%, 100% { transform: scale(1); filter: hue-rotate(0deg) brightness(1); }
-  50% { transform: scale(1.08); filter: hue-rotate(28deg) brightness(1.12); }
-}
-
-/* треугольник по центру ядра */
+/* треугольник по центру ядра — радуга */
 .hud-orb-tri {
   position: relative;
   z-index: 2;
-  width: 0;
-  height: 0;
-  border-left: 11px solid transparent;
-  border-right: 11px solid transparent;
-  border-bottom: 19px solid rgba(20, 8, 40, 0.9);
-  filter: drop-shadow(0 0 6px rgba(168, 85, 247, 0.8));
-  transform: translateY(-1px);
-  transition: transform 0.25s ease, border-bottom-color 0.25s ease;
-  border-radius: 0;
+  width: 26px;
+  height: 23px;
+  clip-path: polygon(50% 0%, 100% 100%, 0% 100%);
+  background: linear-gradient(135deg, #ff3b3b, #ff9f1c, #ffe14d, #3bff6f, #35d0ff, #7a5cff, #ff4de3);
+  background-size: 300% 300%;
+  animation: hud-rainbow 3s linear infinite;
+  filter: drop-shadow(0 0 8px rgba(255, 255, 255, 0.55));
+  transition: transform 0.25s ease;
 }
 
-.hud-orb:hover .hud-orb-tri { transform: translateY(-1px) scale(1.12); }
+@keyframes hud-rainbow {
+  0% { background-position: 0% 50%; }
+  50% { background-position: 100% 50%; }
+  100% { background-position: 0% 50%; }
+}
+
+.hud-orb:hover .hud-orb-tri { transform: scale(1.14); }
 
 .hud-orb.listening .hud-orb-tri {
-  border-bottom-color: #00f2ff;
-  filter: drop-shadow(0 0 10px rgba(0, 242, 255, 1));
+  animation-duration: 0.9s;
+  filter: drop-shadow(0 0 12px rgba(0, 242, 255, 0.9));
 }
 
 /* сонар-кольца «режима уха» — расходятся от ядра, когда слушает */
 .hud-orb-sonar {
+  position: absolute;
   inset: 18px;
+  border-radius: 50%;
   border: 1.5px solid rgba(0, 242, 255, 0.7);
   animation: hud-sonar 1.6s ease-out infinite;
   pointer-events: none;
@@ -359,11 +293,7 @@
   100% { transform: scale(2.6); opacity: 0; }
 }
 
-/* режим прослушивания — ускоряем всё и подсвечиваем цианом */
-.hud-orb.listening .hud-orb-core { animation-duration: 0.8s; box-shadow: 0 0 40px rgba(0, 242, 255, 0.85), 0 0 90px rgba(0, 242, 255, 0.5), 0 0 130px rgba(168, 85, 247, 0.5); }
-.hud-orb.listening .hud-orb-ring1 { animation-duration: 1.2s; }
-.hud-orb.listening .hud-orb-particles { animation-duration: 2s; }
-.hud-orb.listening .hud-orb-halo { animation-duration: 1s; }
+
 
 .hud-prompt {
   font-size: 13px;
@@ -578,15 +508,7 @@
     gap: 12px;
   }
 
-  .hud-orb { width: 96px; height: 96px; }
-  .hud-orb-core { width: 52px; height: 52px; }
-  .hud-orb-particles i { transform-origin: center; }
-  .hud-orb-particles i:nth-child(1) { transform: rotate(0deg) translateX(50px); }
-  .hud-orb-particles i:nth-child(2) { transform: rotate(60deg) translateX(50px); }
-  .hud-orb-particles i:nth-child(3) { transform: rotate(120deg) translateX(50px); }
-  .hud-orb-particles i:nth-child(4) { transform: rotate(180deg) translateX(50px); }
-  .hud-orb-particles i:nth-child(5) { transform: rotate(240deg) translateX(50px); }
-  .hud-orb-particles i:nth-child(6) { transform: rotate(300deg) translateX(50px); }
+  .hud-orb { width: 124px; height: 124px; }
 
   .hud-time { font-size: 2rem; }
   .hud-rank-number { font-size: 1.6rem; }

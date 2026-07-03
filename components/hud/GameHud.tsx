@@ -16,6 +16,7 @@ import {
   Users,
 } from 'lucide-react';
 import { HudPanel } from './HudPanel';
+import CoreOrb from './CoreOrb';
 import type { Task } from '@/hooks/use-game-state';
 
 export type HudNavId = 'inventory' | 'skills' | 'codex' | 'quests' | 'friends';
@@ -312,13 +313,7 @@ export function GameHud({
             aria-label={isListening ? 'Выключить режим уха' : 'Голосовой вызов — режим уха'}
             aria-pressed={isListening}
           >
-            <span className="hud-orb-halo" />
-            <span className="hud-orb-ring1" />
-            <span className="hud-orb-ring2" />
-            <span className="hud-orb-particles">
-              <i /><i /><i /><i /><i /><i />
-            </span>
-            <span className="hud-orb-core" />
+            <CoreOrb listening={isListening} />
             <span className="hud-orb-tri" />
             {isListening && (
               <>
