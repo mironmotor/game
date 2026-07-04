@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import { generateSparks, synthesizeBigIdea, type FunnelSeed, type BigIdea } from '@/lib/funnel';
+import { generateSparks, synthesizeBigIdea, generateViaMax, type FunnelSeed, type BigIdea } from '@/lib/funnel';
 import './funnel.css';
 
 type Phase = 'idle' | 'sparking' | 'synthesizing' | 'done' | 'error';
@@ -57,6 +57,19 @@ export default function FunnelApp() {
     setSparks([]);
     try {
       setPhase('sparking');
+
+      // Сначала — ядро Max (мост): ключ в браузере не нужен.
+      const viaMax = await generateViaMax(seed);
+      if (viaMax) {
+        setSparks(viaMax.sparks);
+        setPhase('synthesizing');
+        await new Promise((r) => setTimeout(r, 600)); // дать искрам упасть
+        setIdea(viaMax.idea);
+        setPhase('done');
+        return;
+      }
+
+      // Запасной путь: прямой вызов LLM из браузера (нужен NEXT_PUBLIC-ключ).
       const newSparks = await generateSparks(seed);
       setSparks(newSparks);
 
@@ -65,7 +78,10 @@ export default function FunnelApp() {
       setIdea(bigIdea);
       setPhase('done');
     } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : 'Что-то пошло не так');
+      setError(
+        (e instanceof Error ? e.message : 'Что-то пошло не так') +
+          ' · Ядро Max недоступно и нет браузерного ключа. Подними мост (MAX17_BRIDGE_URL) или задай NEXT_PUBLIC_GEMINI_API_KEY.',
+      );
       setPhase('error');
     }
   }

@@ -71,6 +71,41 @@ async function callOpenRouter(systemPrompt: string, userPrompt: string, temperat
   return data.choices?.[0]?.message?.content || "";
 }
 
+// ПУТЬ 0 — ядро Max: идею генерит мост (Qwen на M3 / OpenRouter / детерминированное
+// ядро). Ключ в браузере не нужен. Возвращает null, если мост недоступен.
+export async function generateViaMax(seed: FunnelSeed): Promise<{ sparks: string[]; idea: BigIdea; source: string } | null> {
+  try {
+    const base = process.env.NEXT_PUBLIC_BASE_PATH ?? '';
+    const res = await fetch(`${base}/api/max17`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ type: 'big_idea', ...seed }),
+    });
+    const data = await res.json();
+    const big = data?.big_idea;
+    if (!big?.ok || !big.idea?.name) return null;
+    const idea = big.idea as Record<string, unknown>;
+    return {
+      sparks: (big.sparks as string[]) ?? [],
+      source: String(big.source ?? 'max'),
+      idea: {
+        name: String(idea.name ?? ''),
+        tagline: String(idea.tagline ?? ''),
+        problem: String(idea.problem ?? ''),
+        solution: String(idea.solution ?? ''),
+        whoFor: String(idea.whoFor ?? ''),
+        whyNow: String(idea.whyNow ?? ''),
+        magic: String(idea.magic ?? ''),
+        firstStep: String(idea.firstStep ?? ''),
+        boldness: Math.max(1, Math.min(10, Number(idea.boldness) || 5)),
+        scale: Math.max(1, Math.min(10, Number(idea.scale) || 5)),
+      },
+    };
+  } catch {
+    return null;
+  }
+}
+
 // СТАДИЯ 1 — широкое горло воронки: генерируем много сырых искр (фрагментов идеи).
 export async function generateSparks(seed: FunnelSeed): Promise<string[]> {
   const system = `Ты — генератор сырых креативных «искр» для стартап-идей.

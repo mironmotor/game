@@ -16,6 +16,7 @@ const ALLOWED_EVENTS = new Set([
   'voice_state',
   'auto_plan',
   'synapse_graph',
+  'big_idea',
 ]);
 
 const DEFAULT_RESPONSE = {

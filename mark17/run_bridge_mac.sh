@@ -66,6 +66,12 @@ cleanup() {
 }
 trap cleanup EXIT INT TERM
 
+# Мак не должен засыпать, пока мост жив (только macOS)
+if command -v caffeinate >/dev/null 2>&1; then
+  caffeinate -dimsu -w $$ &
+  say "caffeinate включён — Мак не заснёт, пока работает мост"
+fi
+
 say "стартую мост Max17 на :$PORT (лог: $SERVER_LOG)"
 PORT="$PORT" \
 MAX17_BRIDGE_TOKEN="$TOKEN" \
@@ -108,6 +114,19 @@ say "BRIDGE URL : ${PUBLIC_URL:-http://127.0.0.1:$PORT}"
 say "TOKEN      : $TOKEN"
 say "LLM        : $([ "$LLM_ENABLED" = true ] && echo "ollama / $MODEL" || echo "выключен (детерминированный)")"
 echo
+# Автопрописывание в Vercel: работает, если `vercel login` сделан и проект слинкован
+if [ -n "$PUBLIC_URL" ] && command -v vercel >/dev/null 2>&1 && [ -d "$ROOT/.vercel" ]; then
+  say "обновляю MAX17_BRIDGE_URL в Vercel автоматически…"
+  (cd "$ROOT" \
+    && vercel env rm MAX17_BRIDGE_URL production --yes >/dev/null 2>&1 || true \
+    && printf %s "$PUBLIC_URL" | vercel env add MAX17_BRIDGE_URL production >/dev/null 2>&1 \
+    && vercel env rm MAX17_BRIDGE_TOKEN production --yes >/dev/null 2>&1 || true \
+    && printf %s "$TOKEN" | vercel env add MAX17_BRIDGE_TOKEN production >/dev/null 2>&1 \
+    && vercel --prod --yes >/dev/null 2>&1 \
+    && say "Vercel обновлён и передеплоен — прод смотрит на этот мост") \
+    || warn "не удалось обновить Vercel автоматически — пропиши env руками (команды ниже)"
+fi
+
 if [ -n "$PUBLIC_URL" ]; then
   say "проверка:  curl $PUBLIC_URL/health"
   echo

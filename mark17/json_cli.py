@@ -27,6 +27,7 @@ from mark17.synapse_graph import SynapseGraph
 from mark17.consolidation import ConsolidationEngine
 from mark17.voice_state import VoiceProfiles, process_voice_event
 from mark17.planner import build_plan
+from mark17.big_idea import generate as generate_big_idea
 
 ALLOWED_EVENTS = frozenset(
     {
@@ -40,6 +41,7 @@ ALLOWED_EVENTS = frozenset(
         "voice_state",
         "auto_plan",
         "synapse_graph",
+        "big_idea",
     }
 )
 
@@ -78,6 +80,9 @@ def _as_event(data: dict[str, Any]) -> Event:
     elif event_type == "auto_plan":
         goal = data.get("goal") or data.get("message") or data.get("text") or ""
         payload["goal"] = str(goal)
+    elif event_type == "big_idea":
+        for key in ("domain", "audience", "trend", "twist"):
+            payload[key] = str(data.get(key) or "")
 
     return Event(
         type=event_type,
@@ -250,6 +255,9 @@ def normalize(result: dict[str, Any]) -> dict[str, Any]:
     graph = result.get("graph")
     if isinstance(graph, dict):
         normalized["graph"] = graph
+    big = result.get("big_idea")
+    if isinstance(big, dict):
+        normalized["big_idea"] = big
     return normalized
 
 
@@ -307,6 +315,8 @@ def _handle_event(event: Event, args: argparse.Namespace, state_dir: Path) -> di
         return _handle_voice_state(event, brain, vector_memory, synapse_graph, state_dir)
     if event.type == "auto_plan":
         return _handle_auto_plan(event, brain, vector_memory, synapse_graph)
+    if event.type == "big_idea":
+        return _handle_big_idea(event, brain, synapse_graph)
     if event.type == "synapse_graph":
         return _handle_synapse_graph(event, synapse_graph)
 
@@ -365,6 +375,34 @@ def _handle_synapse_graph(event: Event, synapse_graph: SynapseGraph) -> dict[str
         "next_adaptation": "Реальные синапсы ядра Max растут по мере использования системы.",
         "self_evaluation": {"score": 1.0, "reason": "synapse graph export", "store_memory": False, "reinforce": "synapse_graph"},
     }
+
+
+def _handle_big_idea(event: Event, brain: Mark17Brain, synapse_graph: SynapseGraph) -> dict[str, Any]:
+    """Big Idea через ядро: LLM моста (Qwen/OpenRouter) или детерминированный фолбэк."""
+    seed = {k: str(event.payload.get(k) or "") for k in ("domain", "audience", "trend", "twist")}
+    result_idea = generate_big_idea(seed, brain.llm)
+    result: dict[str, Any] = {
+        "ok": True,
+        "event_type": event.type,
+        "route": "big_idea",
+        "big_idea": result_idea,
+        "memory": {"hint": result_idea["idea"].get("tagline", "")},
+        "plasticity": {"confidence": 0.9 if result_idea["source"].startswith("llm") else 0.6,
+                        "action": "big_idea", "learned": True},
+        "llm": {"status": "ok" if result_idea["source"].startswith("llm") else "skipped",
+                "text": f"source={result_idea['source']}", "latency_ms": 0.0},
+        "next_adaptation": result_idea["idea"].get("firstStep", ""),
+        "self_evaluation": {"score": 0.8, "reason": f"big idea via {result_idea['source']}",
+                             "store_memory": True, "reinforce": "big_idea"},
+    }
+    result["synapses"] = synapse_graph.update_from_event(event, result, result["self_evaluation"])
+    brain.memory.remember(
+        Event(type="remember", payload={"note": result_idea["idea"].get("tagline", ""),
+                                          "seed": seed, "reinforce": "big_idea"}, source="funnel"),
+        hint=result_idea["idea"].get("tagline", ""), action="big_idea",
+    )
+    brain.plasticity.save()
+    return result
 
 
 def _handle_auto_plan(
