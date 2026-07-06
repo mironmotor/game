@@ -14,8 +14,17 @@ service cloud.firestore {
     // Users Collection
     match /users/{userId} {
       allow read: if isOwner(userId);
-      allow create: if isOwner(userId) && request.resource.data.uid == userId;
-      allow update: if isOwner(userId) && request.resource.data.uid == resource.data.uid;
+
+      // On create, a user may only give themselves the free tier — never pro.
+      allow create: if isOwner(userId)
+        && request.resource.data.tier == 'free';
+
+      // On update, the user may change their own doc but NOT their tier: the
+      // tier must stay exactly what it was. Only trusted backend (Stripe
+      // webhook via the Admin SDK, which bypasses these rules) can raise it.
+      allow update: if isOwner(userId)
+        && request.resource.data.tier == resource.data.tier;
+
       allow delete: if false; // Users shouldn't be deleted directly from client
       
       // Tasks Subcollection
