@@ -160,3 +160,95 @@ class AnnIndex:
             return cls(data["centroids"], data["assignments"], int(data["n_built"]))
         except Exception:  # noqa: BLE001 - a corrupt cache just rebuilds
             return None
+
+
+# --------------------------------------------------------------------------- #
+# HNSW full-corpus index (hnswlib). Unlike the IVF above (which narrows within
+# the in-RAM capped matrix), this indexes ALL memory vectors by their sqlite id
+# and returns (ids, sims) over the WHOLE corpus — recall then fetches meta only
+# for the returned top-k, so search scales past RECALL_CAP toward 1M without
+# loading all meta into RAM. Optional: if hnswlib is missing or anything fails,
+# VectorMemory falls back to the exact capped-matrix path.
+# --------------------------------------------------------------------------- #
+
+try:
+    import hnswlib  # type: ignore
+
+    _HNSW_OK = True
+except Exception:  # noqa: BLE001
+    _HNSW_OK = False
+
+# Below this many memories, the exact cosine over the capped matrix is already
+# sub-millisecond — HNSW earns its keep only when the corpus exceeds the cap.
+try:
+    HNSW_MIN_ROWS = max(1000, int(os.environ.get("MAX17_HNSW_MIN_ROWS", "5000")))
+except (TypeError, ValueError):
+    HNSW_MIN_ROWS = 5000
+
+
+class HnswIndex:
+    """Full-corpus ANN over all memory vectors (hnswlib, cosine). Labels = ids."""
+
+    def __init__(self, index: "object", dim: int, built_max_id: int) -> None:
+        self._idx = index
+        self.dim = int(dim)
+        self.built_max_id = int(built_max_id)
+
+    @staticmethod
+    def available() -> bool:
+        return _HNSW_OK
+
+    @classmethod
+    def build(cls, matrix: np.ndarray, ids: list[int], built_max_id: int) -> "HnswIndex | None":
+        if not _HNSW_OK or matrix.shape[0] == 0 or not ids:
+            return None
+        try:
+            n, dim = int(matrix.shape[0]), int(matrix.shape[1])
+            idx = hnswlib.Index(space="cosine", dim=dim)
+            idx.init_index(max_elements=max(n * 2, 1024), ef_construction=200, M=16)
+            idx.add_items(matrix.astype(np.float32, copy=False), np.asarray(ids, dtype=np.int64))
+            idx.set_ef(64)
+            return cls(idx, dim, built_max_id)
+        except Exception:  # noqa: BLE001
+            return None
+
+    def add(self, vector: list[float], row_id: int) -> None:
+        try:
+            if self._idx.get_current_count() >= self._idx.get_max_elements():
+                self._idx.resize_index(self._idx.get_max_elements() * 2)
+            self._idx.add_items(
+                np.asarray([vector], dtype=np.float32), np.asarray([row_id], dtype=np.int64)
+            )
+        except Exception:  # noqa: BLE001
+            pass
+
+    def query(self, vector: list[float], k: int) -> tuple[list[int], list[float]]:
+        try:
+            count = int(self._idx.get_current_count())
+            if count == 0:
+                return [], []
+            k = max(1, min(int(k), count))
+            labels, dist = self._idx.knn_query(np.asarray([vector], dtype=np.float32), k=k)
+            ids = [int(x) for x in labels[0].tolist()]
+            sims = [1.0 - float(d) for d in dist[0].tolist()]  # cosine space: dist = 1 - cos
+            return ids, sims
+        except Exception:  # noqa: BLE001
+            return [], []
+
+    def save(self, path: Path) -> None:
+        try:
+            self._idx.save_index(str(path))
+        except Exception:  # noqa: BLE001
+            pass
+
+    @classmethod
+    def load(cls, path: Path, dim: int, count_hint: int, built_max_id: int) -> "HnswIndex | None":
+        if not _HNSW_OK or not Path(path).exists():
+            return None
+        try:
+            idx = hnswlib.Index(space="cosine", dim=int(dim))
+            idx.load_index(str(path), max_elements=max(count_hint * 2, 1024))
+            idx.set_ef(64)
+            return cls(idx, dim, built_max_id)
+        except Exception:  # noqa: BLE001
+            return None

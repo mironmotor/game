@@ -18,3 +18,11 @@ mark17/state/*.db
 code-workspace/
 
 out/
+
+# Local HTTPS material generated for phone access over Wi-Fi.
+certificates/lan-*
+public/game-lan-ca.*
+.vercel
+
+# secret notes (bot token, api keys) — keep out of git
+*.rtf

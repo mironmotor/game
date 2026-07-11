@@ -96,6 +96,19 @@ export function useGameState() {
     setRank(Math.max(1, 10000 - Math.floor(xp / 10)));
   }, [xp]);
 
+  // Cross-instance sync: when any consumer changes tasks/xp (e.g. the Angels
+  // panel takes a task into work), other mounted instances — the HUD missions —
+  // reload from storage so the change is reflected live in the same tab.
+  useEffect(() => {
+    const onSync = () => {
+      setTasks(loadFromStorage<Task[]>(STORAGE_KEYS.tasks, []));
+      setXp(loadFromStorage<number>(STORAGE_KEYS.xp, 0));
+      setDailyHistory(loadFromStorage<DailyXP[]>(STORAGE_KEYS.history, []));
+    };
+    window.addEventListener('game:tasks-sync', onSync);
+    return () => window.removeEventListener('game:tasks-sync', onSync);
+  }, []);
+
   const launchGame = useCallback(async () => {
     const now = new Date().toISOString();
     setLastLaunch(now);
@@ -126,6 +139,15 @@ export function useGameState() {
   const updateTasks = useCallback(async (newTasks: Task[]) => {
     setTasks(newTasks);
     saveToStorage(STORAGE_KEYS.tasks, newTasks);
+  }, []);
+
+  // Append tasks (used by the MAX orchestrator to "take work into the system").
+  const addTasks = useCallback(async (newTasks: Task[]) => {
+    setTasks(prev => {
+      const updated = [...prev, ...newTasks];
+      saveToStorage(STORAGE_KEYS.tasks, updated);
+      return updated;
+    });
   }, []);
 
   const completeTask = useCallback(async (taskId: string): Promise<boolean> => {
@@ -215,7 +237,7 @@ export function useGameState() {
     });
   }, []);
 
-  const executeTaskWithAi = useCallback(async (taskId: string, prompt: string) => {
+  const executeTaskWithAi = useCallback(async (taskId: string, prompt?: string) => {
     // placeholder — handled in component
   }, []);
 
@@ -232,6 +254,7 @@ export function useGameState() {
     launchGame,
     addXp,
     updateTasks,
+    addTasks,
     completeTask,
     setTaskActive,
     deleteTasks,

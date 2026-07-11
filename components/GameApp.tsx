@@ -8,8 +8,6 @@ import { getGeminiResponse, getGeminiResponseStream } from '@/lib/gemini';
 import { useGameState, Task, Message as GameMessage } from '@/hooks/use-game-state';
 import { useBinauralBeats, AuraFrequency } from '@/hooks/use-binaural-beats';
 import { AuraBackground } from '@/components/AuraVisualizer';
-// firebase stub imported for any remaining references
-import '@/firebase';
 
 import Image from 'next/image';
 
@@ -389,7 +387,7 @@ function GameContent() {
         if (sessionMessages.length === 0) {
           try {
             const { getGeminiResponse } = await import('@/lib/gemini');
-            const titleResponse = await getGeminiResponse(`Сгенерируй короткое название (2-4 слова) для начала диалога: "${userMsg}"`, [], '', 'Ты генератор названий. Отвечай только названием, без кавычек.');
+            const titleResponse = await getGeminiResponse(`Сгенерируй короткое название (2-4 слова) для начала диалога: "${userMsg}"`, [], 'Ты генератор названий. Отвечай только названием, без кавычек.');
             if (titleResponse) {
               await updateSessionTitle(currentAgiSessionId, titleResponse.trim());
             }
@@ -499,7 +497,7 @@ function GameContent() {
         if (sessionMessages.length === 0) {
           try {
             const { getGeminiResponse } = await import('@/lib/gemini');
-            const titleResponse = await getGeminiResponse(`Сгенерируй короткое название (2-4 слова) для теста: "${userMsg}"`, [], '', 'Ты генератор названий.');
+            const titleResponse = await getGeminiResponse(`Сгенерируй короткое название (2-4 слова) для теста: "${userMsg}"`, [], 'Ты генератор названий.');
             if (titleResponse) {
               await updateSessionTitle(finalSessionId, titleResponse.trim());
             }
@@ -554,7 +552,8 @@ function GameContent() {
       }
       
       const activeTasks = tasks.filter(t => t.status !== 'completed' && t.status !== 'failed');
-      
+      let initialMsg = '';
+
       if (activeTasks.length > 0) {
         const simpleTasks = activeTasks.filter(t => t.mgr === 'MGR-1').map(t => `- ${t.desc}`).join('\n');
         const mediumTasks = activeTasks.filter(t => t.mgr === 'MGR-2').map(t => `- ${t.desc}`).join('\n');
@@ -565,6 +564,7 @@ function GameContent() {
         if (mediumTasks) taskContext += `Средние (MGR-2):\n${mediumTasks}\n`;
         if (hardTasks) taskContext += `Сложные (MGR-3):\n${hardTasks}\n`;
 
+        let initialMsg: string;
         initialMsg = `[СИСТЕМА: ПРОДОЛЖЕНИЕ СЕССИИ] Пользователь вернулся. Энергия: ${mode}.
 Активные задачи:
 ${taskContext}
@@ -723,7 +723,7 @@ ${taskContext}
         if (activeSessionId && sessionMessages.length === 0) {
           try {
             const { getGeminiResponse } = await import('@/lib/gemini');
-            const titleResponse = await getGeminiResponse(`Сгенерируй очень короткое название (2-4 слова) для этого диалога: "${userMsg}"`, [], '', 'Ты генератор названий. Отвечай только названием, без кавычек.');
+            const titleResponse = await getGeminiResponse(`Сгенерируй очень короткое название (2-4 слова) для этого диалога: "${userMsg}"`, [], 'Ты генератор названий. Отвечай только названием, без кавычек.');
             if (titleResponse) {
               await updateSessionTitle(activeSessionId, titleResponse.trim());
             }

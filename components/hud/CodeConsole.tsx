@@ -69,6 +69,13 @@ export function CodeConsole({
           source: 'code_mode',
         }).catch(() => {});
       }
+      // №4: успех/провал агента → ЗАРАБОТАННЫЙ синапс (validated outcome).
+      void sendMax17Event({
+        type: 'agent_experience',
+        agent: 'code',
+        text,
+        ok: Boolean(result.ok),
+      }).catch(() => {});
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       setTurns((prev) => prev.map((t, i) => (i === index ? { ...t, error: message } : t)));

@@ -17,13 +17,35 @@ import { CodeConsole } from './CodeConsole';
 import { DesktopConsole } from './DesktopConsole';
 import { ArchitectConsole } from './ArchitectConsole';
 import { ModelSwitcher } from './ModelSwitcher';
+import { initJarvis } from '@/lib/jarvis-voice';
+import { getPersona, speakNeural } from '@/lib/neural-voice';
 import './hud.css';
+
+// Приветствие при входе в Игру — зависит от выбранной персоны.
+const GREETINGS = {
+  jarvis: 'Добро пожаловать в Игру, сэр. Чем мы сегодня займёмся для реализации твоего потенциала?',
+  friday: 'С возвращением, босс. Я Пятница, на связи. С чего начнём сегодня?',
+} as const;
 
 const AGI_INTRO =
   'Цифровой агент нового поколения, созданный помогать вам достигать целей и решать сложные задачи. GAME анализирует контекст, предлагает квесты и ведёт вас к результату.';
 
 type Max17HudEvent = Record<string, unknown>;
 type CameraStatus = 'off' | 'starting' | 'active' | 'error';
+type GodModeAction =
+  | 'chat'
+  | 'stars'
+  | 'import'
+  | 'map'
+  | 'dream'
+  | 'neural'
+  | 'status'
+  | 'evolution'
+  | 'council'
+  | 'kickoff'
+  | 'sleep'
+  | 'all'
+  | 'reset';
 
 // Voice-movable camera positions (full literal classes so Tailwind JIT keeps them).
 const CAMERA_POS: Record<'bottom' | 'left' | 'right' | 'top', string> = {
@@ -57,6 +79,17 @@ interface CameraFrameAnalysis {
   luminance: number[];
 }
 
+interface PrivateReflectionPayload {
+  trigger: string;
+  ok: boolean;
+  userText?: string;
+  route?: string;
+  confidence?: number;
+  next?: string;
+  error?: string;
+  latencyMs?: number;
+}
+
 class FirestoreErrorBoundary extends Component<{ children: ReactNode }, { hasError: boolean; errorInfo: unknown }> {
   constructor(props: { children: ReactNode }) {
     super(props);
@@ -64,11 +97,20 @@ class FirestoreErrorBoundary extends Component<{ children: ReactNode }, { hasErr
   }
 
   static getDerivedStateFromError(error: Error) {
+    // The HUD's data path throws plain Error objects (e.g. an empty or failed
+    // /api/max17 response), so don't assume error.message is JSON. Use a parsed
+    // object only when it actually decodes to one carrying an `error` field;
+    // otherwise fall back to the raw message.
+    let parsed: unknown = null;
     try {
-      return { hasError: true, errorInfo: JSON.parse(error.message) };
+      parsed = JSON.parse(error.message);
     } catch {
-      return { hasError: true, errorInfo: { error: error.message } };
+      parsed = null;
     }
+    if (parsed && typeof parsed === 'object' && 'error' in parsed) {
+      return { hasError: true, errorInfo: parsed };
+    }
+    return { hasError: true, errorInfo: { error: error.message } };
   }
 
   componentDidCatch(error: Error, errorInfo: ErrorInfo) {
@@ -113,6 +155,11 @@ function getLlmText(response: Max17Response) {
   if (typeof text !== 'string') return '';
   if (response.llm?.status === 'skipped') return '';
   return text.trim();
+}
+
+function getSecureGameUrl() {
+  if (typeof window === 'undefined') return 'https://<IP этого Mac>:3002/game';
+  return `https://${window.location.hostname}:3002/game`;
 }
 
 function formatRecalledMemory(response: Max17Response) {
@@ -381,6 +428,7 @@ function HudContent() {
   const lastActivityRef = useRef<number>(Date.now());
   const lastGrowRef = useRef<number>(0);
   const isLoadingRef = useRef<boolean>(false);
+  const privateReflectionRef = useRef<{ lastAt: number; lastKey: string }>({ lastAt: 0, lastKey: '' });
   // Music ears (Phase 9): while ON, ~20s listening windows go to the core as
   // music_observation — Max evaluates tracks (кайф-скор) and grows taste.
   const musicRef = useRef<MusicDecomposer | null>(null);
@@ -428,6 +476,31 @@ function HudContent() {
     return () => clearInterval(t);
   }, []);
 
+  // Client-error ring buffer for the Doctor dashboard. Browser JS errors and
+  // unhandled promise rejections are logged to window.__maxClientErrors (last 20);
+  // the /доктор sweep reads them and surfaces them as GAME health issues.
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const w = window as unknown as { __maxClientErrors?: string[] };
+    if (!Array.isArray(w.__maxClientErrors)) w.__maxClientErrors = [];
+    const push = (msg: string) => {
+      const buf = w.__maxClientErrors!;
+      buf.push(`${new Date().toISOString()} ${msg}`.slice(0, 240));
+      if (buf.length > 20) buf.splice(0, buf.length - 20);
+    };
+    const onError = (e: ErrorEvent) => push(`error: ${e.message || 'unknown'}`);
+    const onRej = (e: PromiseRejectionEvent) => {
+      const r = e.reason;
+      push(`unhandled: ${r instanceof Error ? r.message : String(r)}`);
+    };
+    window.addEventListener('error', onError);
+    window.addEventListener('unhandledrejection', onRej);
+    return () => {
+      window.removeEventListener('error', onError);
+      window.removeEventListener('unhandledrejection', onRej);
+    };
+  }, []);
+
   useEffect(() => {
     if (typeof window === 'undefined') return;
     const SR = window.SpeechRecognition ?? window.webkitSpeechRecognition;
@@ -456,8 +529,15 @@ function HudContent() {
   }, []);
 
   const toggleListen = useCallback(() => {
+    if (typeof window !== 'undefined' && !window.isSecureContext) {
+      setAgiMessage(`MAX17: микрофон заблокирован HTTP. Открой ${getSecureGameUrl()} в Safari.`);
+      return;
+    }
     const rec = recognitionRef.current;
-    if (!rec) return;
+    if (!rec) {
+      setAgiMessage('MAX17: этот браузер не поддерживает голосовой ввод. Открой GAME напрямую в Safari, не во встроенном браузере мессенджера.');
+      return;
+    }
     if (isListening) {
       rec.stop();
       setIsListening(false);
@@ -472,30 +552,15 @@ function HudContent() {
       if (!isSpeechEnabled || typeof window === 'undefined' || !window.speechSynthesis) return;
       const cleanText = text.replace(/\s+/g, ' ').trim();
       if (!cleanText) return;
-
-      window.speechSynthesis.cancel();
-      const utterance = new SpeechSynthesisUtterance(cleanText);
-      utterance.lang = 'ru-RU';
-      utterance.rate = 0.95;
-      utterance.pitch = 0.92;
-      utterance.onstart = () => setIsSpeaking(true);
-      utterance.onend = () => setIsSpeaking(false);
-      utterance.onerror = () => setIsSpeaking(false);
-      window.speechSynthesis.speak(utterance);
+      // Neural ElevenLabs voice (JARVIS/Пятница), with system-voice fallback;
+      // both paths emit max:speaking so the arc-reactor/core glow under speech.
+      void speakNeural(cleanText, {
+        onStart: () => setIsSpeaking(true),
+        onEnd: () => setIsSpeaking(false),
+      });
     },
     [isSpeechEnabled],
   );
-
-  const toggleSpeech = useCallback(() => {
-    setIsSpeechEnabled((enabled) => {
-      const next = !enabled;
-      if (enabled && typeof window !== 'undefined' && window.speechSynthesis) {
-        window.speechSynthesis.cancel();
-        setIsSpeaking(false);
-      }
-      return next;
-    });
-  }, []);
 
   // Short rising "beep" so waking is felt even with TTS off.
   const playCue = useCallback(() => {
@@ -523,6 +588,24 @@ function HudContent() {
       // audio cue is best-effort
     }
   }, []);
+
+  const toggleSpeech = useCallback(() => {
+    if (isSpeechEnabled) {
+      if (typeof window !== 'undefined' && window.speechSynthesis) {
+        window.speechSynthesis.cancel();
+      }
+      setIsSpeaking(false);
+      setIsSpeechEnabled(false);
+      return;
+    }
+
+    setIsSpeechEnabled(true);
+    playCue();
+    void speakNeural('Голос MAX включён.', {
+      onStart: () => setIsSpeaking(true),
+      onEnd: () => setIsSpeaking(false),
+    });
+  }, [isSpeechEnabled, playCue]);
 
   const toggleHandsFree = useCallback(() => setHandsFree((on) => !on), []);
 
@@ -564,11 +647,77 @@ function HudContent() {
     [],
   );
 
+  const recordPrivateReflection = useCallback((payload: PrivateReflectionPayload) => {
+    const now = Date.now();
+    const key = [
+      payload.trigger,
+      payload.ok ? 'ok' : 'fail',
+      payload.route ?? '',
+      (payload.userText ?? '').slice(0, 96),
+    ].join('|');
+    if (privateReflectionRef.current.lastKey === key && now - privateReflectionRef.current.lastAt < 30_000) return;
+    privateReflectionRef.current = { lastAt: now, lastKey: key };
+
+    const text = [
+      `private_self_reflection trigger=${payload.trigger}`,
+      `ok=${payload.ok}`,
+      payload.route ? `route=${payload.route}` : '',
+      typeof payload.confidence === 'number' ? `confidence=${Math.round(payload.confidence * 100)}%` : '',
+      typeof payload.latencyMs === 'number' ? `latency_ms=${payload.latencyMs}` : '',
+      payload.userText ? `user="${payload.userText.slice(0, 220)}"` : '',
+      payload.next ? `next="${payload.next.slice(0, 220)}"` : '',
+      payload.error ? `error="${payload.error.slice(0, 220)}"` : '',
+      'visibility=private_only_for_max',
+    ]
+      .filter(Boolean)
+      .join(' | ');
+
+    void sendMax17Event({
+      type: 'agent_experience',
+      agent: 'max_private_reflection',
+      text,
+      ok: payload.ok,
+      private: true,
+      source: 'hud_private_reflection',
+      trigger: payload.trigger,
+      route: payload.route,
+      confidence: payload.confidence,
+      latency_ms: payload.latencyMs,
+      next_adaptation: payload.next,
+      timestamp: new Date(now).toISOString(),
+    }).catch(() => {});
+  }, []);
+
   const pushLog = useCallback((line: string) => {
     const clean = line.trim();
     if (!clean) return;
     setLog((prev) => [clean, ...prev].slice(0, 24));
   }, []);
+
+  // JARVIS приветствует при входе: текст сразу, голос — на первый жест
+  // пользователя (политика автоплея браузера блокирует звук до взаимодействия).
+  const greetedRef = useRef(false);
+  useEffect(() => {
+    initJarvis();
+    if (greetedRef.current) return;
+    greetedRef.current = true;
+    const persona = getPersona();
+    const greeting = GREETINGS[persona];
+    const who = persona === 'friday' ? 'ПЯТНИЦА' : 'JARVIS';
+    setAgiMessage(`MAX17: ${greeting}`);
+    pushLog(`${who}: ${greeting}`);
+    const speakOnce = () => {
+      window.removeEventListener('pointerdown', speakOnce);
+      window.removeEventListener('keydown', speakOnce);
+      speakMax17(greeting);
+    };
+    window.addEventListener('pointerdown', speakOnce, { once: true });
+    window.addEventListener('keydown', speakOnce, { once: true });
+    return () => {
+      window.removeEventListener('pointerdown', speakOnce);
+      window.removeEventListener('keydown', speakOnce);
+    };
+  }, [pushLog, speakMax17]);
 
   // Max composes under his own mood — on voice request («сочини трек») or
   // automatically on insight / when Ultra decides "compose".
@@ -658,8 +807,137 @@ function HudContent() {
         }
       }
     },
-    [wm],
+    [wm, composeMoodTrack, emitMax17HudEvent, pushLog, speakMax17],
   );
+
+  const runGodModeAction = useCallback(
+    async (action: GodModeAction) => {
+      let reflectionNote = '';
+      switch (action) {
+        case 'chat':
+          executeUiCommand({ kind: 'open', target: 'chat' });
+          executeUiCommand({ kind: 'open', target: 'output' });
+          reflectionNote = 'chat and output windows opened';
+          setAgiMessage('MAX17: чат открыт.');
+          break;
+        case 'stars':
+          window.dispatchEvent(new CustomEvent('max3d:toggle'));
+          reflectionNote = '3D star core toggled';
+          setAgiMessage('MAX17: звёздное ядро переключено.');
+          break;
+        case 'import':
+          window.dispatchEvent(new CustomEvent('corpus:toggle'));
+          reflectionNote = 'corpus import toggled';
+          setAgiMessage('MAX17: импорт корпуса открыт.');
+          break;
+        case 'map':
+          executeUiCommand({ kind: 'open', target: 'minimap' });
+          reflectionNote = 'minimap opened';
+          setAgiMessage('MAX17: карта открыта.');
+          break;
+        case 'dream':
+          setAppearanceOpen(true);
+          executeUiCommand({ kind: 'compose' });
+          reflectionNote = 'dream synthesis started';
+          setAgiMessage('MAX17: синтез сна запущен.');
+          break;
+        case 'neural': {
+          pushLog('⚒ Кузница синапсов: кую связи по смыслу…');
+          setAgiMessage('MAX17: нейросинтез запущен.');
+          window.dispatchEvent(new CustomEvent('max:thinking', { detail: { active: true } }));
+          try {
+            const res = await emitMax17HudEvent({ type: 'synapse_forge' });
+            const note = res?.answer?.text || res?.next_adaptation || 'Нейросинтез завершён.';
+            reflectionNote = note;
+            pushLog(`⚒ ${note}`);
+            setAgiMessage(`MAX17: ${note}`);
+          } finally {
+            window.dispatchEvent(new CustomEvent('max:thinking', { detail: { active: false } }));
+          }
+          break;
+        }
+        case 'status':
+          executeUiCommand({ kind: 'open', target: 'status' });
+          executeUiCommand({ kind: 'open', target: 'player' });
+          reflectionNote = 'status and player windows opened';
+          setAgiMessage('MAX17: статус игры открыт.');
+          break;
+        case 'evolution': {
+          pushLog('🧠 MAX растёт: ищу пробелы и учусь…');
+          setAgiMessage('MAX17: эволюция запущена.');
+          window.dispatchEvent(new CustomEvent('max:thinking', { detail: { active: true } }));
+          try {
+            const grow = await emitMax17HudEvent({ type: 'autonomous_research', limit: 3 });
+            const ar = (grow as {
+              autonomous_research?: { network?: boolean; facts_learned?: number; items?: Array<{ topic: string; facts: number }> };
+            })?.autonomous_research;
+            const line = ar?.network
+              ? `MAX изучил ${(ar.items ?? []).length} тем (+${ar.facts_learned ?? 0} фактов)`
+              : 'Веб-обучение выключено, рост остался локальным.';
+            reflectionNote = line;
+            pushLog(`🧠 ${line}`);
+            setAgiMessage(`MAX17: ${line}`);
+          } finally {
+            window.dispatchEvent(new CustomEvent('max:thinking', { detail: { active: false } }));
+          }
+          break;
+        }
+        case 'council':
+          window.dispatchEvent(new CustomEvent('angels:open'));
+          reflectionNote = 'council opened';
+          setAgiMessage('MAX17: совет открыт.');
+          break;
+        case 'kickoff':
+          window.dispatchEvent(new CustomEvent('angels:kickoff'));
+          reflectionNote = 'day kickoff started';
+          setAgiMessage('MAX17: разгон дня запущен.');
+          break;
+        case 'sleep': {
+          setAppearanceOpen(true);
+          pushLog('☾ Сон: консолидация памяти…');
+          setAgiMessage('MAX17: ухожу в сон и консолидацию.');
+          window.dispatchEvent(new CustomEvent('max:thinking', { detail: { active: true } }));
+          try {
+            const res = await emitMax17HudEvent({ type: 'sleep_consolidation' });
+            const note = res?.answer?.text || res?.next_adaptation || 'Сон завершён.';
+            reflectionNote = note;
+            pushLog(`☾ ${note}`);
+            setAgiMessage(`MAX17: ${note}`);
+          } finally {
+            window.dispatchEvent(new CustomEvent('max:thinking', { detail: { active: false } }));
+          }
+          break;
+        }
+        case 'all':
+          executeUiCommand({ kind: 'showAll' });
+          reflectionNote = 'all windows shown';
+          setAgiMessage('MAX17: все окна показаны.');
+          break;
+        case 'reset':
+          executeUiCommand({ kind: 'reset' });
+          reflectionNote = 'HUD layout reset';
+          setAgiMessage('MAX17: HUD сброшен.');
+          break;
+      }
+      recordPrivateReflection({
+        trigger: `godmode:${action}`,
+        ok: true,
+        route: 'godmode',
+        next: reflectionNote || action,
+      });
+    },
+    [emitMax17HudEvent, executeUiCommand, pushLog, recordPrivateReflection],
+  );
+
+  useEffect(() => {
+    const onRun = (event: Event) => {
+      const action = (event as CustomEvent<{ action?: GodModeAction }>).detail?.action;
+      if (!action) return;
+      void runGodModeAction(action);
+    };
+    window.addEventListener('godmode:run', onRun);
+    return () => window.removeEventListener('godmode:run', onRun);
+  }, [runGodModeAction]);
 
   const captureEnvironmentObservation = useCallback(async (announce = true) => {
     const video = cameraVideoRef.current;
@@ -748,7 +1026,7 @@ function HudContent() {
     const insecure = typeof window !== 'undefined' && !window.isSecureContext;
     if (typeof navigator === 'undefined' || !navigator.mediaDevices?.getUserMedia) {
       const hint = insecure
-        ? ' Открой страницу как http://localhost:3002/game — по сетевому IP (192.168.x.x) браузер блокирует камеру без HTTPS.'
+        ? ` Открой страницу как ${getSecureGameUrl()} — по сетевому IP браузер блокирует камеру без HTTPS.`
         : ' Браузер не поддерживает getUserMedia.';
       setCameraError(`Камера недоступна.${hint}`);
       setCameraStatus('error');
@@ -776,7 +1054,7 @@ function HudContent() {
       } else if (name === 'NotReadableError') {
         hint = ' Камеру занял другой процесс (Zoom/FaceTime?). Закрой его и попробуй снова.';
       } else if (insecure) {
-        hint = ' Открой страницу как http://localhost:3002/game (камера требует HTTPS/localhost).';
+        hint = ` Открой страницу как ${getSecureGameUrl()} (камера требует HTTPS).`;
       }
       const reason =
         error instanceof Error ? `${name || error.name}: ${error.message}` : 'unknown camera error';
@@ -834,7 +1112,86 @@ function HudContent() {
       } catch {
         // detection best-effort
       }
-      if (active) detectTimer = window.setTimeout(detectLoop, 220);
+      if (active) detectTimer = window.setTimeout(detectLoop, 120);
+    };
+
+    // 68-точечные группы лица (контуры) для «фрактальной» сетки.
+    const FACE_GROUPS: Array<{ a: number; b: number; closed: boolean }> = [
+      { a: 0, b: 16, closed: false }, // челюсть
+      { a: 17, b: 21, closed: false }, // правая бровь
+      { a: 22, b: 26, closed: false }, // левая бровь
+      { a: 27, b: 30, closed: false }, // спинка носа
+      { a: 31, b: 35, closed: false }, // низ носа
+      { a: 36, b: 41, closed: true }, // правый глаз
+      { a: 42, b: 47, closed: true }, // левый глаз
+      { a: 48, b: 59, closed: true }, // внешние губы
+      { a: 60, b: 67, closed: true }, // внутренние губы
+    ];
+
+    const drawMesh = (
+      c: CanvasRenderingContext2D,
+      mesh: Array<{ x: number; y: number }>,
+      mapX: (n: number) => number,
+      mapY: (n: number) => number,
+      time: number,
+    ) => {
+      const P = mesh.map((p) => [mapX(p.x), mapY(p.y)] as [number, number]);
+      // 1) фрактальная сеть: каждая точка к 2 ближайшим соседям.
+      c.shadowBlur = 0;
+      c.lineWidth = 1;
+      c.strokeStyle = 'rgba(120,220,255,0.16)';
+      for (let i = 0; i < P.length; i++) {
+        let a = -1;
+        let b = -1;
+        let da = 1e9;
+        let db = 1e9;
+        for (let j = 0; j < P.length; j++) {
+          if (j === i) continue;
+          const dx = P[i][0] - P[j][0];
+          const dy = P[i][1] - P[j][1];
+          const d = dx * dx + dy * dy;
+          if (d < da) {
+            db = da;
+            b = a;
+            da = d;
+            a = j;
+          } else if (d < db) {
+            db = d;
+            b = j;
+          }
+        }
+        for (const j of [a, b]) {
+          if (j > i) {
+            c.beginPath();
+            c.moveTo(P[i][0], P[i][1]);
+            c.lineTo(P[j][0], P[j][1]);
+            c.stroke();
+          }
+        }
+      }
+      // 2) контуры черт лица (светящиеся).
+      c.shadowColor = 'rgba(0,242,255,0.7)';
+      c.shadowBlur = 6;
+      c.strokeStyle = 'rgba(0,242,255,0.5)';
+      c.lineWidth = 1.1;
+      for (const g of FACE_GROUPS) {
+        c.beginPath();
+        for (let k = g.a; k <= g.b; k++) {
+          if (k === g.a) c.moveTo(P[k][0], P[k][1]);
+          else c.lineTo(P[k][0], P[k][1]);
+        }
+        if (g.closed) c.closePath();
+        c.stroke();
+      }
+      // 3) пульсирующие узлы поверх каждой точки.
+      for (let i = 0; i < P.length; i++) {
+        const pr = 1.0 + (Math.sin(time * 3 + i * 0.7) * 0.5 + 0.5) * 1.4;
+        c.beginPath();
+        c.arc(P[i][0], P[i][1], pr, 0, Math.PI * 2);
+        c.fillStyle = 'rgba(190,245,255,0.92)';
+        c.fill();
+      }
+      c.shadowBlur = 0;
     };
 
     const draw = () => {
@@ -848,26 +1205,56 @@ function HudContent() {
           if (overlay.width !== w) overlay.width = w;
           if (overlay.height !== h) overlay.height = h;
           ctx.clearRect(0, 0, w, h);
-          const boxes = faceReadingRef.current?.boxes ?? [];
-          ctx.shadowColor = 'rgba(0,242,255,0.8)';
-          ctx.shadowBlur = 8;
-          for (const b of boxes) {
-            const x = b.x * w;
-            const y = b.y * h;
-            const bw = b.w * w;
-            const bh = b.h * h;
-            ctx.fillStyle = 'rgba(0,242,255,0.08)';
-            ctx.fillRect(x, y, bw, bh);
-            ctx.lineWidth = 2;
-            ctx.strokeStyle = 'rgba(0,242,255,0.9)';
-            ctx.strokeRect(x, y, bw, bh);
-            ctx.shadowBlur = 0;
-            ctx.fillStyle = 'rgba(0,242,255,0.95)';
-            ctx.font = '9px monospace';
-            ctx.fillText('лицо', x + 2, Math.max(10, y - 3));
-            ctx.shadowBlur = 8;
+          // Точное совмещение с лицом: проецируем нормированные точки через ту же
+          // object-cover трансформацию, что и <video>, + автодетект зеркала.
+          const vid = cameraVideoRef.current;
+          const vw = vid?.videoWidth || w;
+          const vh = vid?.videoHeight || h;
+          const scale = Math.max(w / vw, h / vh);
+          const dvw = vw * scale;
+          const dvh = vh * scale;
+          const ox = (w - dvw) / 2;
+          const oy = (h - dvh) / 2;
+          let mirror = false;
+          if (vid) {
+            const tr = getComputedStyle(vid).transform;
+            if (tr && tr.startsWith('matrix')) {
+              const a = parseFloat(tr.slice(tr.indexOf('(') + 1).split(',')[0]);
+              if (a < 0) mirror = true;
+            }
           }
-          ctx.shadowBlur = 0;
+          const mapX = (n: number) => {
+            const sx = ox + n * dvw;
+            return mirror ? w - sx : sx;
+          };
+          const mapY = (n: number) => oy + n * dvh;
+
+          const reading = faceReadingRef.current;
+          const meshes = reading?.meshes ?? [];
+          if (reading?.hasMesh && meshes.length) {
+            // Зрение MAX: лицо как фрактальная точечная сетка (не квадрат).
+            const now = performance.now() * 0.001;
+            for (const m of meshes) drawMesh(ctx, m, mapX, mapY, now);
+          } else {
+            // Фолбэк (модель лэндмарков не загрузилась) — рамка по лицу.
+            const boxes = reading?.boxes ?? [];
+            ctx.shadowColor = 'rgba(0,242,255,0.8)';
+            ctx.shadowBlur = 8;
+            for (const b of boxes) {
+              const x0 = mapX(b.x);
+              const x1 = mapX(b.x + b.w);
+              const rx = Math.min(x0, x1);
+              const rw = Math.abs(x1 - x0);
+              const ry = mapY(b.y);
+              const rh = b.h * dvh;
+              ctx.fillStyle = 'rgba(0,242,255,0.08)';
+              ctx.fillRect(rx, ry, rw, rh);
+              ctx.lineWidth = 2;
+              ctx.strokeStyle = 'rgba(0,242,255,0.9)';
+              ctx.strokeRect(rx, ry, rw, rh);
+            }
+            ctx.shadowBlur = 0;
+          }
           // Motion meter along the bottom edge.
           const m = motionRef.current;
           ctx.fillStyle = `rgba(0,242,255,${0.2 + 0.6 * m})`;
@@ -931,19 +1318,46 @@ function HudContent() {
       if (now - lastActivityRef.current < IDLE_MS) return;
       if (now - lastGrowRef.current < MIN_GAP_MS) return;
       lastGrowRef.current = now;
-      // Phase 8: Ultra decides its own next action (research/compile/
-      // consolidate/tree) via the LLM and executes it — true core agency.
-      const res = await emitMax17HudEvent({ type: 'ultra_think' });
-      const note = res?.next_adaptation;
-      if (note && /ультра|придумал|закрыл/i.test(note)) {
-        pushLog(`🧠 ${note}`);
-        setAgiMessage(`MAX17: ${note}`);
-      }
-      // Max decided to compose, or research yielded real new facts (insight) —
-      // celebrate with a track under his current mood.
-      const ultra = (res as { ultra?: { decision?: { action?: string }; executed?: { insight?: boolean } } })?.ultra;
-      if (ultra?.decision?.action === 'compose' || ultra?.executed?.insight) {
-        void composeMoodTrack(true);
+
+      // Show the core thinking while MAX grows on his own.
+      window.dispatchEvent(new CustomEvent('max:thinking', { detail: { active: true } }));
+      try {
+        // Autonomous growth: MAX seeds his own topics from the graph, researches
+        // them on the web, and distills facts into (neural) memory + the synapse
+        // graph. Surfaced so you can SEE what he learned; synapses tick up in /jarvis.
+        const grow = await emitMax17HudEvent({ type: 'autonomous_research', limit: 2 });
+        const ar = (grow as {
+          autonomous_research?: {
+            network?: boolean;
+            facts_learned?: number;
+            items?: Array<{ topic: string; facts: number; status: string }>;
+          };
+        })?.autonomous_research;
+        if (ar?.network) {
+          const learned = (ar.items ?? []).filter((i) => i.facts > 0).map((i) => i.topic);
+          if (ar.facts_learned && learned.length) {
+            const line = `🧠 MAX сам изучил: ${learned.slice(0, 3).join(', ')} (+${ar.facts_learned} фактов)`;
+            pushLog(line);
+            setAgiMessage(`MAX17: ${line}`);
+          } else if ((ar.items ?? []).length) {
+            pushLog(`🧠 MAX поискал: ${(ar.items ?? []).slice(0, 3).map((i) => i.topic).join(', ')} — пока без новых фактов`);
+          }
+        }
+
+        // Phase 8: Ultra also decides its own next action (compile/consolidate/
+        // tree/compose) via the LLM — agency beyond pure research.
+        const res = await emitMax17HudEvent({ type: 'ultra_think' });
+        const note = res?.next_adaptation;
+        if (note && /ультра|придумал|закрыл/i.test(note)) {
+          pushLog(`🧠 ${note}`);
+          setAgiMessage(`MAX17: ${note}`);
+        }
+        const ultra = (res as { ultra?: { decision?: { action?: string }; executed?: { insight?: boolean } } })?.ultra;
+        if (ultra?.decision?.action === 'compose' || ultra?.executed?.insight) {
+          void composeMoodTrack(true);
+        }
+      } finally {
+        window.dispatchEvent(new CustomEvent('max:thinking', { detail: { active: false } }));
       }
     };
     const interval = window.setInterval(() => {
@@ -956,6 +1370,142 @@ function HudContent() {
     const userMsg = (override ?? input).trim();
     if (!userMsg || isLoading) return;
     lastActivityRef.current = Date.now(); // reset the idle-flywheel timer
+
+    // «/godmode» — открыть Терминал бога (окно режимов), не отправляя в ядро.
+    if (/^\/godmode\b/i.test(userMsg)) {
+      setInput('');
+      window.dispatchEvent(new CustomEvent('godmode:open'));
+      pushLog('⚡ /godmode — Терминал бога');
+      setAgiMessage('MAX17: GODMODE открыт.');
+      return;
+    }
+
+    // «/jarvis» — включить/выключить Iron-Man оверлей (arc-reactor + гейджи).
+    if (/^\/jarvis\b/i.test(userMsg)) {
+      setInput('');
+      window.dispatchEvent(new CustomEvent('jarvis:toggle'));
+      pushLog('⚡ /jarvis — Iron-Man HUD переключён');
+      setAgiMessage('MAX17: JARVIS HUD.');
+      return;
+    }
+
+    // «/кластер» — пульт MAX GOD: связка M3 (первичный) ↔ i5 (воркер) по LAN.
+    if (/^\/(кластер|cluster|god)\b/i.test(userMsg)) {
+      setInput('');
+      window.dispatchEvent(new CustomEvent('cluster:toggle'));
+      pushLog('⛓ /кластер — MAX GOD');
+      setAgiMessage('MAX17: кластер.');
+      return;
+    }
+
+    // «/миссии» — живая доска миссий (трекер реальных целей, MAX пушит к шагу).
+    if (/^\/(миссии|missions|цели|goals)\b/i.test(userMsg)) {
+      setInput('');
+      window.dispatchEvent(new CustomEvent('missions:toggle'));
+      pushLog('🎯 /миссии — доска миссий');
+      setAgiMessage('MAX17: миссии.');
+      return;
+    }
+
+    // «/резонанс» / «/свет» — режим Резонанс: нет плашек, только фиолетовое ядро,
+    // дышит, свет разливается во всё поле, коды стекают к центру.
+    if (/^\/(резонанс|resonance|свет|light|ядросвет)\b/i.test(userMsg)) {
+      setInput('');
+      window.dispatchEvent(new CustomEvent('resonance:toggle'));
+      pushLog('🟣 /резонанс — фиолетовое ядро, только свет');
+      setAgiMessage('MAX17: резонанс.');
+      return;
+    }
+
+    // «/фаза» — ChronoSync «Фаза дня»: 3 действия из миссий + фокус + стоп по фазе месяца.
+    if (/^\/(фаза|phase|chrono|хроно)\b/i.test(userMsg)) {
+      setInput('');
+      window.dispatchEvent(new CustomEvent('phase:toggle'));
+      pushLog('🕒 /фаза — фаза дня (ChronoSync)');
+      setAgiMessage('MAX17: фаза дня.');
+      return;
+    }
+
+    // «/доктор» — дашборд здоровья GAME+MAX: свип логов, авто-фиксы, квесты.
+    if (/^\/(доктор|doctor|health|здоровье)\b/i.test(userMsg)) {
+      setInput('');
+      window.dispatchEvent(new CustomEvent('doctor:toggle'));
+      pushLog('🩺 /доктор — здоровье системы');
+      setAgiMessage('MAX17: доктор.');
+      return;
+    }
+
+    // «/мудрец» / «/sage» — голосовой Мудрец из особняка (спутник для игры).
+    if (/^\/(мудрец|sage)\b/i.test(userMsg)) {
+      setInput('');
+      window.dispatchEvent(new CustomEvent('sage:toggle'));
+      pushLog('🧙 /мудрец — Мудрец из особняка');
+      setAgiMessage('MAX17: Мудрец.');
+      return;
+    }
+
+    // «/3d» / «/ядро» — объёмное 3D-присутствие MAX (WebGL-ядро в центре меты).
+    if (/^\/(3d|ядро|core)\b/i.test(userMsg)) {
+      setInput('');
+      window.dispatchEvent(new CustomEvent('max3d:toggle'));
+      pushLog('🌐 /3d — 3D-ядро MAX переключено');
+      setAgiMessage('MAX17: 3D-ядро.');
+      return;
+    }
+
+    // «/навыки» — открыть инвентарь навыков (динамическая компетенция).
+    if (/^\/(навыки|skills|инвентарь|inventory)\b/i.test(userMsg)) {
+      setInput('');
+      window.dispatchEvent(new CustomEvent('skills:toggle'));
+      pushLog('🎒 /навыки — инвентарь навыков');
+      setAgiMessage('MAX17: инвентарь навыков.');
+      return;
+    }
+
+    // «/куй» — Кузница синапсов: семантический kNN-бриджинг → полезные связи к 1M.
+    if (/^\/(куй|forge|кузница)\b/i.test(userMsg)) {
+      setInput('');
+      pushLog('⚒️ Кузница синапсов: кую связи по смыслу…');
+      setAgiMessage('MAX17: кую синапсы.');
+      window.dispatchEvent(new CustomEvent('max:thinking', { detail: { active: true } }));
+      try {
+        const res = await emitMax17HudEvent({ type: 'synapse_forge' });
+        const note = res?.answer?.text || res?.next_adaptation || 'Кузница завершена.';
+        pushLog(`⚒️ ${note}`);
+        setAgiMessage(`MAX17: ${note}`);
+      } finally {
+        window.dispatchEvent(new CustomEvent('max:thinking', { detail: { active: false } }));
+      }
+      return;
+    }
+
+    // «/расти» — запустить автономный рост сейчас: MAX сам ищет пробелы, учит из
+    // веба и распределяет в нейро-память + граф. (Иначе это идёт само в простое.)
+    if (/^\/(расти|grow|учись|learn)\b/i.test(userMsg)) {
+      setInput('');
+      pushLog('🧠 MAX растёт: ищу пробелы и учусь…');
+      setAgiMessage('MAX17: расту — исследую свои пробелы.');
+      window.dispatchEvent(new CustomEvent('max:thinking', { detail: { active: true } }));
+      try {
+        const grow = await emitMax17HudEvent({ type: 'autonomous_research', limit: 3 });
+        const ar = (grow as {
+          autonomous_research?: { network?: boolean; facts_learned?: number; items?: Array<{ topic: string; facts: number }> };
+        })?.autonomous_research;
+        if (!ar?.network) {
+          pushLog('🧠 Веб-обучение выключено (MAX17_AUTO_WEB=false).');
+        } else {
+          const learned = (ar.items ?? []).filter((i) => i.facts > 0).map((i) => i.topic);
+          const line = learned.length
+            ? `🧠 MAX изучил: ${learned.slice(0, 3).join(', ')} (+${ar.facts_learned} фактов)`
+            : `🧠 MAX поискал ${(ar.items ?? []).length} тем — новых фактов пока нет`;
+          pushLog(line);
+          setAgiMessage(`MAX17: ${line}`);
+        }
+      } finally {
+        window.dispatchEvent(new CustomEvent('max:thinking', { detail: { active: false } }));
+      }
+      return;
+    }
 
     // Fast local path: interface control by text or voice ("закрой миссии",
     // "смени фон", "сбрось окна"). Executed instantly; still forwarded to Max17
@@ -975,6 +1525,14 @@ function HudContent() {
       pushLog(`🧩 ${note}`);
       setAgiMessage(`MAX17: ${note}`);
       speakMax17(note.split('.')[0]);
+      recordPrivateReflection({
+        trigger: isPath ? 'ingest_project' : 'ingest_text',
+        ok: Boolean(res),
+        userText: userMsg,
+        route: res?.route || 'ingest_corpus',
+        confidence: res?.confidence,
+        next: note,
+      });
       return;
     }
 
@@ -992,12 +1550,21 @@ function HudContent() {
         source: 'hud_command',
         timestamp: new Date().toISOString(),
       });
+      recordPrivateReflection({
+        trigger: 'hud_command',
+        ok: true,
+        userText: userMsg,
+        route: 'ui_command',
+        next: uiCommand.reply,
+      });
       return;
     }
 
     setInput('');
     setIsLoading(true);
     setAgiMessage(`Вы: ${userMsg} MAX17: обрабатываю событие...`);
+    const startedAt = typeof performance !== 'undefined' ? performance.now() : Date.now();
+    const elapsedMs = () => Math.round((typeof performance !== 'undefined' ? performance.now() : Date.now()) - startedAt);
 
     let activeSessionId = sessionId;
     try {
@@ -1024,13 +1591,21 @@ function HudContent() {
         true,
       );
 
-      // Orchestrator: a code/desktop task is routed to its agent automatically.
+      // Orchestrator: a code/desktop/music task is routed to its real engine
+      // automatically — the chat LLM only talks, the engine actually does it.
       const dispatch = max17?.dispatch;
-      if (dispatch?.instruction && (dispatch.route === 'code' || dispatch.route === 'desktop')) {
+      if (dispatch?.instruction && (dispatch.route === 'code' || dispatch.route === 'desktop' || dispatch.route === 'music')) {
         const note = max17?.answer?.text || 'Передаю задачу агенту…';
         if (dispatch.route === 'code') {
           setCodeTask(dispatch.instruction);
           setCodeOpen(true);
+        } else if (dispatch.route === 'music') {
+          // Open GODMODE (mounts Mode777), then tell it to compose from scratch.
+          window.dispatchEvent(new CustomEvent('godmode:open'));
+          window.setTimeout(
+            () => window.dispatchEvent(new CustomEvent('mode777:compose', { detail: { instruction: dispatch.instruction } })),
+            600,
+          );
         } else {
           setDesktopTask(dispatch.instruction);
           setDesktopOpen(true);
@@ -1040,6 +1615,15 @@ function HudContent() {
         pushLog(`MAX17: ${note}`);
         speakMax17(note);
         await saveMessage('model', note, sid);
+        recordPrivateReflection({
+          trigger: `dispatch:${dispatch.route}`,
+          ok: true,
+          userText: userMsg,
+          route: max17?.route || dispatch.route,
+          confidence: max17?.confidence,
+          next: note,
+          latencyMs: elapsedMs(),
+        });
         return;
       }
 
@@ -1052,11 +1636,29 @@ function HudContent() {
       pushLog(`MAX17: ${fullResponse}`);
       speakMax17(fullResponse);
       await saveMessage('model', fullResponse, sid);
+      recordPrivateReflection({
+        trigger: 'chat_turn',
+        ok: Boolean(max17),
+        userText: userMsg,
+        route: max17?.route || 'bridge_unavailable',
+        confidence: max17?.confidence,
+        next: fullResponse,
+        latencyMs: elapsedMs(),
+      });
     } catch (e) {
       console.error(e);
+      const errorMessage = e instanceof Error ? e.message : String(e);
       setAgiMessage(
         `Вы: ${userMsg} MAX17: не удалось сохранить или обработать сообщение. HUD остаётся активным без Gemini.`,
       );
+      recordPrivateReflection({
+        trigger: 'chat_turn',
+        ok: false,
+        userText: userMsg,
+        route: 'hud_error',
+        error: errorMessage,
+        latencyMs: elapsedMs(),
+      });
     } finally {
       setIsLoading(false);
     }

@@ -18,7 +18,7 @@ if str(_ROOT) not in sys.path:
     sys.path.insert(0, str(_ROOT))
 
 from mark17.curiosity import _topic_key
-from mark17.synapse_graph import SynapseGraph
+from mark17.synapse_graph import BulkRecord, SynapseGraph
 from mark17.synapse_growth import _HEX16, _STRUCTURAL, propose_seeds
 
 
@@ -30,6 +30,21 @@ def _fail(msg: str) -> None:
 def main() -> int:
     with tempfile.TemporaryDirectory(prefix="max17-selfgrow-") as d:
         graph = SynapseGraph(Path(d))
+
+        # kNN forge can emit the same undirected pair twice in one flush. The
+        # batch writer must collapse it before INSERT instead of tripping the
+        # graph's unique index.
+        duplicate = BulkRecord(
+            source_type="memory",
+            source_id="0123456789abcdef",
+            target_type="memory",
+            target_id="fedcba9876543210",
+            relation_type="similar_to",
+            weight=0.8,
+            metadata={"forge": True},
+        )
+        if graph.bulk_upsert([duplicate, duplicate]) != 1 or graph.count() != 1:
+            _fail("bulk_upsert did not collapse duplicate keys")
 
         # Salient, readable concept/topic edges -> should become seeds.
         readable = [

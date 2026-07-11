@@ -33,6 +33,16 @@
   pointer-events: none;
 }
 
+.hud-synapse-field {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  pointer-events: none;
+  width: 100%;
+  height: 100%;
+  opacity: 0.85;
+}
+
 .hud-scanlines {
   position: absolute;
   inset: 0;
@@ -578,6 +588,10 @@
 
 /* ===================== ADAPTIVE WINDOW SYSTEM ===================== */
 
+.hud-windows {
+  display: contents;
+}
+
 .hud-bg-scrim {
   position: absolute;
   inset: 0;
@@ -787,7 +801,7 @@
 /* Dock / control cluster. */
 .hud-dock {
   position: absolute;
-  top: 10px;
+  top: 64px;
   left: 50%;
   transform: translateX(-50%);
   display: flex;
@@ -801,7 +815,7 @@
   background: rgba(12, 10, 30, 0.62);
   border: 1px solid var(--hud-border);
   backdrop-filter: blur(10px);
-  z-index: 50;
+  z-index: 40;
 }
 
 .hud-dock-windows {
@@ -880,16 +894,234 @@
 }
 
 @media (max-width: 700px) {
+  .hud-root.hud-adaptive {
+    position: fixed;
+    inset: 0;
+    min-height: 100dvh;
+    padding-top: calc(214px + env(safe-area-inset-top));
+    overflow-x: hidden;
+    overflow-y: auto;
+    overscroll-behavior-y: contain;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .hud-adaptive .hud-bg,
+  .hud-adaptive .hud-bg-scrim,
+  .hud-adaptive .hud-synapse-field,
+  .hud-adaptive .hud-scanlines {
+    position: fixed;
+  }
+
   .hud-dock {
-    top: 8px;
-    max-width: calc(100vw - 16px);
+    position: fixed;
+    top: calc(112px + env(safe-area-inset-top));
+    left: 8px;
+    right: 8px;
+    width: auto;
+    max-width: none;
+    transform: none;
+    display: block;
+    padding: 6px 8px;
+    border-radius: 14px;
+  }
+
+  .hud-dock-windows,
+  .hud-dock-tools {
     flex-wrap: nowrap;
-    overflow-x: auto;
     justify-content: flex-start;
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+
+  .hud-dock-windows::-webkit-scrollbar,
+  .hud-dock-tools::-webkit-scrollbar {
+    display: none;
+  }
+
+  .hud-dock-tools {
+    margin-top: 5px;
+    padding-top: 5px;
+    padding-left: 0;
+    border-top: 1px solid rgba(255, 255, 255, 0.12);
+    border-left: none;
+  }
+
+  .hud-dock-chip,
+  .hud-dock-tool {
+    min-height: 40px;
+    flex: 0 0 auto;
+  }
+
+  .angels-command-bar {
+    display: grid;
+    grid-template-columns: 44px minmax(0, 1fr) 44px 44px;
+    gap: 6px;
+  }
+
+  .angels-command-bar > button {
+    min-width: 44px;
+    min-height: 40px;
+    padding: 6px;
+    justify-content: center;
+  }
+
+  .angels-command-bar > input {
+    width: 100%;
+    min-height: 40px;
+    padding: 0 10px;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 10px;
+    background: rgba(0, 0, 0, 0.24);
+  }
+
+  .angels-command-bar > :nth-child(5) {
+    grid-column: 1;
+    grid-row: 2;
+  }
+
+  .angels-command-bar > :nth-child(6) {
+    grid-column: 2;
+    grid-row: 2;
+  }
+
+  .angels-command-bar > :nth-child(7) {
+    grid-column: 3;
+    grid-row: 2;
+  }
+
+  .angels-command-bar > :nth-child(8) {
+    grid-column: 4;
+    grid-row: 2;
   }
 
   .hud-core-stage {
-    top: 24%;
+    position: relative;
+    left: auto;
+    top: auto;
+    width: 100%;
+    transform: none;
+    margin: 0 auto 18px;
+    padding: 0 16px;
+    z-index: 2;
+  }
+
+  .hud-core {
+    width: 112px;
+    height: 112px;
+  }
+
+  .hud-core-caption {
+    max-width: 100%;
+    font-size: 12px;
+  }
+
+  .hud-windows {
+    position: relative;
+    z-index: 2;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    padding: 0 12px calc(104px + env(safe-area-inset-bottom));
+  }
+
+  .hud-windows .hud-window {
+    position: relative !important;
+    left: auto !important;
+    top: auto !important;
+    width: 100% !important;
+    height: auto !important;
+    min-height: 0;
+    touch-action: pan-y;
+    user-select: auto;
+  }
+
+  .hud-window-bar {
+    min-height: 52px;
+    padding: 6px 8px 6px 14px;
+    cursor: default;
+    touch-action: pan-y;
+  }
+
+  .hud-window-title {
+    font-size: 10px;
+  }
+
+  .hud-window-btn {
+    width: 40px;
+    height: 40px;
+    border-radius: 10px;
+  }
+
+  .hud-window-resize {
+    display: none;
+  }
+
+  .hud-window-pad {
+    padding: 12px;
+  }
+
+  .hud-window .hud-input-bar {
+    display: grid;
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+    gap: 8px;
+  }
+
+  .hud-window .hud-input-bar .hud-icon-btn {
+    width: 44px;
+    height: 44px;
+    justify-self: center;
+  }
+
+  .hud-window .hud-input-bar input {
+    grid-column: 1 / span 4;
+    grid-row: 3;
+    width: 100%;
+    min-height: 44px;
+    padding: 0 12px;
+    border: 1px solid rgba(168, 85, 247, 0.3);
+    border-radius: 12px;
+    background: rgba(0, 0, 0, 0.24);
+  }
+
+  .hud-window .hud-input-bar > .hud-icon-btn:last-child {
+    grid-column: 5;
+    grid-row: 3;
+  }
+
+  .hud-mission-item {
+    min-height: 36px;
+    align-items: center;
+    font-size: 13px;
+  }
+
+  .hud-mission-item input {
+    width: 20px;
+    height: 20px;
+    margin-top: 0;
+  }
+
+  .hud-adaptive .hud-nav {
+    position: fixed;
+    left: 8px;
+    right: 8px;
+    bottom: max(8px, env(safe-area-inset-bottom));
+    width: auto;
+    transform: none;
+    justify-content: space-around;
+    gap: 0;
+    padding: 7px 4px;
+    z-index: 45;
+  }
+
+  .hud-nav-item {
+    min-width: 58px;
+    min-height: 56px;
+    padding: 5px 4px 8px;
+  }
+
+  .hud-nav-label {
+    font-size: 7px;
+    letter-spacing: 0.08em;
   }
 }
 

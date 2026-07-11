@@ -363,6 +363,15 @@ def run_agent(request: dict[str, Any]) -> dict[str, Any]:
         except Exception:  # noqa: BLE001 - recording is best-effort
             recorded_id = None
 
+    # Phase 2b: успех укрепляет синапс-граф (концепты задачи → агент). Граф учится,
+    # что работает; повторные успехи делают связь «полезной». Fail-soft.
+    try:
+        from mark17.synapse_graph import record_agent_experience
+
+        record_agent_experience(_state_dir(request), agent="code", task=instruction, success=success)
+    except Exception:  # noqa: BLE001
+        pass
+
     return {
         "ok": True,
         "answer": answer,

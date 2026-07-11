@@ -9,6 +9,7 @@ from __future__ import annotations
 import hashlib
 import json
 import math
+import os
 import re
 import sqlite3
 import time
@@ -18,14 +19,23 @@ from typing import Any
 
 import numpy as np
 
-from mark17.ann_index import ANN_MIN_ROWS, AnnIndex
+from mark17.ann_index import ANN_MIN_ROWS, AnnIndex, HNSW_MIN_ROWS, HnswIndex
 from mark17.events import Event
+from mark17 import embedder
 
-# Bumped from 128: character n-grams add many more features, so a wider space
-# keeps hash collisions low. Stored vectors of a different length are treated as
-# stale and re-embedded on load (see VectorMemory._ensure_index).
-VECTOR_DIM = 256
+# Hash-space width (local fallback). The ACTIVE dim is set by the embedder: a
+# neural provider (Ollama nomic-embed / Gemini) returns 768 and stored vectors of
+# a different length are re-embedded on load (see VectorMemory._ensure_index).
+_HASH_DIM = 256
+VECTOR_DIM = embedder.active_dim(_HASH_DIM)
 NGRAM_SIZES = (3, 4)
+# Живой рекол держим на последних N записях (свежие + важные): строить мету с
+# concepts для десятков тысяч строк = тяжело. Корпус целиком живёт в графе/БД,
+# кузница (forge_vectors) грузит всё. Tunable: MAX17_RECALL_CAP.
+try:
+    RECALL_CAP = max(1000, int(os.environ.get("MAX17_RECALL_CAP", "8000")))
+except (TypeError, ValueError):
+    RECALL_CAP = 8000
 TOKEN_RE = re.compile(r"[a-zA-Zа-яА-ЯёЁ0-9_]+")
 
 SYNONYM_GROUPS = {
@@ -83,6 +93,49 @@ SYNONYM_GROUPS = {
         "задачи",
         "миссия",
         "квест",
+    },
+    # --- Life-game domains: cluster the user's real goals by meaning, not words. ---
+    "sales": {
+        "sales", "sale", "deal", "lead", "leads", "client", "clients", "customer", "call", "calls", "cold",
+        "продажа", "продажи", "продать", "сделка", "сделки", "клиент", "клиенты", "клиентов",
+        "лид", "лиды", "обзвон", "звонок", "звонки", "воронка",
+    },
+    "marketing": {
+        "marketing", "promote", "promotion", "reach", "audience", "traffic", "ads", "campaign", "offer",
+        "маркетинг", "продвижение", "продвинуть", "реклама", "охват", "охваты", "аудитория",
+        "трафик", "кампания", "оффер",
+    },
+    "content": {
+        "content", "reels", "reel", "video", "post", "posts", "story", "stories", "clip", "shoot", "edit",
+        "контент", "рилс", "рилз", "видео", "ролик", "пост", "посты", "сторис", "клип", "съёмка", "съемка", "монтаж",
+    },
+    "product": {
+        "product", "feature", "landing", "site", "website", "app", "application", "mvp", "release", "onboarding",
+        "продукт", "фича", "функция", "лендинг", "сайт", "приложение", "релиз", "онбординг",
+    },
+    "code": {
+        "code", "coding", "bug", "refactor", "api", "endpoint", "component", "deploy", "build",
+        "script", "backend", "frontend",
+        "код", "баг", "рефактор", "апи", "компонент", "деплой", "сборка", "скрипт", "бэкенд", "фронтенд",
+    },
+    "money": {
+        "money", "income", "profit", "revenue", "payment", "price", "budget",
+        "деньги", "доход", "прибыль", "выручка", "оплата", "цена", "бюджет", "заработок",
+    },
+    "body": {
+        "body", "sport", "gym", "workout", "training", "sleep", "energy", "health",
+        "circadian", "caffeine", "fatigue", "tired", "tiredness", "recovery", "rest", "stress", "stimulation",
+        "тело", "спорт", "зал", "тренировка", "сон", "энергия", "здоровье", "бег",
+        "усталость", "устал", "уставший", "сонливость", "недосып", "кофеин", "кофе",
+        "циркадный", "ритм", "восстановление", "отдых", "стресс", "перегруз", "стимуляция",
+    },
+    "relationship": {
+        "meeting", "partner", "people", "network", "networking",
+        "встреча", "встречи", "партнёр", "партнер", "люди", "общение", "нетворкинг",
+    },
+    "focus": {
+        "goal", "goals", "priority", "priorities", "focus", "today",
+        "цель", "цели", "приоритет", "приоритеты", "фокус", "сегодня",
     },
 }
 
@@ -201,7 +254,7 @@ def _hash_bucket(feature: str, dim: int) -> tuple[int, float]:
     return idx, sign
 
 
-def embed_text(text: str, *, dim: int = VECTOR_DIM) -> list[float]:
+def _hash_embed(text: str, dim: int) -> list[float]:
     vector = [0.0] * dim
     for feature, weight in _features(text):
         idx, sign = _hash_bucket(feature, dim)
@@ -211,6 +264,16 @@ def embed_text(text: str, *, dim: int = VECTOR_DIM) -> list[float]:
     if norm == 0:
         return vector
     return [value / norm for value in vector]
+
+
+def embed_text(text: str, *, dim: int | None = None) -> list[float]:
+    """Real neural embedding (Ollama → Gemini) when available, else the local
+    token-hash. The neural path fixes its own dim; the hash path honours `dim`."""
+    target = VECTOR_DIM if dim is None else dim
+    vec = embedder.neural_embed(text)
+    if vec is not None and len(vec) == target:
+        return vec
+    return _hash_embed(text, target)
 
 
 def cosine_similarity(left: list[float], right: list[float]) -> float:
@@ -348,10 +411,23 @@ class VectorMemory:
         # (exact full scan) below ANN_MIN_ROWS, so small stores are unchanged.
         self._ann: AnnIndex | None = None
         self._ann_path = state_dir / "vector_ann.npz"
+        # Полнокорпусный HNSW-индекс: ищет по ВСЕМ векторам (не по капу), мету тянет
+        # только для top-k. Снимает потолок RECALL_CAP для поиска. Опционально:
+        # нет hnswlib / любая ошибка → фолбэк на точный путь по матрице.
+        self._hnsw: HnswIndex | None = None
+        self._hnsw_tried = False
+        self._hnsw_path = state_dir / "vector_hnsw.bin"
+        self._hnsw_meta = state_dir / "vector_hnsw.json"
+        # Бинарный кэш матрицы: np.load вместо парса десятков тысяч JSON-векторов
+        # на старте демона (без него _ensure_index на 40k строк = десятки секунд).
+        self._mat_cache = state_dir / "vector_matrix.npy"
+        self._mat_meta = state_dir / "vector_matrix.json"
 
     def _conn(self) -> sqlite3.Connection:
-        conn = sqlite3.connect(self.db_path)
+        conn = sqlite3.connect(self.db_path, timeout=5.0)
         conn.row_factory = sqlite3.Row
+        conn.execute("PRAGMA busy_timeout=5000")
+        conn.execute("PRAGMA foreign_keys=ON")
         return conn
 
     def _meta_from_row(self, row: sqlite3.Row) -> dict[str, Any]:
@@ -370,33 +446,109 @@ class VectorMemory:
     def _ensure_index(self) -> None:
         if self._matrix is not None:
             return
-        vectors: list[list[float]] = []
-        meta: list[dict[str, Any]] = []
-        stale: list[tuple[str, int]] = []  # (json_vector, id) re-embedded on migration
         with self._conn() as c:
-            rows = c.execute("SELECT * FROM vector_memories ORDER BY id").fetchall()
+            tot = c.execute("SELECT COUNT(*) AS n, COALESCE(MAX(id), 0) AS m FROM vector_memories").fetchone()
+            n = int(tot["n"])
+            max_id = int(tot["m"])
+            # Только последние RECALL_CAP строк (мета с concepts дорогая на 10k+).
+            rows = c.execute(
+                "SELECT id, timestamp, event_type, text, summary, reinforce, importance "
+                "FROM vector_memories ORDER BY id DESC LIMIT ?",
+                (RECALL_CAP,),
+            ).fetchall()
+        rows = list(reversed(rows))  # id-возрастание → совпадает с хвостом матрицы
+        meta = [self._meta_from_row(r) for r in rows]
+
+        M = self._load_matrix_cache(n, max_id)
+        if M is None:
+            M = self._rebuild_matrix(n, max_id)
+        # Хвост матрицы (последние len(meta)) совпадает с выбранными строками.
+        if M.shape[0] > len(meta):
+            M = np.ascontiguousarray(M[-len(meta):])
+        self._matrix = M
+        self._meta = meta
+        self._refresh_ann()
+
+    def forge_vectors(self) -> tuple[np.ndarray, list[int], list[float], list[str]]:
+        """Полная матрица + id/важность/тип для кузницы (без recall-капа)."""
+        with self._conn() as c:
+            tot = c.execute("SELECT COUNT(*) AS n, COALESCE(MAX(id), 0) AS m FROM vector_memories").fetchone()
+            n = int(tot["n"])
+            max_id = int(tot["m"])
+            rows = c.execute(
+                "SELECT id, importance, event_type FROM vector_memories ORDER BY id"
+            ).fetchall()
+        M = self._load_matrix_cache(n, max_id)
+        if M is None:
+            M = self._rebuild_matrix(n, max_id)
+        ids = [int(r["id"]) for r in rows]
+        imp = [float(r["importance"]) for r in rows]
+        event_types = [str(r["event_type"]) for r in rows]
+        return M, ids, imp, event_types
+
+    def _load_matrix_cache(self, n: int, max_id: int) -> np.ndarray | None:
+        try:
+            if not self._mat_cache.exists() or not self._mat_meta.exists():
+                return None
+            hdr = json.loads(self._mat_meta.read_text(encoding="utf-8"))
+            if hdr.get("n") != n or hdr.get("max_id") != max_id or hdr.get("dim") != VECTOR_DIM:
+                return None
+            M = np.load(self._mat_cache)
+            if int(M.shape[0]) != n or (n > 0 and int(M.shape[1]) != VECTOR_DIM):
+                return None
+            return M.astype(np.float32, copy=False)
+        except Exception:
+            return None
+
+    def _save_matrix_cache(self, M: np.ndarray, n: int, max_id: int) -> None:
+        try:
+            np.save(self._mat_cache, M)
+            self._mat_meta.write_text(json.dumps({"n": n, "max_id": max_id, "dim": VECTOR_DIM}), encoding="utf-8")
+        except Exception:
+            pass
+
+    def _rebuild_matrix(self, n: int, max_id: int) -> np.ndarray:
+        """Медленный путь (раз): парс векторов из БД + миграция размерности + кэш."""
+        vectors: list[list[float]] = []
+        stale: list[tuple[str, int]] = []
+        with self._conn() as c:
+            rows = c.execute("SELECT id, vector, text FROM vector_memories ORDER BY id").fetchall()
             for row in rows:
                 try:
                     parsed = json.loads(row["vector"])
                 except (json.JSONDecodeError, TypeError):
                     parsed = None
                 if isinstance(parsed, list) and len(parsed) == VECTOR_DIM:
-                    vector = [float(v) for v in parsed]
+                    vectors.append([float(v) for v in parsed])
                 else:
-                    # Stored with an older dim/format -> re-embed and persist.
-                    vector = embed_text(str(row["text"]))
-                    stale.append((json.dumps(vector), int(row["id"])))
-                vectors.append(vector)
-                meta.append(self._meta_from_row(row))
+                    v = _hash_embed(str(row["text"]), VECTOR_DIM)
+                    vectors.append(v)
+                    stale.append((json.dumps(v), int(row["id"])))
             if stale:
                 c.executemany("UPDATE vector_memories SET vector = ? WHERE id = ?", stale)
-        self._matrix = (
-            np.asarray(vectors, dtype=np.float32)
-            if vectors
-            else np.zeros((0, VECTOR_DIM), dtype=np.float32)
-        )
-        self._meta = meta
-        self._refresh_ann()
+        M = np.asarray(vectors, dtype=np.float32) if vectors else np.zeros((0, VECTOR_DIM), dtype=np.float32)
+        self._save_matrix_cache(M, n, max_id)
+        return M
+
+    def reembed_all(self) -> int:
+        """Recompute every stored vector with the current embed_text — run after the
+        semantic ontology changes. Keeps old + new records in the same feature space
+        so cosine recall stays consistent."""
+        with self._conn() as c:
+            rows = c.execute("SELECT id, text FROM vector_memories").fetchall()
+            updates = [(json.dumps(embed_text(str(row["text"]))), int(row["id"])) for row in rows]
+            if updates:
+                c.executemany("UPDATE vector_memories SET vector = ? WHERE id = ?", updates)
+        # Drop caches so the next recall rebuilds from the refreshed vectors.
+        self._matrix = None
+        self._meta = []
+        self._ann = None
+        try:
+            if self._ann_path.exists():
+                self._ann_path.unlink()
+        except OSError:
+            pass
+        return len(updates)
 
     def _refresh_ann(self) -> None:
         """Build/load the IVF index above the threshold; drop it below. Best-effort:
@@ -417,8 +569,85 @@ class VectorMemory:
         except Exception:  # noqa: BLE001 - scale path must never break recall
             self._ann = None
 
+    def _ensure_hnsw(self) -> None:
+        """Lazily build/load the full-corpus HNSW index (once per process).
+        Best-effort: any failure leaves self._hnsw=None → recall uses the exact
+        capped-matrix path. Loads the persisted index and catches up new rows
+        incrementally; full rebuild only if the gap since build is large."""
+        if self._hnsw is not None or self._hnsw_tried:
+            return
+        self._hnsw_tried = True
+        if not HnswIndex.available():
+            return
+        try:
+            with self._conn() as c:
+                tot = c.execute(
+                    "SELECT COUNT(*) AS n, COALESCE(MAX(id), 0) AS m FROM vector_memories"
+                ).fetchone()
+                n = int(tot["n"])
+                max_id = int(tot["m"])
+                if n < HNSW_MIN_ROWS:
+                    return
+                hdr: dict[str, Any] = {}
+                try:
+                    if self._hnsw_meta.exists():
+                        hdr = json.loads(self._hnsw_meta.read_text(encoding="utf-8"))
+                except Exception:  # noqa: BLE001
+                    hdr = {}
+                built_max = int(hdr.get("max_id") or 0)
+                # Reuse persisted index if dims match and it isn't too far behind.
+                if (
+                    self._hnsw_path.exists()
+                    and hdr.get("dim") == VECTOR_DIM
+                    and (max_id - built_max) <= 5000
+                ):
+                    idx = HnswIndex.load(self._hnsw_path, VECTOR_DIM, n, built_max)
+                    if idx is not None:
+                        if max_id > built_max:
+                            new_rows = c.execute(
+                                "SELECT id, vector FROM vector_memories WHERE id > ? ORDER BY id",
+                                (built_max,),
+                            ).fetchall()
+                            for r in new_rows:
+                                try:
+                                    idx.add(json.loads(r["vector"]), int(r["id"]))
+                                except Exception:  # noqa: BLE001
+                                    pass
+                        self._hnsw = idx
+                        return
+            # Fresh build from the full corpus (uses the cached matrix).
+            M, ids, _imp, _types = self.forge_vectors()
+            if M.shape[0] == 0:
+                return
+            idx = HnswIndex.build(M, ids, max_id)
+            if idx is not None:
+                idx.save(self._hnsw_path)
+                try:
+                    self._hnsw_meta.write_text(
+                        json.dumps({"n": n, "max_id": max_id, "dim": VECTOR_DIM}), encoding="utf-8"
+                    )
+                except Exception:  # noqa: BLE001
+                    pass
+                self._hnsw = idx
+        except Exception:  # noqa: BLE001 - scale path must never break recall
+            self._hnsw = None
+
+    def _fetch_meta_by_ids(self, ids: list[int]) -> dict[int, dict[str, Any]]:
+        if not ids:
+            return {}
+        placeholders = ",".join("?" * len(ids))
+        with self._conn() as c:
+            rows = c.execute(
+                f"SELECT id, timestamp, event_type, text, summary, reinforce, importance "
+                f"FROM vector_memories WHERE id IN ({placeholders})",
+                ids,
+            ).fetchall()
+        return {int(r["id"]): self._meta_from_row(r) for r in rows}
+
     def _init_db(self) -> None:
         with self._conn() as c:
+            c.execute("PRAGMA journal_mode=WAL")
+            c.execute("PRAGMA synchronous=NORMAL")
             c.execute(
                 """
                 CREATE TABLE IF NOT EXISTS vector_memories (
@@ -475,6 +704,10 @@ class VectorMemory:
             )
             new_id = int(cur.lastrowid)
 
+        # Keep the full-corpus HNSW index current (incremental add, best-effort).
+        if self._hnsw is not None:
+            self._hnsw.add(vector, new_id)
+
         # Keep the in-memory index in sync if it has already been built.
         if self._matrix is not None:
             row_vec = np.asarray(vector, dtype=np.float32).reshape(1, -1)
@@ -511,6 +744,38 @@ class VectorMemory:
         query_vector = embed_text(query)
         if not any(query_vector):
             return []
+
+        # Full-corpus HNSW: search ALL memories (past RECALL_CAP), fetch meta only
+        # for the top-k. Falls through to the exact capped-matrix path on miss/error.
+        self._ensure_hnsw()
+        if self._hnsw is not None:
+            try:
+                ids, sims = self._hnsw.query(query_vector, max(limit * 8, 48))
+                pairs = [(i, s) for i, s in zip(ids, sims) if s >= SIM_FLOOR]
+                if pairs:
+                    metas = self._fetch_meta_by_ids([i for i, _ in pairs])
+                    qconc = _concepts(query)
+                    hh: list[VectorHit] = []
+                    for i, sim in pairs:
+                        m = metas.get(i)
+                        if not m:
+                            continue
+                        score = float(sim) * m["importance"]
+                        if qconc and m["concepts"]:
+                            overlap = len(qconc & m["concepts"]) / len(qconc)
+                            score += overlap * m["importance"] * 0.25
+                        hh.append(
+                            VectorHit(
+                                id=m["id"], timestamp=m["timestamp"], event_type=m["event_type"],
+                                text=m["text"][:240], summary=m["summary"][:180],
+                                reinforce=m["reinforce"][:180], importance=m["importance"], score=score,
+                            )
+                        )
+                    if hh:
+                        hh.sort(key=lambda hit: (hit.score, hit.id), reverse=True)
+                        return hh[:limit]
+            except Exception:  # noqa: BLE001 - scale path must never break recall
+                pass
 
         self._ensure_index()
         if self._matrix is None or self._matrix.shape[0] == 0:

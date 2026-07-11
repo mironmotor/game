@@ -35,16 +35,30 @@ function runDesktopAgent(payload: unknown): Promise<Record<string, unknown>> {
     });
     child.on('close', (code) => {
       clearTimeout(timeout);
-      const line = stdout.trim().split('\n').filter(Boolean).at(-1);
-      if (!line) {
+      const lines = stdout.trim().split('\n').filter(Boolean);
+      if (lines.length === 0) {
         reject(new Error(stderr || `desktop_agent exited with code ${code}`));
         return;
       }
-      try {
-        resolve(JSON.parse(line));
-      } catch (error) {
-        reject(new Error(`Invalid desktop_agent JSON response: ${String(error)}`));
+      // Python may print a stray warning to stdout before/after the JSON payload;
+      // taking the last line blindly then surfaced as "Malformed JSON 500" in the
+      // console. Scan from the last line backward for the first valid JSON object.
+      let payload: Record<string, unknown> | null = null;
+      for (let i = lines.length - 1; i >= 0; i--) {
+        const candidate = lines[i].trim();
+        if (!candidate.startsWith('{')) continue;
+        try {
+          payload = JSON.parse(candidate) as Record<string, unknown>;
+          break;
+        } catch {
+          // keep scanning older lines
+        }
       }
+      if (!payload) {
+        reject(new Error(`Invalid desktop_agent JSON response: ${stderr || stdout.slice(0, 200)}`));
+        return;
+      }
+      resolve(payload);
     });
 
     child.stdin.end(JSON.stringify(payload));

@@ -355,7 +355,7 @@ export async function generateImage(prompt: string): Promise<string | null> {
 
       for (const part of geminiResponse.candidates?.[0]?.content?.parts || []) {
         if (part.inlineData) {
-          const base64EncodeString: string = part.inlineData.data;
+          const base64EncodeString: string = part.inlineData.data ?? '';
           return `data:${part.inlineData.mimeType || 'image/png'};base64,${base64EncodeString}`;
         }
       }

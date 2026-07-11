@@ -1,16 +1,19 @@
 'use client';
 
 import { useEffect, useRef } from 'react';
-import * as THREE from 'three';
+import { ambientActive, ambientFrame, startAmbient } from '@/lib/ambient-audio';
 
 export type NeuralCoreStatus = 'idle' | 'listening' | 'processing' | 'speaking';
 
 /**
- * Rotating synaptic core: a dense violet point-cloud nucleus with traveling
- * pulse nodes orbiting its surface. The animation speed reacts to Max17's
- * status (idle / listening / processing / speaking). Pure WebGL, no external
- * services — safe for the CPU-only target since it only draws a few thousand
- * additive points.
+ * Адаптивное ядро MAX (2D-канвас): вращающаяся сфера из точек внутри светящегося
+ * розового кольца-гало, которое деформируется и РЕАГИРУЕТ НА ЗВУК ПРОСТРАНСТВА
+ * (микрофон — «уши» MAX). Свечение — через shadowBlur + двойной штрих, поэтому
+ * чисто и ярко на любом размере. Без микрофона — спокойная органическая анимация.
+ *
+ * Микрофон не пишется и никуда не отправляется (см. lib/ambient-audio). Разрешение
+ * запрашивается по первому жесту. Скорость/яркость также зависят от статуса
+ * (idle / listening / processing / speaking) и от того, говорит ли MAX.
  */
 export function NeuralCore({
   className = '',
@@ -19,187 +22,200 @@ export function NeuralCore({
   className?: string;
   status?: NeuralCoreStatus;
 }) {
-  const containerRef = useRef<HTMLDivElement>(null);
+  const canvasRef = useRef<HTMLCanvasElement>(null);
   const statusRef = useRef<NeuralCoreStatus>(status);
+  const externalBusyRef = useRef(false);
+  const speakingRef = useRef(false);
 
   useEffect(() => {
     statusRef.current = status;
   }, [status]);
 
   useEffect(() => {
-    const container = containerRef.current;
-    if (!container) return;
-
-    const width = container.clientWidth || 140;
-    const height = container.clientHeight || 140;
-
-    const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
-    renderer.setSize(width, height);
-    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
-
-    container.innerHTML = '';
-    container.appendChild(renderer.domElement);
-
-    const scene = new THREE.Scene();
-    const camera = new THREE.PerspectiveCamera(50, width / height, 0.1, 100);
-    camera.position.set(0, 0, 5.65);
-
-    // ==================== DENSE NUCLEUS DOTS ====================
-    const DOT_COUNT = 3400;
-    const positions = new Float32Array(DOT_COUNT * 3);
-    const colors = new Float32Array(DOT_COUNT * 3);
-    const phases = new Float32Array(DOT_COUNT);
-    const baseRadius = new Float32Array(DOT_COUNT);
-
-    for (let i = 0; i < DOT_COUNT; i++) {
-      const i3 = i * 3;
-      const phi = Math.acos(2 * Math.random() - 1);
-      const theta = 2 * Math.PI * Math.random();
-      const r = 1.51 + Math.random() * 0.12;
-      baseRadius[i] = r;
-
-      positions[i3] = r * Math.sin(phi) * Math.cos(theta);
-      positions[i3 + 1] = r * Math.sin(phi) * Math.sin(theta);
-      positions[i3 + 2] = r * Math.cos(phi);
-
-      const shade = 0.68 + Math.random() * 0.32;
-      colors[i3] = 0.62 * shade;
-      colors[i3 + 1] = 0.32 * shade;
-      colors[i3 + 2] = 1.0 * shade;
-
-      phases[i] = Math.random() * Math.PI * 2;
-    }
-
-    const dotsGeo = new THREE.BufferGeometry();
-    dotsGeo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
-    dotsGeo.setAttribute('color', new THREE.BufferAttribute(colors, 3));
-
-    const dotsMat = new THREE.PointsMaterial({
-      size: 0.05,
-      vertexColors: true,
-      transparent: true,
-      opacity: 0.94,
-      blending: THREE.AdditiveBlending,
-      depthWrite: false,
-    });
-    const nucleus = new THREE.Points(dotsGeo, dotsMat);
-    scene.add(nucleus);
-
-    // ==================== ORBITING PULSE NODES ====================
-    const PULSE_COUNT = 9;
-    const pulses: THREE.Mesh<THREE.SphereGeometry, THREE.MeshBasicMaterial>[] = [];
-
-    for (let i = 0; i < PULSE_COUNT; i++) {
-      const pulseGeo = new THREE.SphereGeometry(0.052, 18, 18);
-      const pulseMat = new THREE.MeshBasicMaterial({
-        color: 0xe879f9,
-        transparent: true,
-        opacity: 0.95,
-        blending: THREE.AdditiveBlending,
-      });
-      const pulse = new THREE.Mesh(pulseGeo, pulseMat);
-
-      pulse.userData = {
-        lat: Math.random() * Math.PI,
-        lon: Math.random() * Math.PI * 2,
-        speed: 0.019 + Math.random() * 0.012,
-        phase: Math.random() * Math.PI * 2,
-      };
-
-      scene.add(pulse);
-      pulses.push(pulse);
-    }
-
-    // ==================== LIGHT ====================
-    const pointLight = new THREE.PointLight(0xc084fc, 2.5, 120);
-    pointLight.position.set(8, 9, 11);
-    scene.add(pointLight);
-    scene.add(new THREE.AmbientLight(0x1a1433, 0.55));
-
-    let time = 0;
-    let animationFrameId = 0;
-
-    function animate() {
-      animationFrameId = requestAnimationFrame(animate);
-
-      let speedMultiplier = 1;
-      if (statusRef.current === 'processing') speedMultiplier = 2.5;
-      else if (statusRef.current === 'speaking') speedMultiplier = 1.5;
-      else if (statusRef.current === 'listening') speedMultiplier = 0.5;
-
-      time += 0.016 * speedMultiplier;
-
-      nucleus.rotation.y = time * 0.17;
-      nucleus.rotation.x = Math.sin(time * 0.06) * 0.07;
-
-      const posAttr = nucleus.geometry.attributes.position as THREE.BufferAttribute;
-      for (let i = 0; i < DOT_COUNT; i++) {
-        const i3 = i * 3;
-        const osc = Math.sin(time * 1.85 + phases[i]) * 0.03;
-        const r = baseRadius[i] + osc;
-
-        const x = positions[i3];
-        const y = positions[i3 + 1];
-        const z = positions[i3 + 2];
-        const len = Math.sqrt(x * x + y * y + z * z) || 1;
-
-        posAttr.array[i3] = (x / len) * r;
-        posAttr.array[i3 + 1] = (y / len) * r;
-        posAttr.array[i3 + 2] = (z / len) * r;
-      }
-      posAttr.needsUpdate = true;
-
-      pulses.forEach((pulse, idx) => {
-        const data = pulse.userData as {
-          lat: number;
-          lon: number;
-          speed: number;
-          phase: number;
-        };
-        data.lat += data.speed * speedMultiplier;
-        if (data.lat > Math.PI) data.lat = 0.025;
-
-        const r = 1.48 + Math.sin(time * 3.2 + data.phase) * 0.07;
-        pulse.position.set(
-          r * Math.sin(data.lat) * Math.cos(data.lon),
-          r * Math.sin(data.lat) * Math.sin(data.lon),
-          r * Math.cos(data.lat),
-        );
-
-        pulse.scale.setScalar(0.82 + Math.sin(time * 4.8 + idx) * 0.32);
-      });
-
-      renderer.render(scene, camera);
-    }
-
-    animate();
-
-    const handleResize = () => {
-      if (!container) return;
-      const newWidth = container.clientWidth || width;
-      const newHeight = container.clientHeight || height;
-      camera.aspect = newWidth / newHeight;
-      camera.updateProjectionMatrix();
-      renderer.setSize(newWidth, newHeight);
+    const onThinking = (e: Event) => {
+      externalBusyRef.current = Boolean((e as CustomEvent).detail?.active);
     };
-
-    window.addEventListener('resize', handleResize);
-
+    const onSpeaking = (e: Event) => {
+      speakingRef.current = Boolean((e as CustomEvent).detail?.active);
+    };
+    window.addEventListener('max:thinking', onThinking as EventListener);
+    window.addEventListener('max:speaking', onSpeaking as EventListener);
     return () => {
-      cancelAnimationFrame(animationFrameId);
-      window.removeEventListener('resize', handleResize);
-      renderer.dispose();
-      dotsGeo.dispose();
-      dotsMat.dispose();
-      pulses.forEach((p) => {
-        p.geometry.dispose();
-        p.material.dispose();
-      });
-      if (renderer.domElement.parentNode === container) {
-        container.removeChild(renderer.domElement);
-      }
+      window.removeEventListener('max:thinking', onThinking as EventListener);
+      window.removeEventListener('max:speaking', onSpeaking as EventListener);
     };
   }, []);
 
-  return <div ref={containerRef} className={`hud-core-canvas ${className}`} />;
+  // «Уши» MAX: микрофон по первому жесту (политика браузера + согласие).
+  useEffect(() => {
+    if (ambientActive()) return;
+    const tryStart = () => {
+      void startAmbient();
+      window.removeEventListener('pointerdown', tryStart);
+      window.removeEventListener('keydown', tryStart);
+    };
+    window.addEventListener('pointerdown', tryStart);
+    window.addEventListener('keydown', tryStart);
+    return () => {
+      window.removeEventListener('pointerdown', tryStart);
+      window.removeEventListener('keydown', tryStart);
+    };
+  }, []);
+
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    const ctx = canvas?.getContext('2d');
+    if (!canvas || !ctx) return;
+
+    const DPR = Math.min(window.devicePixelRatio || 1, 2);
+    let W = 0;
+    let H = 0;
+    const resize = () => {
+      const r = canvas.getBoundingClientRect();
+      W = Math.max(80, r.width);
+      H = Math.max(80, r.height);
+      canvas.width = Math.round(W * DPR);
+      canvas.height = Math.round(H * DPR);
+    };
+    resize();
+    const ro = new ResizeObserver(resize);
+    ro.observe(canvas);
+
+    // Сфера из точек (распределение Фибоначчи — равномерно по поверхности).
+    const N = 520;
+    const pts: Array<[number, number, number]> = [];
+    for (let i = 0; i < N; i++) {
+      const y = 1 - (i / (N - 1)) * 2;
+      const rr = Math.sqrt(Math.max(0, 1 - y * y));
+      const phi = i * Math.PI * (3 - Math.sqrt(5));
+      pts.push([Math.cos(phi) * rr, y, Math.sin(phi) * rr]);
+    }
+
+    const RN = 180; // сегментов кольца
+    const ringR = new Float32Array(RN); // временно-сглаженный радиус
+    const ringRS = new Float32Array(RN); // + пространственно-сглаженный
+    const ringX = new Float32Array(RN);
+    const ringY = new Float32Array(RN);
+    let ringInited = false;
+    let t = 0;
+    let audioLevel = 0;
+    let raf = 0;
+
+    const draw = () => {
+      raf = requestAnimationFrame(draw);
+      ctx.save();
+      ctx.scale(DPR, DPR);
+
+      const af = ambientFrame();
+      const rawLevel = af ? af.level : 0;
+      audioLevel += (rawLevel - audioLevel) * 0.2;
+
+      let speed = 1;
+      if (statusRef.current === 'processing' || externalBusyRef.current) speed = 2.4;
+      else if (statusRef.current === 'speaking' || speakingRef.current) speed = 1.6;
+      else if (statusRef.current === 'listening') speed = 0.6;
+      speed += audioLevel * 1.8;
+      t += 0.016 * speed;
+
+      ctx.clearRect(0, 0, W, H);
+      const cx = W / 2;
+      const cy = H / 2;
+      const minDim = Math.min(W, H);
+      const sphereR = minDim * 0.3 + audioLevel * minDim * 0.03;
+      const ringBase = minDim * 0.37;
+      const deform = minDim * 0.14;
+
+      // Лёгкое центральное свечение.
+      const cg = ctx.createRadialGradient(cx, cy, 0, cx, cy, sphereR * 1.3);
+      cg.addColorStop(0, `rgba(255,60,220,${0.1 + audioLevel * 0.22})`);
+      cg.addColorStop(1, 'rgba(255,60,220,0)');
+      ctx.fillStyle = cg;
+      ctx.fillRect(0, 0, W, H);
+
+      // Вращающаяся сфера из точек.
+      const ay = t * 0.4;
+      const ax = Math.sin(t * 0.25) * 0.3;
+      const cosY = Math.cos(ay);
+      const sinY = Math.sin(ay);
+      const cosX = Math.cos(ax);
+      const sinX = Math.sin(ax);
+      for (let i = 0; i < N; i++) {
+        const p = pts[i];
+        const x1 = p[0] * cosY - p[2] * sinY;
+        const z1 = p[0] * sinY + p[2] * cosY;
+        const y1 = p[1] * cosX - z1 * sinX;
+        const z2 = p[1] * sinX + z1 * cosX;
+        const depth = (z2 + 1) / 2;
+        const px = cx + x1 * sphereR;
+        const py = cy + y1 * sphereR;
+        ctx.beginPath();
+        ctx.arc(px, py, 0.6 + depth * (1 + minDim * 0.004), 0, 6.283);
+        ctx.fillStyle = `rgba(255,${Math.round(55 + depth * 85)},${Math.round(200 + depth * 45)},${0.14 + depth * 0.55})`;
+        ctx.fill();
+      }
+
+      // Светящееся кольцо-гало: органика + живой спектр микрофона.
+      // 1) целевой радиус на сегмент → 2) временное сглаживание → 3) простран-
+      // ственное сглаживание → 4) гладкая замкнутая кривая (квадратики через
+      // средние точки). Так контур плавный, без рваных углов.
+      for (let i = 0; i < RN; i++) {
+        const a = (i / RN) * Math.PI * 2;
+        let band = 0;
+        if (af) {
+          const bin = Math.floor((i / RN) * af.bins * 0.55);
+          band = af.data[bin] / 255;
+        }
+        const organic = Math.sin(t * 0.9 + a * 3) * (minDim * 0.018) + Math.sin(t * 1.7 + a * 5 + 1.3) * (minDim * 0.013);
+        const target = ringBase + organic + band * deform;
+        ringR[i] = ringInited ? ringR[i] + (target - ringR[i]) * 0.3 : target;
+      }
+      ringInited = true;
+      for (let pass = 0; pass < 2; pass++) {
+        // циклическое сглаживание соседей (1-2-1), 2 прохода
+        const src = pass === 0 ? ringR : ringRS;
+        const dst = ringRS;
+        for (let i = 0; i < RN; i++) {
+          const pr = src[(i - 1 + RN) % RN];
+          const nx = src[(i + 1) % RN];
+          dst[i] = (pr + 2 * src[i] + nx) * 0.25;
+        }
+      }
+      for (let i = 0; i < RN; i++) {
+        const a = (i / RN) * Math.PI * 2;
+        ringX[i] = Math.cos(a) * ringRS[i];
+        ringY[i] = Math.sin(a) * ringRS[i];
+      }
+
+      ctx.save();
+      ctx.translate(cx, cy);
+      ctx.rotate(t * 0.05);
+      ctx.lineJoin = 'round';
+      ctx.lineCap = 'round';
+      ctx.shadowColor = 'rgba(255,60,220,0.9)';
+      ctx.shadowBlur = minDim * 0.06 + audioLevel * minDim * 0.09;
+      for (let pass = 0; pass < 2; pass++) {
+        ctx.beginPath();
+        ctx.moveTo((ringX[RN - 1] + ringX[0]) * 0.5, (ringY[RN - 1] + ringY[0]) * 0.5);
+        for (let i = 0; i < RN; i++) {
+          const j = (i + 1) % RN;
+          ctx.quadraticCurveTo(ringX[i], ringY[i], (ringX[i] + ringX[j]) * 0.5, (ringY[i] + ringY[j]) * 0.5);
+        }
+        ctx.closePath();
+        ctx.strokeStyle = pass === 0 ? 'rgba(255,90,230,0.95)' : 'rgba(255,180,248,0.9)';
+        ctx.lineWidth = pass === 0 ? Math.max(2, minDim * 0.016) : Math.max(1, minDim * 0.005);
+        ctx.stroke();
+      }
+      ctx.restore();
+      ctx.restore();
+    };
+
+    draw();
+
+    return () => {
+      cancelAnimationFrame(raf);
+      ro.disconnect();
+    };
+  }, []);
+
+  return <canvas ref={canvasRef} className={`hud-core-canvas ${className}`} />;
 }

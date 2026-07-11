@@ -42,6 +42,8 @@ VOLATILE_KEYS = frozenset(
         # Environmental absolute path embedded by get_ultimate_state in the Ultra
         # snapshot — differs between the two ephemeral parity dirs by design.
         "state_dir",
+        # Append-only growth log (timestamps + accumulated totals) — volatile by design.
+        "growth_history",
     }
 )
 

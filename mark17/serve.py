@@ -64,6 +64,15 @@ def main() -> int:
 
     stores = _build_stores(args, args.state_dir)
 
+    # Прогрев ДО приёма запросов: строим рекол-индекс и трогаем граф, чтобы первый
+    # user_message не платил ~12с холодной загрузки (иначе бюджет → десинк демона).
+    try:
+        stores.vector_memory._ensure_index()
+        stores.vector_memory._ensure_hnsw()  # полнокорпусный HNSW готов до первого recall
+        stores.synapse_graph.count()
+    except Exception:
+        pass
+
     for line in sys.stdin:
         line = line.strip()
         if not line:

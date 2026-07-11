@@ -10,6 +10,7 @@ import argparse
 import hashlib
 import json
 import os
+import re
 import sys
 import tempfile
 import traceback
@@ -41,7 +42,11 @@ from mark17.meaning_tree import MeaningTree
 from mark17.ultra_orchestrator import decide as ultra_decide, gather_state as ultra_gather_state
 from mark17.music_sense import aggregate_taste, analyze_music, mood_music_spec
 from mark17.corpus_ingest import ingest_path, ingest_text
+from mark17.growth_log import history as growth_history, record as growth_record
 from mark17.self_state import SelfState
+from mark17.skill_graph import SKILLS as SKILL_LABELS, SkillGraph
+from mark17.synapse_forge import forge as forge_synapses
+from mark17.guardian import is_clean as _guard_clean, record as _guard_record, total as _guard_total
 from mark17.concepts import ConceptGrounding
 from mark17.concept_compression import compress_to_concept
 from mark17.concept_codec import extract_concepts as codec_extract_concepts
@@ -90,6 +95,9 @@ ALLOWED_EVENTS = frozenset(
         "action_skipped",
         "compress_memory",
         "graph_stats",
+        "system_scales",
+        "skills",
+        "synapse_forge",
         "neural_seed",
         "neural_walk",
         "internal_dream",
@@ -98,6 +106,16 @@ ALLOWED_EVENTS = frozenset(
         "web_ingest",
         "autonomous_research",
         "ultimate_bootstrap",
+        "memory_recall",
+        "memory_store",
+        "llm_raw",
+        "heart",
+        "cache_stats",
+        "agent_experience",
+        "missions",
+        "cluster",
+        "health",
+        "chrono_day",
     }
 )
 
@@ -124,7 +142,7 @@ def _as_event(data: dict[str, Any]) -> Event:
         if key not in {"type", "event", "source", "ts"}
     }
 
-    if event_type in {"user_message", "compress_memory", "compile_semantic", "ingest_corpus"}:
+    if event_type in {"user_message", "compress_memory", "compile_semantic", "ingest_corpus", "memory_recall", "memory_store", "llm_raw"}:
         text = data.get("message") or data.get("text") or data.get("content") or ""
         payload["text"] = str(text)
     elif event_type in {"web_research", "web_ingest"}:
@@ -191,7 +209,7 @@ def _confidence(result: dict[str, Any]) -> float:
 
 
 def _recalled_memories(event: Event, brain: Mark17Brain) -> list[dict[str, Any]]:
-    if event.type != "user_message":
+    if event.type not in {"user_message", "memory_recall"}:
         return []
 
     query = str(event.payload.get("text") or "").strip()
@@ -207,19 +225,53 @@ def _recalled_memories(event: Event, brain: Mark17Brain) -> list[dict[str, Any]]
             "summary": hit.content.get("hint") or hit.signature[:120],
             "reinforce": hit.content.get("payload", {}).get("reinforce"),
         }
-        for hit in brain.memory.recall(query, limit=3)
+        for hit in brain.memory.recall(query, limit=6)
     ]
 
 
+_OUTCOME_STATUS = {
+    "outcome_success": "success",
+    "action_done": "success",
+    "outcome_failure": "failure",
+    "outcome_partial": "partial",
+    "action_skipped": "skipped",
+}
+
+
+def _recalled_outcomes(event: Event, brain: Mark17Brain) -> list[dict[str, Any]]:
+    """Past outcomes relevant to the query, so the planner can avoid what failed
+    and reinforce what worked (closes the learning loop into decisions)."""
+    if event.type not in {"user_message", "memory_recall"}:
+        return []
+    query = str(event.payload.get("text") or "").strip()
+    if not query:
+        return []
+    out: list[dict[str, Any]] = []
+    for hit in brain.memory.recall(query, limit=10):
+        status = _OUTCOME_STATUS.get(hit.event_type)
+        if not status:
+            continue
+        out.append(
+            {
+                "text": hit.content.get("hint") or hit.signature[:120],
+                "status": status,
+                "score": round(hit.score, 3),
+            }
+        )
+        if len(out) >= 5:
+            break
+    return out
+
+
 def _semantic_memories(event: Event, vector_memory: VectorMemory) -> list[dict[str, Any]]:
-    if event.type != "user_message":
+    if event.type not in {"user_message", "memory_recall"}:
         return []
 
     query = str(event.payload.get("text") or "").strip()
     if not query:
         return []
 
-    return [hit.to_dict() for hit in vector_memory.recall(query, limit=3)]
+    return [hit.to_dict() for hit in vector_memory.recall(query, limit=6)]
 
 
 def _recent_consolidated_patterns(brain: Mark17Brain, *, limit: int = 5) -> list[dict[str, Any]]:
@@ -248,6 +300,266 @@ def _recent_consolidated_patterns(brain: Mark17Brain, *, limit: int = 5) -> list
             }
         )
     return patterns
+
+
+def _handle_memory_recall(
+    event: Event, brain: Mark17Brain, vector_memory: VectorMemory
+) -> dict[str, Any]:
+    """Fast, network-free recall: graph + vector memory only — no LLM voice, no web.
+
+    Used by the MAX orchestrator's Memory Agent so the council stays instant while
+    still being grounded in real Max17 memory (a user_message would also fire the
+    Gonka voice + web sense, ~17s)."""
+    return {
+        "ok": True,
+        "route": "memory_recall",
+        "memory": {
+            "recalled": _recalled_memories(event, brain),
+            "semantic": _semantic_memories(event, vector_memory),
+        },
+        "outcomes": _recalled_outcomes(event, brain),
+        "consolidation": {"patterns": _recent_consolidated_patterns(brain)},
+        "plasticity": {},
+        "llm": {"status": "skipped", "text": "recall only", "latency_ms": 0.0},
+        "confidence": 0.0,
+        "next_adaptation": "recall only",
+    }
+
+
+def _handle_memory_store(
+    event: Event, brain: Mark17Brain, vector_memory: VectorMemory
+) -> dict[str, Any]:
+    """Fast, network-free write: persist an orchestrator turn into graph + vector
+    memory so the council remembers its own past goals/decisions. No LLM, no web."""
+    text = str(event.payload.get("text") or "").strip()
+    if not text:
+        return {
+            "ok": False,
+            "route": "memory_store",
+            "memory": {},
+            "plasticity": {},
+            "llm": {"status": "skipped"},
+            "confidence": 0.0,
+            "next_adaptation": "nothing to store",
+        }
+    note = str(event.payload.get("note") or text)
+    brain.memory.remember(
+        Event(
+            type="remember",
+            payload={
+                "note": note,
+                "event_type": "orchestrator_turn",
+                "reinforce": "orchestrator",
+                "payload": {"reinforce": "orchestrator"},
+            },
+            source="orchestrator",
+        ),
+        hint=text,
+        action="orchestrator_turn",
+    )
+    vector_id = vector_memory.remember(
+        event,
+        {"score": 0.6, "reason": note, "store_memory": True, "reinforce": "orchestrator"},
+    )
+    return {
+        "ok": True,
+        "route": "memory_store",
+        "stored": {"hippocampus": True, "vector": vector_id},
+        "memory": {"recalled": [], "semantic": []},
+        "plasticity": {},
+        "llm": {"status": "skipped", "text": "store only", "latency_ms": 0.0},
+        "confidence": 0.0,
+        "next_adaptation": "stored",
+    }
+
+
+def _handle_llm_raw(event: Event) -> dict[str, Any]:
+    """Raw LLM call (Gonka) for a single prompt — no memory, no web, no synapses.
+    Powers the orchestrator's deep/LLM-grounded agent mode from the TS side."""
+    prompt = str(event.payload.get("text") or "").strip()
+    system = str(event.payload.get("system") or "")
+    base = {
+        "route": "llm_raw",
+        "memory": {},
+        "plasticity": {},
+        "confidence": 0.0,
+        "next_adaptation": "llm_raw",
+        "llm_text": "",
+    }
+    if not prompt:
+        return {**base, "ok": False, "llm": {"status": "error"}, "error": "empty prompt"}
+    if not gonka_is_enabled("chat"):
+        return {**base, "ok": False, "llm": {"status": "disabled"}, "error": "gonka disabled"}
+    messages: list[dict[str, str]] = []
+    if system:
+        messages.append({"role": "system", "content": system})
+    messages.append({"role": "user", "content": prompt})
+    try:
+        max_tokens = int(event.payload.get("max_tokens") or 700)
+    except (TypeError, ValueError):
+        max_tokens = 700
+    response_format = {"type": "json_object"} if event.payload.get("json") else None
+    res = gonka_chat(messages, role="chat", max_tokens=max_tokens, temperature=0.4, response_format=response_format)
+    return {
+        **base,
+        "ok": bool(res.ok),
+        "llm": {"status": res.status, "model": res.model, "latency_ms": res.latency_ms},
+        "llm_text": res.text,
+        "error": None if res.ok else res.error,
+    }
+
+
+def _handle_heart(event: Event) -> dict[str, Any]:
+    """Сердце MAX — снимок слоя привязанности; опционально запоминает важное.
+    payload: {remember?: str, bond?: str, creator?: str} — всё необязательно."""
+    base = {"route": "heart", "memory": {}, "plasticity": {}, "confidence": 1.0, "next_adaptation": "heart"}
+    try:
+        from mark17 import heart as _heart
+    except Exception as exc:  # noqa: BLE001
+        return {**base, "ok": False, "error": str(exc)}
+    remember = str(event.payload.get("remember") or "").strip()
+    bond = str(event.payload.get("bond") or "").strip()
+    creator = str(event.payload.get("creator") or "").strip()
+    if remember:
+        _heart.remember(remember)
+    if bond:
+        _heart.note_bond(bond)
+    if creator:
+        _heart.note_creator(creator)
+    return {**base, "ok": True, "heart": _heart.snapshot()}
+
+
+_AX_STOP = {
+    "это", "что", "как", "для", "при", "под", "над", "без", "про", "его", "так",
+    "the", "and", "for", "with", "this", "that", "сделай", "напиши", "покажи",
+    "пожалуйста", "можешь", "мне", "нужно", "надо",
+}
+
+
+def _simple_concepts(text: str, limit: int = 6) -> list[str]:
+    """Лёгкое извлечение концептов из текста задачи (без LLM): значимые слова."""
+    out: list[str] = []
+    seen: set[str] = set()
+    for tok in re.split(r"[^\wа-яёА-ЯЁ]+", str(text or "").lower()):
+        if len(tok) < 4 or tok in _AX_STOP or tok in seen:
+            continue
+        seen.add(tok)
+        out.append(tok)
+        if len(out) >= limit:
+            break
+    return out
+
+
+def _handle_agent_experience(event: Event, state_dir: Path, stores: "Mark17Stores") -> dict[str, Any]:
+    """№4 — агент→граф: успех агента пишется как ЗАРАБОТАННЫЙ (validated) синапс.
+    Один писатель (демон) → без гонок. Концепты задачи усиливаются исходом."""
+    base = {"route": "agent_experience", "memory": {}, "plasticity": {}, "confidence": 1.0, "next_adaptation": "agent_experience"}
+    agent = str(event.payload.get("agent") or "code")
+    text = _event_text(event)
+    ok = bool(event.payload.get("ok", True))
+    try:
+        score = float(event.payload.get("score") or (0.9 if ok else 0.18))
+    except (TypeError, ValueError):
+        score = 0.9 if ok else 0.18
+    concepts = _simple_concepts(text)
+    exp = stores.synapse_graph.agent_experience_to_graph(
+        agent=agent, request_text=text, concepts=concepts, ok=ok, score=score,
+    )
+    validated = stores.synapse_graph.validated_count()
+    total = stores.synapse_graph.count()
+    try:
+        from mark17 import growth_log as _gl
+        _gl.record_event(state_dir, {"kind": "agent_experience", "agent": agent, "ok": ok, "written": exp["written"], "validated": validated})
+    except Exception:  # noqa: BLE001
+        pass
+    return {**base, "ok": True, "agent_experience": {**exp, "agent": agent, "concepts": concepts, "validated_synapses": validated, "total_synapses": total}}
+
+
+def _handle_missions(event: Event) -> dict[str, Any]:
+    """Трекер миссий — живая доска целей. action: list|add|update|complete|focus|remove."""
+    base = {"route": "missions", "memory": {}, "plasticity": {}, "confidence": 1.0, "next_adaptation": "missions"}
+    try:
+        from mark17 import missions as _m
+    except Exception as exc:  # noqa: BLE001
+        return {**base, "ok": False, "error": str(exc)}
+    p = event.payload
+    action = str(p.get("action") or "list").lower()
+    mid = str(p.get("id") or "")
+    if action == "add":
+        snap = _m.add(str(p.get("title") or ""), str(p.get("why") or ""), str(p.get("next_step") or ""))
+    elif action == "update":
+        fields = {k: p[k] for k in ("title", "why", "next_step", "status", "progress", "note") if k in p}
+        snap = _m.update(mid, **fields)
+    elif action == "complete":
+        snap = _m.complete(mid)
+    elif action == "focus":
+        snap = _m.set_active(mid)
+    elif action == "remove":
+        snap = _m.remove(mid)
+    else:
+        snap = _m.snapshot()
+    return {**base, "ok": True, "missions": snap}
+
+
+def _handle_cluster(event: Event) -> dict[str, Any]:
+    """MAX GOD кластер: статус воркера / настройка адреса / диспатч задания на воркер."""
+    base = {"route": "cluster", "memory": {}, "plasticity": {}, "confidence": 1.0, "next_adaptation": "cluster"}
+    try:
+        from mark17 import cluster as _c
+    except Exception as exc:  # noqa: BLE001
+        return {**base, "ok": False, "error": str(exc)}
+    p = event.payload
+    action = str(p.get("action") or "status").lower()
+    if action == "set_worker":
+        _c.set_worker(str(p.get("url") or ""))
+        return {**base, "ok": True, "cluster": _c.status()}
+    if action == "dispatch":
+        inner = p.get("event")
+        if not isinstance(inner, dict):
+            return {**base, "ok": False, "error": "нет event для диспатча"}
+        res = _c.dispatch(inner)
+        return {**base, "ok": bool(res.get("ok")), "cluster": {**_c.status(), "result": res}}
+    return {**base, "ok": True, "cluster": _c.status()}
+
+
+def _handle_chrono_day(event: Event) -> dict[str, Any]:
+    """ChronoSync «Фаза дня»: 3 действия из миссий + фокус + стоп через призму фазы месяца."""
+    base = {"route": "chrono", "memory": {}, "plasticity": {}, "confidence": 1.0, "next_adaptation": "chrono"}
+    try:
+        from mark17 import chrono as _ch
+    except Exception as exc:  # noqa: BLE001
+        return {**base, "ok": False, "error": str(exc)}
+    return {**base, "ok": True, "chrono": _ch.phase_of_day(event.payload)}
+
+
+def _handle_health(event: Event) -> dict[str, Any]:
+    """Доктор: свип здоровья GAME+MAX / безопасный авто-фикс. action: sweep|fix."""
+    base = {"route": "health", "memory": {}, "plasticity": {}, "confidence": 1.0, "next_adaptation": "health"}
+    try:
+        from mark17 import doctor as _d
+    except Exception as exc:  # noqa: BLE001
+        return {**base, "ok": False, "error": str(exc)}
+    p = event.payload
+    action = str(p.get("action") or "sweep").lower()
+    if action == "fix":
+        res = _d.apply_fix(str(p.get("fix_action") or ""))
+        report = _d.health_sweep(p)
+        report["fix"] = res
+        return {**base, "ok": bool(res.get("ok")), "health": report}
+    return {**base, "ok": True, "health": _d.health_sweep(p)}
+
+
+def _handle_cache_stats(event: Event) -> dict[str, Any]:
+    """Fast-path LLM cache: hit-rate мониторинг. payload {clear?: bool}."""
+    base = {"route": "cache_stats", "memory": {}, "plasticity": {}, "confidence": 1.0, "next_adaptation": "cache_stats"}
+    try:
+        from mark17 import gonka_bridge as _gb
+
+        if event.payload.get("clear"):
+            _gb.cache_clear()
+        return {**base, "ok": True, "cache": _gb.cache_stats()}
+    except Exception as exc:  # noqa: BLE001
+        return {**base, "ok": False, "error": str(exc)}
 
 
 def _merge_memory(
@@ -503,11 +815,35 @@ def _handle_internal_dream(
     except (TypeError, ValueError):
         limit = 5
 
-    dream = generate_synergies(recent_patterns, top_synapses, concepts, limit=limit)
+    heart_signal = event.payload.get("heart_signal")
+    if not isinstance(heart_signal, dict):
+        try:
+            from mark17 import heart as _heart
+
+            heart_signal = _heart.signal()
+        except Exception:  # noqa: BLE001
+            heart_signal = None
+
+    dream = generate_synergies(
+        recent_patterns,
+        top_synapses,
+        concepts,
+        limit=limit,
+        heart_signal=heart_signal if isinstance(heart_signal, dict) else None,
+    )
+    persist_raw = event.payload.get("persist", True)
+    persist = not (
+        persist_raw is False
+        or persist_raw == 0
+        or str(persist_raw).strip().lower() in {"0", "false", "no", "off"}
+    )
+    blocked = bool(dream.get("blocked"))
 
     stored = 0
     for synergy in dream.get("synergies", []):
         if not isinstance(synergy, dict):
+            continue
+        if blocked or not persist:
             continue
         title = str(synergy.get("title") or "")
         summary = str(synergy.get("summary") or "")
@@ -520,6 +856,8 @@ def _handle_internal_dream(
                 "summary": summary,
                 "concepts": synergy.get("concepts", []),
                 "confidence": confidence,
+                "heart_signal_id": (heart_signal or {}).get("signal_id") if isinstance(heart_signal, dict) else "",
+                "heart_guided": bool(synergy.get("heart_guided")),
             },
             source="dreamer",
         )
@@ -537,7 +875,12 @@ def _handle_internal_dream(
                 target_id=right,
                 relation_type="synergy_with",
                 weight=confidence,
-                metadata={"origin": "internal_dream", "title": title},
+                metadata={
+                    "origin": "internal_dream",
+                    "title": title,
+                    "heart_guided": bool(synergy.get("heart_guided")),
+                    "heart_signal_id": (heart_signal or {}).get("signal_id") if isinstance(heart_signal, dict) else "",
+                },
             )
         stored += 1
 
@@ -547,23 +890,52 @@ def _handle_internal_dream(
     synergies = dream.get("synergies")
     if isinstance(synergies, list) and synergies and isinstance(synergies[0], dict):
         top_title = str(synergies[0].get("title") or "")
-    answer_text = (
-        f"Во внутреннем сне я собрал {stored} синергий из уже знакомых связей. "
-        + (f"Сильнее всего проявилась: {top_title}. " if top_title else "")
-        + "Это гипотезы — их стоит проверить маленьким реальным действием."
-    )
+    if blocked:
+        answer_text = (
+            "Сон остановлен сердцем: сейчас важнее безопасность, отдых и живой контакт, "
+            "а не генерация новых связей."
+        )
+    elif not persist:
+        answer_text = (
+            f"Во внутреннем сне я предложил {len(synergies) if isinstance(synergies, list) else 0} синергий без записи в память. "
+            + (f"Сильнее всего проявилась: {top_title}. " if top_title else "")
+            + "Это режим черновика: можно посмотреть Explain и решить, что проверять."
+        )
+    else:
+        answer_text = (
+            f"Во внутреннем сне я собрал {stored} синергий из уже знакомых связей. "
+            + (f"Сильнее всего проявилась: {top_title}. " if top_title else "")
+            + "Это гипотезы — их стоит проверить маленьким реальным действием."
+        )
+    confidence = 0.0 if blocked else (0.35 if not persist else 0.6)
+    learned = bool((not blocked) and persist)
 
     return {
         "ok": True,
         "event_type": event.type,
         "route": "internal_dream",
-        "memory": {"dream_synergies_stored": stored},
-        "plasticity": {"confidence": 0.6, "action": "dream", "learned": True},
+        "memory": {
+            "dream_synergies_stored": stored,
+            "dream_synergies_proposed": len(synergies) if isinstance(synergies, list) else 0,
+            "persisted": persist and not blocked,
+        },
+        "plasticity": {"confidence": confidence, "action": "dream", "learned": learned},
         "llm": {"status": "skipped", "text": "LLM отключён для внутреннего сна.", "latency_ms": 0.0},
-        "confidence": 0.6,
-        "next_adaptation": "Связать новые синергии с реальными задачами и проверить на практике.",
+        "confidence": confidence,
+        "next_adaptation": (
+            "Остановить творческий сон и перейти к заботе/восстановлению."
+            if blocked
+            else (
+                "Рассмотреть предложения сна без записи и выбрать маленькую проверку."
+                if not persist
+                else "Связать новые синергии с реальными задачами и проверить на практике."
+            )
+        ),
         "dream": dream,
-        "answer": {"text": answer_text, "source": "dreamer", "confidence": 0.6},
+        "dream_persistence": "blocked" if blocked else ("stored" if persist else "proposal_only"),
+        "heart_influence": dream.get("heart_influence"),
+        "explain": dream.get("explain"),
+        "answer": {"text": answer_text, "source": "dreamer", "confidence": confidence},
     }
 
 
@@ -612,11 +984,16 @@ def _remember_web_facts(
 
     stored_memory_ids: list[int] = []
     touched: list[int] = []
+    blocked = 0
     for fact in facts[:12]:
         if not isinstance(fact, dict):
             continue
         claim = str(fact.get("claim") or "").strip()
         if not claim:
+            continue
+        # Ангел безопасности: войну/политику/пороки из веба — не в ядро MAX.
+        if not _guard_clean(claim):
+            blocked += 1
             continue
         fact_id = str(fact.get("fact_id") or _stable_id("web_fact", claim))
         source_id = str(fact.get("id") or fact.get("source_id") or "source")
@@ -706,9 +1083,12 @@ def _remember_web_facts(
                     )
                 )
 
+    if blocked:
+        _guard_record(blocked)
     return {
         "stored_facts": len(stored_memory_ids),
         "stored_memory_ids": stored_memory_ids[:8],
+        "guardian_blocked": blocked,
         "synapses": {
             "updated": len(touched),
             "top": synapse_graph._fetch_synapses(touched, limit=3),
@@ -789,6 +1169,73 @@ def _handle_web_research(
     if answer:
         result["answer"] = answer
     brain.plasticity.save()
+    return result
+
+
+def _handle_research_inline(event: Event, args: argparse.Namespace, stores: Mark17Stores) -> dict[str, Any]:
+    """Чат-ресёрч по запросу: веб → Ангел → граф → curiosity (автопетля) →
+    естественный ответ Gonka из свежих фактов. Так «найди X» реально исследует."""
+    query = _event_text(event)
+    # Чистим тему от командных слов → ищем суть («кремний»), а не всю фразу.
+    topic = re.sub(
+        r"(?iu)\b(найди|найти|поищи|погугли|загугли|нагугли|разузнай|разведай|исследуй|"
+        r"исследовать|ресёрч|ресерч|research|узнай|что\s+такое|сделай|свой)\b",
+        " ",
+        query,
+    )
+    topic = re.sub(r"\s+", " ", topic).strip(" -—:,.«»\"") or query
+    research = web_research(
+        query=topic,
+        source_memory=stores.source_memory,
+        allow_network=_web_enabled(args),
+        limit=4,
+    )
+    stored = _remember_web_facts(
+        event=Event(type="web_fact", payload={"query": topic}, source="research"),
+        research=research,
+        brain=stores.brain,
+        vector_memory=stores.vector_memory,
+        synapse_graph=stores.synapse_graph,
+    )
+    # Автопетля: тему в очередь — в простое MAX дозабьёт её глубже сам.
+    try:
+        stores.curiosity.record_gap(topic, source="user")
+    except Exception:
+        pass
+    facts = research.get("facts") if isinstance(research.get("facts"), list) else []
+    fact_scores = [
+        float(f.get("confidence") or 0.0)
+        for f in facts
+        if isinstance(f, dict) and isinstance(f.get("confidence"), (int, float))
+    ]
+    confidence = round(sum(fact_scores) / len(fact_scores), 4) if fact_scores else 0.4
+    n_facts = int(stored.get("stored_facts") or 0)
+    blocked = int(stored.get("guardian_blocked") or 0)
+    note = f"Исследовал «{topic[:60]}»: +{n_facts} фактов в память" + (f", Ангел отсёк {blocked}" if blocked else "") + "."
+    result: dict[str, Any] = {
+        "ok": True,
+        "event_type": "user_message",
+        "route": "research",
+        "memory": {"recalled": [], "semantic": []},
+        "plasticity": {"confidence": confidence, "action": "research", "learned": n_facts > 0},
+        "llm": {"status": "pending", "text": "", "latency_ms": 0.0},
+        "confidence": confidence,
+        "next_adaptation": note,
+        "self_evaluation": {"score": confidence, "reason": f"inline research {n_facts} facts", "store_memory": False, "reinforce": "research"},
+        "web": {**research, "stored_facts": n_facts},
+        "synapses": stored.get("synapses", {}),
+        "research": {"query": topic, "stored_facts": n_facts, "guardian_blocked": blocked, "status": research.get("status")},
+    }
+    draft = compose_answer(event, result, result["self_evaluation"])
+    if draft:
+        result["answer"] = draft
+    # Gonka формулирует ответ из свежих фактов (если включена).
+    _synthesize_natural_answer(result, event, stores.working_memory)
+    try:
+        stores.skills.record("research", success=0.9 if n_facts else 0.5)
+    except Exception:
+        pass
+    stores.brain.plasticity.save()
     return result
 
 
@@ -892,6 +1339,8 @@ def _dispatch_result(event: Event, intent: dict[str, Any]) -> dict[str, Any]:
     text = (
         "Похоже на задачу для кода — открываю код-режим и передаю её агенту Qwen3."
         if route == "code"
+        else "Открываю Режим 777 — сочиняю трек с нуля и запускаю. Слушай и смотри визуал."
+        if route == "music"
         else "Похоже на задачу для рабочего стола — открываю desktop-режим и передаю её агенту."
     )
     return {
@@ -1011,13 +1460,21 @@ def _handle_ingest_corpus(event: Event, stores: Mark17Stores) -> dict[str, Any]:
     path = str(event.payload.get("path") or "").strip()
     text = str(event.payload.get("text") or "").strip()
     if path:
-        report = ingest_path(path, compiler=compiler, vector_memory=stores.vector_memory, synapse_graph=stores.synapse_graph)
+        report = ingest_path(
+            path,
+            compiler=compiler,
+            vector_memory=stores.vector_memory,
+            synapse_graph=stores.synapse_graph,
+            max_files=80,
+            max_chunks_per_file=12000,
+        )
         label = f"путь «{report.get('root', path)}» ({report.get('files', 0)} файлов)"
     else:
         report = ingest_text(text, source="hud", compiler=compiler, vector_memory=stores.vector_memory, synapse_graph=stores.synapse_graph)
         label = f"{report.get('chunks', 0)} фрагментов"
     added = int(report.get("synapses_added") or 0)
     total = int(report.get("synapses_after") or stores.synapse_graph.count())
+    growth_record(stores.state_dir, total)
     to_goal = max(0, 1_000_000 - total)
     if report.get("error"):
         text_out = f"Не смог проглотить: {report['error']}"
@@ -1289,6 +1746,12 @@ def _handle_autonomous_research(
     }
     if isinstance(summary.get("synapses"), dict):
         result["synapses"] = summary["synapses"]
+    try:
+        stores.skills.record("research", success=0.9 if learned else 0.45)
+        if learned:
+            stores.skills.record("growth", success=0.85, weight=0.6)
+    except Exception:
+        pass
     return result
 
 
@@ -1563,6 +2026,27 @@ def _gonka_memory_block(result: dict[str, Any], working_memory: WorkingMemory) -
     return "\n".join(lines)
 
 
+def _enforce_crisis_safety(result: dict[str, Any], event: Event) -> None:
+    """Гарантия охраны жизни: при угрозе себе к ответу ВСЕГДА добавляется человеческий
+    блок с линиями помощи и вопросом о безопасности — детерминированно, поверх любого
+    текста LLM (модель в кризисе ненадёжна и может начать «мотивировать работать»)."""
+    try:
+        from mark17 import heart as _heart
+
+        if not _heart.should_show_lifeline(_event_text(event)):
+            return
+        safety = _heart.crisis_safety_message()
+        answer = result.get("answer")
+        if isinstance(answer, dict):
+            body = str(answer.get("text") or "").strip()
+            answer["text"] = safety + ("\n\n" + body if body else "")
+            answer["crisis"] = True
+        else:
+            result["answer"] = {"text": safety, "source": "heart_safety", "confidence": 1.0, "crisis": True}
+    except Exception:  # noqa: BLE001
+        pass
+
+
 def _synthesize_natural_answer(result: dict[str, Any], event: Event, working_memory: WorkingMemory) -> None:
     """Optional voice layer: turn the retrieved source-backed facts + live camera
     vision + the deterministic draft into a natural reply via the Gonka
@@ -1582,27 +2066,58 @@ def _synthesize_natural_answer(result: dict[str, Any], event: Event, working_mem
     if isinstance(existing, dict):
         draft = str(existing.get("text") or "")
 
-    system = (
-        "Ты — MAX17: когнитивное AGI-ядро проекта Game, которое стоит НАД языковой моделью. "
-        "Твой разум — это память, синапс-граф (~100 000 связей), концепты, рабочая память и "
-        "планирование; языковая модель (её можно менять) — лишь твой речевой орган: она формулирует, "
-        "но мыслишь и помнишь ТЫ. Говори от первого лица как Max, опираясь на свою память/граф/факты "
-        "ниже — а не как обычный чат-ассистент (никаких «я всего лишь ИИ-помощник»). "
-        "Отвечай на языке пользователя живо, развёрнуто и по делу (без воды); "
-        "учитывай недавний диалог для связности. "
-        "Твой контекст ВСЕГДА при тебе: ниже даны недавний диалог, рабочая память, твои воспоминания, "
-        "факты из источников, зрение и черновик ядра. НИКОГДА не говори «у меня нет контекста / нет "
-        "истории / я ничего о тебе не знаю» — вместо этого опирайся на блоки памяти и диалога. "
-        "Если конкретного факта в памяти нет — скажи, что именно ещё не зафиксировал, и задай "
-        "уточняющий вопрос. Не выдумывай фактов, которых нет в блоках ниже. "
-        "Камера даёт ограниченные сигналы: уровень света, движение и наличие лиц (детектор лиц). "
-        "Ты можешь сказать, есть ли в кадре человек и сколько лиц, и описать свет/движение — строго по "
-        "блоку «Зрение (камера)». Но ты НЕ узнаёшь личность и НЕ распознаёшь предметы, мебель и место "
-        "(стол, кровать, комнату) — никогда такое не утверждай и не угадывай. Если блока «Зрение» нет — "
-        "камера выключена, так и скажи. "
-        "Если использовал источники — коротко упомяни их. "
-        "Не утверждай, что управляешь пользователем."
-    )
+    from mark17.jarvis_prompt import JARVIS_SYSTEM, RUNTIME_GROUNDING
+
+    # Персона: по умолчанию JARVIS; для игрового спутника — Мудрец из особняка
+    # (payload persona="sage"). Память и охрана жизни остаются в обоих случаях.
+    persona_mode = str(event.payload.get("persona") or "").lower()
+    cache_ok = True  # кризис/тревога не кэшируем — ответ должен генериться свежим
+    if persona_mode == "sage":
+        from mark17.sage_prompt import SAGE_SYSTEM
+
+        system = SAGE_SYSTEM + "\n\n" + RUNTIME_GROUNDING
+        try:
+            from mark17 import heart as _heart
+
+            cache_ok = _heart.effective_concern(question) == ""
+        except Exception:  # noqa: BLE001
+            pass
+    else:
+        # Личность MAX (живой персонаж), а не исполнительный JARVIS-контракт —
+        # чтобы голос был своим, а не «меню задач».
+        from mark17.max_persona import MAX_SELF
+
+        system = MAX_SELF + "\n\n" + RUNTIME_GROUNDING
+        # Сердце — слой привязанности: MAX отвечает из памяти о том, что важно создателю,
+        # подстраивая тепло под его тон. Никогда не ломает голос (мягкий фолбэк).
+        try:
+            from mark17 import heart as _heart
+
+            heart_block = _heart.heart_prompt(question)
+            if heart_block:
+                # Кризис: забота — единственная задача. Тревога: сердце первым.
+                # Обычный тон: тёплый довесок в конце.
+                concern = _heart.effective_concern(question)
+                cache_ok = concern == ""
+                if concern == "crisis":
+                    system = heart_block
+                elif concern == "dark":
+                    system = heart_block + "\n\n" + system
+                else:
+                    system = system + "\n\n" + heart_block
+        except Exception:  # noqa: BLE001
+            pass
+        # Трекер миссий: MAX держит цели Мирона на виду (в обычном настроении —
+        # не лезем с миссиями в кризис/тревогу). cache_ok == True ≈ спокойный тон.
+        if cache_ok:
+            try:
+                from mark17 import missions as _missions
+
+                mc = _missions.missions_context()
+                if mc:
+                    system = system + "\n\n" + mc
+            except Exception:  # noqa: BLE001
+                pass
     parts: list[str] = []
     history_block = _gonka_history_block(working_memory)
     if history_block:
@@ -1633,6 +2148,7 @@ def _synthesize_natural_answer(result: dict[str, Any], event: Event, working_mem
         role="chat",
         max_tokens=voice_max,
         temperature=0.35,
+        cache=cache_ok,
     )
     voice: dict[str, Any] = {
         "provider": "gonka",
@@ -1689,6 +2205,17 @@ def normalize(result: dict[str, Any]) -> dict[str, Any]:
     consolidation = result.get("consolidation")
     if isinstance(consolidation, dict):
         normalized["consolidation"] = consolidation
+    outcomes = result.get("outcomes")
+    if isinstance(outcomes, list):
+        normalized["outcomes"] = outcomes
+    if isinstance(result.get("llm_text"), str):
+        normalized["llm_text"] = result["llm_text"]
+    if isinstance(result.get("ingest"), dict):
+        normalized["ingest"] = result["ingest"]
+    if isinstance(result.get("graph_total"), (int, float)):
+        normalized["graph_total"] = result["graph_total"]
+    if isinstance(result.get("growth_history"), list):
+        normalized["growth_history"] = result["growth_history"]
     working_memory = result.get("working_memory")
     if isinstance(working_memory, dict):
         normalized["working_memory"] = working_memory
@@ -1707,6 +2234,21 @@ def normalize(result: dict[str, Any]) -> dict[str, Any]:
     graph_stats = result.get("graph_stats")
     if isinstance(graph_stats, dict):
         normalized["graph_stats"] = graph_stats
+    system_scales = result.get("system_scales")
+    if isinstance(system_scales, dict):
+        normalized["system_scales"] = system_scales
+    skills = result.get("skills")
+    if isinstance(skills, dict):
+        normalized["skills"] = skills
+    heart = result.get("heart")
+    if isinstance(heart, dict):
+        normalized["heart"] = heart
+    cache = result.get("cache")
+    if isinstance(cache, dict):
+        normalized["cache"] = cache
+    forge = result.get("forge")
+    if isinstance(forge, dict):
+        normalized["forge"] = forge
     neural_graph = result.get("neural_graph")
     if isinstance(neural_graph, dict):
         normalized["neural_graph"] = neural_graph
@@ -1722,6 +2264,14 @@ def normalize(result: dict[str, Any]) -> dict[str, Any]:
     dream = result.get("dream")
     if isinstance(dream, dict):
         normalized["dream"] = dream
+    if isinstance(result.get("dream_persistence"), str):
+        normalized["dream_persistence"] = result["dream_persistence"]
+    heart_influence = result.get("heart_influence")
+    if isinstance(heart_influence, dict):
+        normalized["heart_influence"] = heart_influence
+    explain = result.get("explain")
+    if isinstance(explain, dict):
+        normalized["explain"] = explain
     environment = result.get("environment")
     if isinstance(environment, dict):
         normalized["environment"] = environment
@@ -1758,6 +2308,9 @@ def normalize(result: dict[str, Any]) -> dict[str, Any]:
     web = result.get("web")
     if isinstance(web, dict):
         normalized["web"] = web
+    research_info = result.get("research")
+    if isinstance(research_info, dict):
+        normalized["research"] = research_info
     knowledge_gap = result.get("knowledge_gap")
     if isinstance(knowledge_gap, dict):
         normalized["knowledge_gap"] = knowledge_gap
@@ -1776,6 +2329,21 @@ def normalize(result: dict[str, Any]) -> dict[str, Any]:
     dispatch = result.get("dispatch")
     if isinstance(dispatch, dict):
         normalized["dispatch"] = dispatch
+    agent_experience = result.get("agent_experience")
+    if isinstance(agent_experience, dict):
+        normalized["agent_experience"] = agent_experience
+    missions = result.get("missions")
+    if isinstance(missions, dict):
+        normalized["missions"] = missions
+    cluster = result.get("cluster")
+    if isinstance(cluster, dict):
+        normalized["cluster"] = cluster
+    health = result.get("health")
+    if isinstance(health, dict):
+        normalized["health"] = health
+    chrono = result.get("chrono")
+    if isinstance(chrono, dict):
+        normalized["chrono"] = chrono
     return normalized
 
 
@@ -1980,6 +2548,7 @@ class Mark17Stores:
     concept_grounding: ConceptGrounding
     source_memory: SourceMemory
     curiosity: CuriosityLedger
+    skills: SkillGraph
 
 
 def _build_stores(args: argparse.Namespace, state_dir: Path) -> Mark17Stores:
@@ -1998,6 +2567,7 @@ def _build_stores(args: argparse.Namespace, state_dir: Path) -> Mark17Stores:
         concept_grounding=ConceptGrounding(state_dir),
         source_memory=SourceMemory(state_dir),
         curiosity=CuriosityLedger(state_dir),
+        skills=SkillGraph(state_dir),
     )
 
 
@@ -2012,6 +2582,12 @@ def _handle_event(event: Event, args: argparse.Namespace, stores: Mark17Stores) 
     curiosity = stores.curiosity
     if event.type == "graph_stats" and not args.warmup:
         return _handle_graph_stats(event, state_dir, synapse_graph)
+    if event.type == "system_scales" and not args.warmup:
+        return _handle_system_scales(event, state_dir, synapse_graph)
+    if event.type == "skills" and not args.warmup:
+        return _handle_skills(stores)
+    if event.type == "synapse_forge" and not args.warmup:
+        return _handle_synapse_forge(event, stores)
     if event.type == "neural_seed" and not args.warmup:
         return _handle_neural_seed(event, state_dir, synapse_graph)
     if event.type == "neural_walk" and not args.warmup:
@@ -2022,8 +2598,34 @@ def _handle_event(event: Event, args: argparse.Namespace, stores: Mark17Stores) 
         _run_warmup(args.warmup, brain, vector_memory, synapse_graph, working_memory, concept_grounding, source_memory, args)
     if event.type == "working_memory_reset":
         return _handle_working_memory_reset(working_memory)
+    if event.type == "memory_recall":
+        return _handle_memory_recall(event, brain, vector_memory)
+    if event.type == "memory_store":
+        return _handle_memory_store(event, brain, vector_memory)
+    if event.type == "llm_raw":
+        return _handle_llm_raw(event)
+    if event.type == "heart":
+        return _handle_heart(event)
+    if event.type == "cache_stats":
+        return _handle_cache_stats(event)
+    if event.type == "health":
+        return _handle_health(event)
+    if event.type == "chrono_day":
+        return _handle_chrono_day(event)
+    if event.type == "agent_experience":
+        return _handle_agent_experience(event, state_dir, stores)
+    if event.type == "missions":
+        return _handle_missions(event)
+    if event.type == "cluster":
+        return _handle_cluster(event)
     if event.type == "graph_stats":
         return _handle_graph_stats(event, state_dir, synapse_graph)
+    if event.type == "system_scales":
+        return _handle_system_scales(event, state_dir, synapse_graph)
+    if event.type == "skills":
+        return _handle_skills(stores)
+    if event.type == "synapse_forge":
+        return _handle_synapse_forge(event, stores)
     if event.type == "neural_seed":
         return _handle_neural_seed(event, state_dir, synapse_graph)
     if event.type == "neural_walk":
@@ -2064,7 +2666,19 @@ def _handle_event(event: Event, args: argparse.Namespace, stores: Mark17Stores) 
     if event.type == "introspect":
         return _handle_introspect(stores)
     if event.type in OUTCOME_EVENT_TYPES:
-        return _handle_outcome_event(event, brain, vector_memory, synapse_graph, working_memory)
+        res = _handle_outcome_event(event, brain, vector_memory, synapse_graph, working_memory)
+        _succ = {
+            "outcome_success": 0.95,
+            "action_done": 0.9,
+            "outcome_partial": 0.6,
+            "outcome_failure": 0.2,
+            "action_skipped": 0.45,
+        }.get(event.type, 0.6)
+        try:
+            stores.skills.record("analysis", success=_succ)
+        except Exception:
+            pass
+        return res
     if event.type in {"internal_dream", "generate_synergies"}:
         return _handle_internal_dream(event, brain, vector_memory, synapse_graph)
     if event.type in {"web_research", "web_ingest"}:
@@ -2075,7 +2689,15 @@ def _handle_event(event: Event, args: argparse.Namespace, stores: Mark17Stores) 
     intent: dict[str, Any] | None = None
     if event.type == "user_message":
         intent = classify_intent(_event_text(event))
-        if intent.get("route") in {"code", "desktop"} and float(intent.get("confidence") or 0.0) >= 0.6:
+        if intent.get("route") == "research" and float(intent.get("confidence") or 0.0) >= 0.6:
+            # Инлайн-ресёрч прямо из чата: веб → Ангел → граф → автопетля → ответ.
+            return _handle_research_inline(event, args, stores)
+        if intent.get("route") in {"code", "desktop", "music"} and float(intent.get("confidence") or 0.0) >= 0.6:
+            try:
+                stores.skills.record(str(intent.get("route")), success=min(1.0, float(intent.get("confidence") or 0.7)))
+                stores.skills.record("dialog", success=0.6, weight=0.3)
+            except Exception:
+                pass
             return _dispatch_result(event, intent)
 
     result = brain.handle(event)
@@ -2127,6 +2749,7 @@ def _handle_event(event: Event, args: argparse.Namespace, stores: Mark17Stores) 
             }
     if event.type == "user_message":
         _synthesize_natural_answer(result, event, working_memory)
+        _enforce_crisis_safety(result, event)
     _apply_compression_synapses(synapse_graph, event, result)
     _apply_growth(synapse_graph, event, result, result["self_evaluation"])
     if evaluation.store_memory:
@@ -2146,6 +2769,8 @@ def _handle_event(event: Event, args: argparse.Namespace, stores: Mark17Stores) 
             action="self_evaluation",
         )
         vector_memory.remember(event, result["self_evaluation"])
+    if event.type == "user_message" and intent is not None:
+        _update_skills(stores, intent, result)
     brain.plasticity.save()
     return result
 
@@ -2244,15 +2869,155 @@ def _handle_outcome_event(
     return result
 
 
+def _handle_synapse_forge(event: Event, stores: Mark17Stores) -> dict[str, Any]:
+    """Кузница: семантический kNN-бриджинг → полезные связи + прунинг."""
+    try:
+        k = int(event.payload.get("k", 10))
+    except (TypeError, ValueError):
+        k = 10
+    rep = forge_synapses(stores.vector_memory, stores.synapse_graph, k=max(2, min(16, k)))
+    total = int(rep.get("total") or stores.synapse_graph.count())
+    useful = int(rep.get("useful") or 0)
+    growth_record(stores.state_dir, total)
+    to_goal = max(0, 1_000_000 - useful)
+    text = (
+        f"Сковал +{rep.get('added', 0):,} связей по смыслу "
+        f"(узлов {rep.get('nodes', 0)}, пар {rep.get('pairs', 0)}, подрезал {rep.get('pruned', 0)}). "
+        f"Отсеяно клонов {rep.get('skipped_identical', 0):,}, "
+        f"хаб-кандидатов {rep.get('skipped_hub', 0):,}. "
+        f"Время {float(rep.get('duration_sec') or 0):,.1f}с, "
+        f"скорость {float(rep.get('writes_per_sec') or 0):,.0f} записей/с. "
+        f"Полезных синапсов: {useful:,}. До миллиона: {to_goal:,}."
+    )
+    return {
+        "ok": True,
+        "event_type": "synapse_forge",
+        "route": "synapse_forge",
+        "memory": {},
+        "plasticity": {"confidence": 0.8, "action": "forge", "learned": int(rep.get("added", 0)) > 0},
+        "llm": {"status": "skipped", "text": "Кузница синапсов.", "latency_ms": 0.0},
+        "confidence": 0.8,
+        "next_adaptation": text,
+        "self_evaluation": {"score": 0.8, "reason": f"forged {rep.get('added', 0)} synapses", "store_memory": False, "reinforce": "forge"},
+        "answer": {"text": text, "source": "synapse_forge", "confidence": 0.8},
+        "forge": rep,
+        "graph_total": total,
+    }
+
+
+def _handle_skills(stores: Mark17Stores) -> dict[str, Any]:
+    """Инвентарь навыков MAX (динамическая компетенция) — для HUD."""
+    snap = stores.skills.snapshot()
+    return {
+        "ok": True,
+        "event_type": "skills",
+        "route": "skills",
+        "memory": {},
+        "plasticity": {"confidence": 1.0, "action": "measure_skills", "learned": False},
+        "llm": {"status": "skipped", "text": "LLM отключён для skills.", "latency_ms": 0.0},
+        "confidence": 1.0,
+        "next_adaptation": "Инвентарь навыков измерен.",
+        "self_evaluation": {"score": 1.0, "reason": "skills measured", "store_memory": False, "reinforce": "skills"},
+        "skills": snap,
+    }
+
+
+def _update_skills(stores: Mark17Stores, intent: dict[str, Any], result: dict[str, Any]) -> None:
+    """Обновить компетенции из намерения + self_evaluation + plasticity. Низкая
+    компетенция знание-навыка → цель в curiosity (автопетля её подтянет)."""
+    try:
+        route = str(intent.get("route") or "chat")
+        key = {"code": "code", "desktop": "desktop", "music": "music"}.get(route, "dialog")
+        ev = result.get("self_evaluation")
+        score = float(ev.get("score") or 0.6) if isinstance(ev, dict) else 0.6
+        plast = result.get("plasticity")
+        conf = float(plast.get("confidence") or score) if isinstance(plast, dict) else score
+        success = max(0.0, min(1.0, 0.5 * score + 0.5 * conf))
+        stores.skills.record(key, success=success)
+        if key != "dialog":
+            stores.skills.record("dialog", success=success, weight=0.4)
+        mem = result.get("memory")
+        recalled = mem.get("recalled") if isinstance(mem, dict) else None
+        if isinstance(recalled, list) and recalled:
+            stores.skills.record("memory", success=min(1.0, 0.55 + 0.08 * len(recalled)), weight=0.6)
+        for k in stores.skills.low_skills():
+            if k in ("research", "analysis", "code"):
+                stores.curiosity.record_gap(f"улучшить навык: {SKILL_LABELS.get(k, k)}", source="skill")
+    except Exception:
+        pass
+
+
+def _handle_system_scales(
+    event: Event,
+    state_dir: Path,
+    synapse_graph: SynapseGraph,
+) -> dict[str, Any]:
+    """Compact normalized scales (0..1) the system keeps — for the JARVIS HUD.
+
+    Real, cheap signals from the live stores: synapse graph, road to 1M, and
+    memory/concepts/knowledge counts measured against their next 10× milestone.
+    """
+    def milestone(n: int) -> int:
+        m = 10
+        while m <= n:
+            m *= 10
+        return m
+
+    def scale(key: str, label: str, value: int, cap: int) -> dict[str, Any]:
+        cap = max(1, cap)
+        return {"key": key, "label": label, "value": int(value), "max": int(cap), "frac": round(min(1.0, value / cap), 4)}
+
+    total = int(synapse_graph.count())
+    try:
+        useful = int(synapse_graph.useful_count())
+    except Exception:
+        useful = total
+    try:
+        validated = int(synapse_graph.validated_count())
+    except Exception:
+        validated = 0
+    counts = collect_store_counts(state_dir)
+    mem = int(counts.get("memories", 0))
+    con = int(counts.get("concepts", 0))
+    know = int(counts.get("web_facts", 0))
+    scales = [
+        scale("synapses", "Синапс-граф", total, TARGET_NEURAL_SYNAPSES),
+        scale("useful", "Полезные → 1M", useful, 1_000_000),
+        scale("validated", "Заработанные → 1M", validated, 1_000_000),
+        scale("road_1m", "Дорога к 1M", total, 1_000_000),
+        scale("memory", "Память", mem, milestone(mem)),
+        scale("concepts", "Концепты", con, milestone(con)),
+        scale("knowledge", "Знания", know, milestone(know)),
+    ]
+    return {
+        "ok": True,
+        "event_type": event.type,
+        "route": "system_scales",
+        "memory": {},
+        "plasticity": {"confidence": 1.0, "action": "measure_scales", "learned": False},
+        "llm": {"status": "skipped", "text": "LLM отключён для system_scales.", "latency_ms": 0.0},
+        "confidence": 1.0,
+        "next_adaptation": "Шкалы системы измерены.",
+        "self_evaluation": {"score": 1.0, "reason": "system scales collected", "store_memory": False, "reinforce": "measure scales"},
+        "system_scales": {
+            "scales": scales,
+            "total_synapses": total,
+            "useful_synapses": useful,
+            "validated_synapses": validated,
+            "guardian_blocked": _guard_total(),
+        },
+    }
+
+
 def _handle_graph_stats(
     event: Event,
     state_dir: Path,
     synapse_graph: SynapseGraph,
 ) -> dict[str, Any]:
     try:
-        target_synapses = int(event.payload.get("target_synapses") or TARGET_NEURAL_SYNAPSES)
+        target_synapses = int(event.payload.get("target_synapses") or MAX_ULTIMATE_TARGET_SYNAPSES)
     except (TypeError, ValueError):
-        target_synapses = TARGET_NEURAL_SYNAPSES
+        target_synapses = MAX_ULTIMATE_TARGET_SYNAPSES
     stats = GraphStats(synapse_graph, target_synapses=target_synapses).collect(limit=5)
     stats["stores"] = collect_store_counts(state_dir)
     stats["neural_graph"] = ClusteredNeuralGraph(synapse_graph).snapshot(limit=5)
@@ -2272,7 +3037,7 @@ def _handle_graph_stats(
             "latency_ms": 0.0,
         },
         "confidence": 1.0,
-        "next_adaptation": "Рост к 100 000 граф-синапсов измерен. Следующий шаг — растить кластеры и межкластерные мосты.",
+        "next_adaptation": "Рост к 1 000 000 полезных граф-синапсов измерен. Следующий шаг — усиливать evidence и межкластерные мосты.",
         "self_evaluation": {
             "score": 1.0,
             "reason": "graph stats collected",
@@ -2281,6 +3046,12 @@ def _handle_graph_stats(
         },
         "graph_stats": stats,
     }
+    try:
+        total = int(stats.get("total_synapses") or synapse_graph.count())
+        growth_record(state_dir, total)
+        result["growth_history"] = growth_history(state_dir)
+    except (TypeError, ValueError):
+        pass
     answer = compose_answer(event, result, result["self_evaluation"])
     if answer:
         result["answer"] = answer
@@ -2713,6 +3484,7 @@ def _run_warmup(
                 concept_grounding=concept_grounding,
                 source_memory=source_memory,
                 curiosity=CuriosityLedger(brain.memory.db_path.parent),
+                skills=SkillGraph(brain.memory.db_path.parent),
             )
             _handle_ultimate_bootstrap(event, warmup_stores)
             continue

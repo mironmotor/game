@@ -150,9 +150,9 @@ def update_outcome_synapses(
                 source_id=_stable_id(action_title),
                 target_type="outcome",
                 target_id=outcome_id,
-                relation_type="leads_to",
+                relation_type="action_result",
                 weight=weight,
-                metadata={"summary": f"{action_title} -> {status}"},
+                metadata={"summary": f"{action_title} -> {status}", "source_trust": 1.0},
             )
         )
 
@@ -161,11 +161,22 @@ def update_outcome_synapses(
             synapse_graph.upsert(
                 source_type="goal",
                 source_id=_stable_id(goal),
+                target_type="action",
+                target_id=_stable_id(action_title),
+                relation_type="goal_of",
+                weight=weight,
+                metadata={"summary": f"{goal} -> {action_title}", "source_trust": 1.0},
+            )
+        )
+        touched.append(
+            synapse_graph.upsert(
+                source_type="goal",
+                source_id=_stable_id(goal),
                 target_type="outcome",
                 target_id=outcome_id,
                 relation_type="leads_to",
                 weight=weight,
-                metadata={"summary": f"{goal} -> {status}"},
+                metadata={"summary": f"{goal} -> {status}", "source_trust": 1.0},
             )
         )
 

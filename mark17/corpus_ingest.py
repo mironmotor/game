@@ -20,19 +20,29 @@ resolved and confined to the project dir, so ingest can't read arbitrary disk.
 
 from __future__ import annotations
 
+import os
 import re
 from pathlib import Path
 from typing import Any
 
+from mark17.guardian import is_clean as _guard_clean, record as _guard_record
 from mark17.semantic_compiler import SemanticCompiler
 
 _ROOT = Path(__file__).resolve().parent.parent
+# Optional whitelisted external corpus root (e.g. a dataset folder outside the
+# project). Paths still resolve only within the project OR this single root —
+# never arbitrary disk. Set MAX17_CORPUS_ROOT to enable.
+_CORPUS_ROOT = os.environ.get("MAX17_CORPUS_ROOT", "").strip()
 _SENT_SPLIT = re.compile(r"(?<=[.!?。…])\s+|\n{2,}|\r?\n(?=\s*[-*•\d])")
 MIN_CHUNK = 12
 MAX_CHUNK = 320
 MAX_CHUNKS_DEFAULT = 300
+MAX_FILE_BYTES = 8_000_000  # читаем до ~8МБ с файла (хватает на тысячи записей; не взрывает память)
 # Files we read for path ingest — text-ish only, never binaries/secrets/state.
-_TEXT_SUFFIXES = {".md", ".txt", ".py", ".ts", ".tsx", ".js", ".json", ".css", ".rst", ".csv", ".yml", ".yaml"}
+_TEXT_SUFFIXES = {
+    ".md", ".txt", ".py", ".ts", ".tsx", ".js", ".json", ".jsonl", ".css",
+    ".rst", ".csv", ".tsv", ".yml", ".yaml",
+}
 _SKIP_DIRS = {".git", "node_modules", ".next", "state", "__pycache__", ".venv", "certificates"}
 
 
@@ -84,9 +94,12 @@ def ingest_text(
     """Compile a blob of text chunk-by-chunk into the graph. Idempotent (cache)."""
     chunks = chunk_text(text)[: max(1, max_chunks)]
     before = synapse_graph.count()
-    compiled = cached = unverified = units = 0
+    compiled = cached = unverified = units = blocked = 0
     samples: list[str] = []
     for chunk in chunks:
+        if not _guard_clean(chunk):
+            blocked += 1  # Ангел безопасности: война/политика/пороки — не в ядро
+            continue
         ir = compiler.compile_text(chunk, vector_memory=vector_memory, synapse_graph=synapse_graph)
         if ir.get("cached"):
             cached += 1
@@ -97,12 +110,15 @@ def ingest_text(
                 samples.append(str(ir["ir_text"]).replace("\n", " ")[:120])
         else:
             unverified += 1
+    if blocked:
+        _guard_record(blocked)
     after = synapse_graph.count()
     return {
         "source": source,
         "chunks": len(chunks),
         "compiled": compiled,
         "cached": cached,
+        "blocked": blocked,
         "unverified": unverified,
         "ir_units": units,
         "synapses_before": before,
@@ -112,11 +128,40 @@ def ingest_text(
     }
 
 
+def _within(target: Path, root: Path) -> bool:
+    return target == root or root in target.parents
+
+
+def _display(p: Path) -> str:
+    """Path for reporting/source: relative to project, else to corpus root, else abs."""
+    try:
+        return str(p.relative_to(_ROOT))
+    except ValueError:
+        pass
+    if _CORPUS_ROOT:
+        try:
+            return str(p.relative_to(Path(_CORPUS_ROOT).resolve()))
+        except ValueError:
+            pass
+    return str(p)
+
+
 def _safe_path(rel: str) -> Path | None:
+    # 1) project-relative (preferred when it actually exists)
     target = (_ROOT / rel).resolve()
-    if target != _ROOT and _ROOT not in target.parents:
-        return None
-    return target
+    if _within(target, _ROOT) and target.exists():
+        return target
+    # 2) whitelisted external corpus root (if configured) — relative or absolute
+    if _CORPUS_ROOT:
+        root = Path(_CORPUS_ROOT).resolve()
+        cand = (root / rel).resolve()
+        if _within(cand, root) and cand.exists():
+            return cand
+        if _within(target, root) and target.exists():
+            return target
+    # nothing existing matched: return the confined project candidate for a clean
+    # "not found" error, or None if the path escapes the project entirely.
+    return target if _within(target, _ROOT) else None
 
 
 def _iter_files(target: Path) -> list[Path]:
@@ -150,12 +195,12 @@ def ingest_path(
     total_compiled = 0
     for path in files:
         try:
-            text = path.read_text(encoding="utf-8", errors="replace")
+            text = path.read_text(encoding="utf-8", errors="replace")[:MAX_FILE_BYTES]
         except Exception:  # noqa: BLE001
             continue
         res = ingest_text(
             text,
-            source=str(path.relative_to(_ROOT)),
+            source=_display(path),
             compiler=compiler,
             vector_memory=vector_memory,
             synapse_graph=synapse_graph,
@@ -165,7 +210,7 @@ def ingest_path(
         per_file.append({"file": res["source"], "compiled": res["compiled"], "cached": res["cached"]})
     after = synapse_graph.count()
     return {
-        "root": str(target.relative_to(_ROOT)) if target != _ROOT else ".",
+        "root": _display(target) if target != _ROOT else ".",
         "files": len(files),
         "compiled": total_compiled,
         "synapses_before": before,

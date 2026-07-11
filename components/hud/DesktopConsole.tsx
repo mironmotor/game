@@ -31,6 +31,7 @@ export function DesktopConsole({ onClose, initialTask }: { onClose: () => void; 
   const [autoMode, setAutoMode] = useState(true);
   const autoModeRef = useRef(true);
   const ranTaskRef = useRef<string | null>(null);
+  const taskRef = useRef(''); // активная задача — для записи опыта в граф (№4)
   const scrollRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
@@ -47,6 +48,10 @@ export function DesktopConsole({ onClose, initialTask }: { onClose: () => void; 
   const process = async (result: DesktopResult, stepsLeft: number) => {
     if (!result.ok) {
       push({ kind: 'error', text: result.error || 'агент вернул ошибку' });
+      // №4: провал тоже исход — учимся (в «заработанные» не идёт).
+      if (taskRef.current) {
+        void sendMax17Event({ type: 'agent_experience', agent: 'desktop', text: taskRef.current, ok: false }).catch(() => {});
+      }
       setBusy(false);
       return;
     }
@@ -62,6 +67,10 @@ export function DesktopConsole({ onClose, initialTask }: { onClose: () => void; 
         text: `[desktop] ${proposal.answer || ''}`.slice(0, 400),
         source: 'desktop_mode',
       }).catch(() => {});
+      // №4: успешное завершение → ЗАРАБОТАННЫЙ синапс (validated outcome).
+      if (taskRef.current) {
+        void sendMax17Event({ type: 'agent_experience', agent: 'desktop', text: taskRef.current, ok: true }).catch(() => {});
+      }
       setBusy(false);
       return;
     }
@@ -86,6 +95,7 @@ export function DesktopConsole({ onClose, initialTask }: { onClose: () => void; 
 
   const start = async (taskOverride?: string) => {
     const text = (taskOverride ?? instruction).trim();
+    if (text) taskRef.current = text;
     if (!text || busy || pending) return;
     setInstruction('');
     push({ kind: 'you', text });

@@ -8,7 +8,7 @@ from typing import Any
 
 from mark17.synapse_graph import SynapseGraph
 
-TARGET_SYNAPSES = 100_000
+TARGET_SYNAPSES = 1_000_000
 
 
 def _round(value: Any, digits: int = 4) -> float:
@@ -28,6 +28,10 @@ class GraphStats:
                 """
                 SELECT
                     COUNT(*) AS total_synapses,
+                    COUNT(*) FILTER (WHERE weight >= 0.2 AND evidence_count >= 1) AS useful_synapses,
+                    COUNT(*) FILTER (WHERE weight >= 0.2 AND evidence_count >= 2) AS working_synapses,
+                    COUNT(*) FILTER (WHERE weight >= 0.2 AND evidence_count >= 3) AS reinforced_synapses,
+                    COUNT(*) FILTER (WHERE weight >= 0.2 AND evidence_count >= 5) AS strong_synapses,
                     COALESCE(SUM(evidence_count), 0) AS total_evidence,
                     COALESCE(AVG(weight), 0) AS avg_weight,
                     COALESCE(MAX(weight), 0) AS max_weight
@@ -86,11 +90,16 @@ class GraphStats:
             ).fetchall()
 
         total_synapses = int(totals["total_synapses"])
-        progress = min(1.0, total_synapses / self.target_synapses)
-        remaining = max(0, self.target_synapses - total_synapses)
+        useful_synapses = int(totals["useful_synapses"])
+        progress = min(1.0, useful_synapses / self.target_synapses)
+        remaining = max(0, self.target_synapses - useful_synapses)
         return {
             "target_synapses": self.target_synapses,
             "total_synapses": total_synapses,
+            "useful_synapses": useful_synapses,
+            "working_synapses": int(totals["working_synapses"]),
+            "reinforced_synapses": int(totals["reinforced_synapses"]),
+            "strong_synapses": int(totals["strong_synapses"]),
             "remaining_to_target": remaining,
             "progress": round(progress, 4),
             "progress_percent": round(progress * 100, 2),

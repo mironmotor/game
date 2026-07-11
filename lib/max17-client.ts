@@ -188,6 +188,18 @@ export interface Max17Response {
   confidence: number;
   next_adaptation: string;
   answer?: Max17Answer;
+  outcomes?: Array<{ text?: string; status?: string; score?: number }>;
+  ingest?: {
+    chunks?: number;
+    compiled?: number;
+    cached?: number;
+    synapses_before?: number;
+    synapses_after?: number;
+    synapses_added?: number;
+    error?: string;
+  };
+  graph_total?: number;
+  growth_history?: Array<{ t?: number; total?: number }>;
   synapses?: Max17Synapses;
   consolidation?: Max17Consolidation;
   working_memory?: Max17WorkingMemory;
@@ -214,7 +226,7 @@ function normalizeBasePath(basePath: string | undefined) {
   return basePath.startsWith('/') ? basePath : `/${basePath}`;
 }
 
-function getApiPath(endpoint: string) {
+export function getApiPath(endpoint: string) {
   const envBasePath = normalizeBasePath(process.env.NEXT_PUBLIC_BASE_PATH);
   if (envBasePath) {
     return `${envBasePath}/api/${endpoint}`;
@@ -237,6 +249,33 @@ function getMax17ApiPath() {
   return getApiPath('max17');
 }
 
+/**
+ * Parse a fetch Response body as JSON without throwing on an empty or non-JSON
+ * body. The /api/* routes always intend to emit a JSON object, but a 200 with an
+ * empty or truncated body — an aborted/raced request, or a dev-server HMR cut —
+ * makes a bare `response.json()` throw "Unexpected end of JSON input". Reading the
+ * text first and parsing defensively turns that into a clear, typed error instead
+ * of a raw SyntaxError that bubbles into the HUD error boundary.
+ */
+async function parseJsonBody<T>(
+  response: Response,
+): Promise<{ value: T | null; error: string | null }> {
+  let text: string;
+  try {
+    text = await response.text();
+  } catch (error) {
+    return { value: null, error: error instanceof Error ? error.message : String(error) };
+  }
+  if (!text.trim()) {
+    return { value: null, error: `Empty response body (status ${response.status})` };
+  }
+  try {
+    return { value: JSON.parse(text) as T, error: null };
+  } catch {
+    return { value: null, error: `Malformed JSON response (status ${response.status})` };
+  }
+}
+
 // Headers for the token-gated agent routes. NEXT_PUBLIC_* is inlined at build;
 // on a localhost-only server this is fine and adds defense-in-depth.
 function agentHeaders(): Record<string, string> {
@@ -247,21 +286,44 @@ function agentHeaders(): Record<string, string> {
 }
 
 export async function sendMax17Event(event: Record<string, unknown>): Promise<Max17Response> {
-  const response = await fetch(getMax17ApiPath(), {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify(event),
-  });
+  // The bridge can blip on a cold start (daemon still booting → a transient 5xx or
+  // a dropped connection). A single blip used to surface as "мост недоступен" on the
+  // client because there was no retry. Retry once after a short backoff — by then the
+  // daemon is warm. Only network errors and 5xx are retried; a 4xx is a real error.
+  const MAX_ATTEMPTS = 2;
+  for (let attempt = 1; ; attempt++) {
+    let response: Response;
+    try {
+      response = await fetch(getMax17ApiPath(), {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(event),
+      });
+    } catch (networkError) {
+      if (attempt < MAX_ATTEMPTS) {
+        await new Promise((r) => setTimeout(r, 900));
+        continue;
+      }
+      throw networkError instanceof Error ? networkError : new Error(String(networkError));
+    }
 
-  const payload = (await response.json()) as Max17Response;
+    const { value, error } = await parseJsonBody<Max17Response>(response);
 
-  if (!response.ok) {
-    throw new Error(payload.error || `Max17 request failed with status ${response.status}`);
+    if (!response.ok) {
+      if (response.status >= 500 && attempt < MAX_ATTEMPTS) {
+        await new Promise((r) => setTimeout(r, 900));
+        continue;
+      }
+      throw new Error(value?.error || error || `Max17 request failed with status ${response.status}`);
+    }
+    if (!value) {
+      throw new Error(error || 'Max17 returned an empty response');
+    }
+
+    return value;
   }
-
-  return payload;
 }
 
 export interface CodeAgentStep {
@@ -310,7 +372,8 @@ export async function sendCodeAgent(payload: {
     headers: agentHeaders(),
     body: JSON.stringify(payload),
   });
-  return (await response.json()) as CodeAgentResult;
+  const { value, error } = await parseJsonBody<CodeAgentResult>(response);
+  return value ?? { ok: false, error: error || 'Empty response from code agent' };
 }
 
 export interface DesktopAction {
@@ -353,7 +416,8 @@ export async function sendDesktopAgent(payload: {
     headers: agentHeaders(),
     body: JSON.stringify(payload),
   });
-  return (await response.json()) as DesktopResult;
+  const { value, error } = await parseJsonBody<DesktopResult>(response);
+  return value ?? { ok: false, error: error || 'Empty response from desktop agent' };
 }
 
 export interface DevBranch {
@@ -381,7 +445,8 @@ export async function sendArchitect(payload: {
     headers: agentHeaders(),
     body: JSON.stringify(payload),
   });
-  return (await response.json()) as ArchitectResult;
+  const { value, error } = await parseJsonBody<ArchitectResult>(response);
+  return value ?? { ok: false, error: error || 'Empty response from architect' };
 }
 
 export interface LlmPreset {
@@ -413,7 +478,8 @@ export interface LlmConfig {
 
 export async function getLlmConfig(): Promise<LlmConfig> {
   const response = await fetch(getApiPath('llm-config'), { method: 'GET' });
-  return (await response.json()) as LlmConfig;
+  const { value, error } = await parseJsonBody<LlmConfig>(response);
+  return value ?? { ok: false, error: error || 'Empty response from llm-config' };
 }
 
 export async function setLlmModel(id: string, role?: string): Promise<LlmConfig> {
@@ -422,5 +488,6 @@ export async function setLlmModel(id: string, role?: string): Promise<LlmConfig>
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ id, role }),
   });
-  return (await response.json()) as LlmConfig;
+  const { value, error } = await parseJsonBody<LlmConfig>(response);
+  return value ?? { ok: false, error: error || 'Empty response from llm-config' };
 }

@@ -4,12 +4,6 @@ const staticExport = process.env.NEXT_OUTPUT === 'export';
 
 const nextConfig: NextConfig = {
   reactStrictMode: true,
-  eslint: {
-    ignoreDuringBuilds: true,
-  },
-  typescript: {
-    ignoreBuildErrors: true,
-  },
   images: {
     unoptimized: true,
     remotePatterns: [
@@ -22,6 +16,9 @@ const nextConfig: NextConfig = {
   basePath: '/game',
   assetPrefix: '/game',
   transpilePackages: ['motion'],
+  experimental: {
+    webpackBuildWorker: false,
+  },
 };
 
 export default nextConfig;

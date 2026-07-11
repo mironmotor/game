@@ -20,11 +20,13 @@ import {
   Play,
   Plus,
   RotateCcw,
+  Sparkles,
   Star,
   Sun,
   Triangle,
   Users,
   Volume2,
+  Zap,
 } from 'lucide-react';
 import { NeuralCore, type NeuralCoreStatus } from './NeuralCore';
 import { HudWindow } from './HudWindow';
@@ -35,6 +37,7 @@ import {
   type WindowId,
 } from './window-manager';
 import { getBackground } from './backgrounds';
+import { SolarSystem } from './SolarSystem';
 import type { Task } from '@/hooks/use-game-state';
 
 export type HudNavId = 'inventory' | 'skills' | 'codex' | 'quests' | 'friends';
@@ -169,6 +172,24 @@ function HudDock({ onOpenAppearance }: { onOpenAppearance?: () => void }) {
         <button
           type="button"
           className="hud-dock-tool"
+          onClick={() => window.dispatchEvent(new CustomEvent('angels:open'))}
+          title="Совет Ангелов — спросить MAX и 7 агентов"
+        >
+          <Sparkles size={13} />
+          <span>Совет</span>
+        </button>
+        <button
+          type="button"
+          className="hud-dock-tool"
+          onClick={() => window.dispatchEvent(new CustomEvent('angels:kickoff'))}
+          title="Разгон дня — MAX даёт миссию и берёт топ-задачу в работу"
+        >
+          <Zap size={13} />
+          <span>Разгон</span>
+        </button>
+        <button
+          type="button"
+          className="hud-dock-tool"
           onClick={() => (onOpenAppearance ? onOpenAppearance() : wm.cycleBackground())}
           title="Вид: темы, фоны и генератор снов"
         >
@@ -246,6 +267,7 @@ export function GameHud(props: GameHudProps) {
     <div className="hud-root hud-adaptive">
       <div className="hud-bg" style={{ background: bg.css }} />
       {bg.scrim ? <div className="hud-bg-scrim" style={{ opacity: bg.scrim }} /> : null}
+      <SolarSystem className="hud-synapse-field" />
       <div className="hud-scanlines" />
 
       {/* Fixed identity core — the GAME synaptic nucleus, always centred. */}
@@ -260,6 +282,7 @@ export function GameHud(props: GameHudProps) {
       <HudDock onOpenAppearance={onToggleAppearance} />
 
       {/* ===================== WINDOWS ===================== */}
+      <div className="hud-windows">
       <HudWindow id="rank" accent="purple">
         <div className="hud-window-pad relative">
           <div className="hud-label">WORLD RANK</div>
@@ -512,6 +535,7 @@ export function GameHud(props: GameHudProps) {
           </div>
         </div>
       </HudWindow>
+      </div>
 
       <nav className="hud-nav">
         {NAV_ITEMS.map(({ id, label, icon }) => (

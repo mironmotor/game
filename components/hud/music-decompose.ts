@@ -73,7 +73,7 @@ export class MusicDecomposer {
     const analyser = this.analyser;
     const ctx = this.ctx;
     if (!analyser || !ctx) return;
-    analyser.getFloatFrequencyData(this.freq);
+    analyser.getFloatFrequencyData(this.freq as Float32Array<ArrayBuffer>);
     const binHz = ctx.sampleRate / FFT_SIZE;
 
     let bass = 0;
@@ -124,7 +124,7 @@ export class MusicDecomposer {
     let bestCorr = 0;
     const minLag = Math.round((60 / 180) * fps); // 180 BPM
     const maxLag = Math.round((60 / 60) * fps); // 60 BPM
-    const total = onsets.reduce((s, v) => s + v, 0);
+    const total: number = onsets.reduce<number>((s, v) => s + v, 0);
     if (total < 6) return { bpm: 0, regularity: 0 };
     for (let lag = minLag; lag <= maxLag; lag++) {
       let corr = 0;

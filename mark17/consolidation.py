@@ -195,7 +195,7 @@ class ConsolidationEngine:
             "patterns": selected,
         }
 
-    def bridge_distant(self, *, limit: int = 12, min_sim: float = 0.15, anchors: int = 40) -> dict[str, Any]:
+    def bridge_distant(self, *, limit: int = 12, min_sim: float = 0.15, anchors: int = 40, k: int = 10) -> dict[str, Any]:
         """Phase 5 — cross-cluster bridges. Wire associative "bridges" synapses
         between memories that are semantically close but live in DIFFERENT
         clusters (different event_type — e.g. a chat message and a camera/sound
@@ -220,7 +220,7 @@ class ConsolidationEngine:
         bridges: list[dict[str, Any]] = []
         for i in order:
             sims = matrix @ matrix[i]
-            for j in np.argsort(sims)[::-1][:8].tolist():
+            for j in np.argsort(sims)[::-1][:k].tolist():
                 j = int(j)
                 sim = float(sims[j])
                 if j == i or sim < min_sim:

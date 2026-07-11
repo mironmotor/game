@@ -44,6 +44,7 @@ export function HudWindow({
   };
 
   const beginDrag = (mode: 'move' | 'resize') => (e: PointerEvent) => {
+    if (window.matchMedia('(max-width: 700px)').matches) return;
     e.preventDefault();
     e.stopPropagation();
     (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
@@ -82,6 +83,7 @@ export function HudWindow({
   return (
     <section
       className={`hud-window hud-window-${accent} ${win.minimized ? 'is-minimized' : ''}`}
+      data-window-id={id}
       style={{ left: win.x, top: win.y, width: win.w, height: win.minimized ? undefined : win.h, zIndex: win.z }}
       onPointerDown={() => wm.focusWindow(id)}
       aria-label={meta.title}

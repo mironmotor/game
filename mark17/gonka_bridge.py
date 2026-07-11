@@ -14,13 +14,15 @@ It is deliberately conservative:
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import re
 import time
 import urllib.error
 import urllib.request
-from dataclasses import dataclass
+from collections import OrderedDict
+from dataclasses import dataclass, replace
 from typing import Any
 
 from mark17 import llm_config
@@ -42,6 +44,70 @@ class GonkaResponse:
     role: str = "chat"
     latency_ms: float = 0.0
     error: str = ""
+    cached: bool = False
+
+
+# ——— Fast-path LRU cache ———
+# Вход LLM большой (системный промпт ~6 КБ) и дёргается на каждый месседж.
+# Ключ — хэш РЕАЛЬНОГО запроса (role + messages + параметры), поэтому кэш
+# самоинвалидируется: меняется память/история/тон сердца → меняется промпт →
+# другой ключ → промах. Отдельная инвалидация по графу не нужна. TTL добивает
+# устаревание. Кризис/тревога НЕ кэшируются вызывающей стороной (cache=False).
+_CACHE_MAX = 256
+_CACHE_TTL_SEC = 3600.0
+_cache: "OrderedDict[str, tuple[float, GonkaResponse]]" = OrderedDict()
+_cache_stats = {"hits": 0, "misses": 0, "stored": 0, "skipped": 0}
+
+
+def _cache_key(
+    role: str,
+    messages: list[dict[str, str]],
+    max_tokens: int,
+    temperature: float,
+    response_format: dict[str, Any] | None,
+) -> str:
+    blob = json.dumps(
+        {"r": role, "mt": max_tokens, "t": temperature, "rf": response_format, "m": messages},
+        ensure_ascii=False,
+        sort_keys=True,
+    )
+    return hashlib.sha256(blob.encode("utf-8")).hexdigest()
+
+
+def _cache_get(key: str) -> GonkaResponse | None:
+    item = _cache.get(key)
+    if item is None:
+        return None
+    ts, resp = item
+    if time.time() - ts > _CACHE_TTL_SEC:
+        _cache.pop(key, None)
+        return None
+    _cache.move_to_end(key)  # LRU touch
+    return resp
+
+
+def _cache_put(key: str, resp: GonkaResponse) -> None:
+    _cache[key] = (time.time(), resp)
+    _cache.move_to_end(key)
+    while len(_cache) > _CACHE_MAX:
+        _cache.popitem(last=False)
+
+
+def cache_stats() -> dict[str, Any]:
+    total = _cache_stats["hits"] + _cache_stats["misses"]
+    return {
+        **_cache_stats,
+        "size": len(_cache),
+        "max_size": _CACHE_MAX,
+        "ttl_sec": int(_CACHE_TTL_SEC),
+        "hit_rate": round(_cache_stats["hits"] / total, 3) if total else 0.0,
+    }
+
+
+def cache_clear() -> None:
+    _cache.clear()
+    for k in _cache_stats:
+        _cache_stats[k] = 0
 
 
 def is_enabled(role: str = "chat") -> bool:
@@ -52,8 +118,7 @@ def is_enabled(role: str = "chat") -> bool:
     """
     if os.environ.get("MAX17_GONKA_ENABLED") == "false":
         return False
-    _, key, _ = llm_config.resolve(role)
-    return bool(key)
+    return llm_config.available_for_role(role)
 
 
 _RETRYABLE = {408, 409, 425, 429, 500, 502, 503, 529}
@@ -135,6 +200,7 @@ def chat(
     temperature: float = 0.3,
     timeout: float = DEFAULT_TIMEOUT_SEC,
     response_format: dict[str, Any] | None = None,
+    cache: bool = True,
 ) -> GonkaResponse:
     """Resolve the role's backend ladder and try each until one answers.
 
@@ -154,13 +220,27 @@ def chat(
         _, _, model = llm_config.resolve(role)
         return GonkaResponse(ok=False, text="", model=model, status="disabled", role=role)
 
+    # Fast path: identical prompt within TTL -> instant, no network/cost.
+    key = _cache_key(role, messages, max_tokens, temperature, response_format) if cache else None
+    if key is not None:
+        hit = _cache_get(key)
+        if hit is not None:
+            _cache_stats["hits"] += 1
+            return replace(hit, cached=True, latency_ms=0.0)
+        _cache_stats["misses"] += 1
+    elif not cache:
+        _cache_stats["skipped"] += 1
+
     last = GonkaResponse(ok=False, text="", model=candidates[0][2], status="error", role=role)
-    for base_url, key, model in candidates:
+    for base_url, key_, model in candidates:
         last = _chat_once(
-            base_url, key, model, messages,
+            base_url, key_, model, messages,
             role=role, max_tokens=max_tokens, temperature=temperature,
             timeout=timeout, response_format=response_format,
         )
         if last.ok:
+            if key is not None:
+                _cache_put(key, last)
+                _cache_stats["stored"] += 1
             return last
     return last

@@ -230,6 +230,19 @@ def run(request: dict[str, Any]) -> dict[str, Any]:
         )
         proposal, model = _step(messages)
         proposal["needs_confirm"] = _needs_confirm(proposal)
+        # Выполненное действие — опыт в синапс-граф (вес скромнее: исход не верифицирован
+        # как у code-агента). Fail-soft.
+        try:
+            from mark17.synapse_graph import record_agent_experience
+
+            _sd = str(request.get("state_dir") or "").strip()
+            _task = f"{approved.get('action', '')} {approved.get('summary', '')}".strip()
+            record_agent_experience(
+                Path(_sd) if _sd else (_ROOT / "mark17" / "state"),
+                agent="desktop", task=_task, success=True, weight_boost=1.0,
+            )
+        except Exception:  # noqa: BLE001
+            pass
         return {
             "ok": True,
             "observation": observation,

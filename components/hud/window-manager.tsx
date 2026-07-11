@@ -84,12 +84,14 @@ function clamp(value: number, min: number, max: number) {
  * across laptop / phone / future AR canvas. */
 function computeDefaultLayout(vw: number, vh: number): WindowMap {
   const pad = 16;
+  const compact = vw <= 700;
   const leftW = clamp(Math.round(vw * 0.2), 200, 280);
   const rightW = clamp(Math.round(vw * 0.22), 230, 320);
   const chatW = clamp(Math.round(vw * 0.42), 320, 560);
   const outW = clamp(Math.round(vw * 0.32), 300, 440);
 
   const rightX = Math.max(pad, vw - rightW - pad);
+  const outputX = Math.max(pad, vw - outW - pad);
   const place = (
     id: WindowId,
     x: number,
@@ -110,20 +112,21 @@ function computeDefaultLayout(vw: number, vh: number): WindowMap {
   });
 
   return {
-    rank: place('rank', pad, pad, leftW, 112, 1),
-    clock: place('clock', pad, pad + 124, leftW, 150, 2),
+    rank: place('rank', pad, pad, leftW, 112, 1, !compact),
+    clock: place('clock', pad, pad + 124, leftW, 150, 2, !compact),
     missions: place('missions', pad, pad + 286, leftW, 196, 3),
-    minimap: place('minimap', pad, vh - 232, leftW, 180, 4),
-    status: place('status', rightX, pad, rightW, 116, 5),
-    agi: place('agi', rightX, pad + 128, rightW, 176, 6),
+    minimap: place('minimap', pad, vh - 232, leftW, 180, 4, !compact),
+    status: place('status', rightX, pad, rightW, 116, 5, !compact),
+    agi: place('agi', rightX, pad + 128, rightW, 176, 6, !compact),
     player: place('player', rightX, pad + 316, rightW, 196, 7),
-    output: place('output', rightX, vh - 304, outW, 200, 8),
+    output: place('output', outputX, vh - 304, outW, 200, 8),
     chat: place('chat', Math.round((vw - chatW) / 2), vh - 206, chatW, 128, 9),
   };
 }
 
 interface PersistShape {
   v: number;
+  viewport?: 'compact' | 'desktop';
   background: string;
   windows: Partial<Record<WindowId, Partial<WindowState>>>;
 }
@@ -180,11 +183,17 @@ export function WindowManagerProvider({ children }: { children: ReactNode }) {
     const vh = window.innerHeight || 900;
     const defaults = computeDefaultLayout(vw, vh);
     const persisted = loadPersisted();
+    const viewport = vw <= 700 ? 'compact' : 'desktop';
+    const canRestoreLayout = persisted &&
+      (persisted.viewport === viewport || (!persisted.viewport && viewport === 'desktop'));
 
     if (persisted) {
       if (typeof persisted.background === 'string') {
         setBackgroundState(persisted.background);
       }
+    }
+
+    if (canRestoreLayout) {
       const merged = { ...defaults };
       let maxZ = WINDOW_ORDER.length;
       for (const id of WINDOW_ORDER) {
@@ -218,7 +227,12 @@ export function WindowManagerProvider({ children }: { children: ReactNode }) {
     if (!hydrated) return;
     const timer = window.setTimeout(() => {
       try {
-        const payload: PersistShape = { v: 2, background, windows: {} };
+        const payload: PersistShape = {
+          v: 2,
+          viewport: window.innerWidth <= 700 ? 'compact' : 'desktop',
+          background,
+          windows: {},
+        };
         for (const id of WINDOW_ORDER) {
           const w = windows[id];
           payload.windows[id] = {

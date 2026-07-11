@@ -15,6 +15,8 @@ from __future__ import annotations
 import json
 import os
 import sys
+import time
+import urllib.request
 from pathlib import Path
 from typing import Any
 
@@ -77,6 +79,20 @@ PRESETS: dict[str, dict[str, Any]] = {
         "model": "qwen2.5:3b",
         "local": True,
     },
+    "ollama-qwen3": {
+        "label": "Ollama Qwen3 4B — локально, суверенно (8 ГБ-friendly)",
+        "base": "http://127.0.0.1:11434/v1",
+        "key": "ollama",
+        "model": "qwen3:4b",
+        "local": True,
+    },
+    "lmstudio-qwen3": {
+        "label": "LM Studio · Qwen3 4B — локально, сервер :1234",
+        "base": "http://127.0.0.1:1234/v1",
+        "key": "lm-studio",
+        "model": "qwen3-4b",
+        "local": True,
+    },
     "gemini": {
         "label": "Gemini 2.5 Flash — облако, умно (есть лимиты)",
         "base": "https://generativelanguage.googleapis.com/v1beta/openai",
@@ -109,12 +125,48 @@ PRESETS: dict[str, dict[str, Any]] = {
     },
 }
 
+_LOCAL_PROBE_TTL_SEC = 10.0
+_LOCAL_PROBE_CACHE: dict[str, tuple[float, bool, str]] = {}
+
 
 def _preset_key(preset: dict[str, Any]) -> str:
     if preset.get("key"):
         return str(preset["key"])
     env_name = preset.get("key_env")
     return os.environ.get(str(env_name), "") if env_name else ""
+
+
+def _local_models_url(base: str) -> str:
+    return base.rstrip("/") + "/models"
+
+
+def _local_status(preset_id: str, preset: dict[str, Any], *, timeout: float = 0.35) -> tuple[bool, str]:
+    """Fast cached health check for local OpenAI-compatible backends."""
+    if not preset.get("local"):
+        return bool(_preset_key(preset)), "key" if _preset_key(preset) else "missing_key"
+    now = time.time()
+    cached = _LOCAL_PROBE_CACHE.get(preset_id)
+    if cached and now - cached[0] < _LOCAL_PROBE_TTL_SEC:
+        return cached[1], cached[2]
+    url = _local_models_url(str(preset.get("base") or ""))
+    try:
+        req = urllib.request.Request(url, method="GET")
+        with urllib.request.urlopen(req, timeout=timeout) as resp:  # noqa: S310 - localhost only
+            ok = 200 <= int(getattr(resp, "status", 0)) < 300
+        reason = "local_online" if ok else "local_unhealthy"
+    except Exception as exc:  # noqa: BLE001 - offline local backend is expected.
+        ok = False
+        reason = f"local_offline:{type(exc).__name__}"
+    _LOCAL_PROBE_CACHE[preset_id] = (now, ok, reason)
+    return ok, reason
+
+
+def _preset_available(preset_id: str, preset: dict[str, Any]) -> bool:
+    return _local_status(preset_id, preset)[0] if preset.get("local") else bool(_preset_key(preset))
+
+
+def available_for_role(role: str | None = None) -> bool:
+    return bool(resolve_chain(role))
 
 
 def _read_state() -> dict[str, Any]:
@@ -193,7 +245,7 @@ def resolve_preset_id(role: str | None = None) -> str | None:
         if explicit:
             return explicit
         default = ROLE_DEFAULTS.get(str(role))
-        if default in PRESETS and _preset_key(PRESETS[default]):
+        if default in PRESETS and _preset_available(default, PRESETS[default]):
             return default
     return get_active()
 
@@ -227,7 +279,7 @@ def resolve_chain(role: str | None = None) -> list[tuple[str, str, str]]:
             return
         p = PRESETS[pid]
         key = _preset_key(p)
-        if not key:
+        if not key or not _preset_available(pid, p):
             return
         model = str(p["model"])
         if model in seen:
@@ -239,7 +291,15 @@ def resolve_chain(role: str | None = None) -> list[tuple[str, str, str]]:
     for pid in FALLBACK_CHAINS.get(str(role), []):
         _add(pid)
     if not out:
-        out.append(resolve(role))
+        env_key = os.environ.get("GONKA_API_KEY", "").strip()
+        if env_key:
+            out.append(
+                (
+                    (os.environ.get("GONKA_BASE_URL") or DEFAULT_BASE_URL).rstrip("/"),
+                    env_key,
+                    (os.environ.get("GONKA_MODEL") or DEFAULT_MODEL).strip(),
+                )
+            )
     return out
 
 
@@ -274,13 +334,15 @@ def list_presets() -> dict[str, Any]:
     role_active = _role_state()
     items = []
     for pid, p in PRESETS.items():
+        available, reason = _local_status(pid, p) if p.get("local") else (bool(_preset_key(p)), "key" if _preset_key(p) else "missing_key")
         items.append(
             {
                 "id": pid,
                 "label": p["label"],
                 "model": p["model"],
                 "local": bool(p.get("local")),
-                "available": bool(_preset_key(p)),
+                "available": available,
+                "availability": reason,
                 "active": pid == active,
             }
         )
