@@ -1,0 +1,527 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>555 VPN — Свобода. Скорость. Приватность.</title>
+<meta name="description" content="555 VPN — быстрый и приватный VPN. 10 000+ конфигов, все устройства, подключение за минуту." />
+<style>
+/* ============================================================
+   555 VPN — дизайн-токены.
+   Чтобы перекрасить весь сайт под ваш логотип — правьте только
+   переменные в :root ниже (5–7 строк) и SVG логотипа в шапке.
+   ============================================================ */
+:root{
+  --bg:        #070b14;   /* фон страницы */
+  --bg-2:      #0b1120;   /* фон секций-подложек */
+  --panel:     rgba(255,255,255,.035);
+  --line:      rgba(255,255,255,.09);
+  --text:      #eef2ff;
+  --muted:     #97a3bd;
+  --accent:    #4f8cff;   /* основной цвет бренда (из логотипа) */
+  --accent-2:  #9b5cff;   /* второй цвет градиента */
+  --accent-3:  #35e0d0;   /* акцент для статусов/успеха */
+  --grad:      linear-gradient(135deg, var(--accent) 0%, var(--accent-2) 100%);
+  --radius:    20px;
+  --shadow:    0 20px 60px rgba(0,0,0,.45);
+  --glow:      0 8px 40px rgba(79,140,255,.35);
+}
+
+*{ margin:0; padding:0; box-sizing:border-box; }
+html{ scroll-behavior:smooth; }
+body{
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  line-height:1.6;
+  overflow-x:hidden;
+}
+
+/* фоновое свечение + сетка */
+.bg-fx{
+  position:fixed; inset:0; z-index:-1; pointer-events:none;
+  background:
+    radial-gradient(900px 500px at 80% -10%, rgba(155,92,255,.16), transparent 60%),
+    radial-gradient(800px 500px at 10% 10%, rgba(79,140,255,.14), transparent 60%),
+    radial-gradient(700px 600px at 50% 110%, rgba(53,224,208,.08), transparent 60%);
+}
+.bg-fx::after{
+  content:""; position:absolute; inset:0;
+  background-image:
+    linear-gradient(rgba(255,255,255,.03) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255,255,255,.03) 1px, transparent 1px);
+  background-size:56px 56px;
+  mask-image: radial-gradient(1200px 700px at 50% 0%, #000 0%, transparent 75%);
+  -webkit-mask-image: radial-gradient(1200px 700px at 50% 0%, #000 0%, transparent 75%);
+}
+
+.wrap{ max-width:1140px; margin:0 auto; padding:0 20px; }
+
+/* ---------- шапка ---------- */
+header{
+  position:sticky; top:0; z-index:50;
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  background: rgba(7,11,20,.72);
+  border-bottom:1px solid var(--line);
+}
+.nav{ display:flex; align-items:center; gap:28px; height:68px; }
+.brand{ display:flex; align-items:center; gap:12px; text-decoration:none; color:var(--text); margin-right:auto; }
+.brand b{ font-size:20px; letter-spacing:.06em; }
+.brand b span{ background:var(--grad); -webkit-background-clip:text; background-clip:text; color:transparent; }
+.nav a.link{ color:var(--muted); text-decoration:none; font-size:15px; transition:color .2s; }
+.nav a.link:hover{ color:var(--text); }
+
+/* ---------- кнопки ---------- */
+.btn{
+  display:inline-flex; align-items:center; justify-content:center; gap:10px;
+  padding:14px 28px; border-radius:14px; border:0; cursor:pointer;
+  font-size:16px; font-weight:700; text-decoration:none; color:#fff;
+  background:var(--grad); box-shadow:var(--glow);
+  transition:transform .15s, box-shadow .15s, filter .15s;
+}
+.btn:hover{ transform:translateY(-2px); filter:brightness(1.08); }
+.btn.small{ padding:10px 20px; font-size:14px; border-radius:12px; }
+.btn.ghost{
+  background:transparent; box-shadow:none; color:var(--text);
+  border:1px solid var(--line);
+}
+.btn.ghost:hover{ border-color:var(--accent); }
+
+/* ---------- герой ---------- */
+.hero{ padding:96px 0 80px; display:grid; grid-template-columns:1.15fr .85fr; gap:48px; align-items:center; }
+.badge{
+  display:inline-flex; align-items:center; gap:8px;
+  padding:7px 14px; border-radius:999px; font-size:13px; font-weight:600;
+  color:var(--accent-3); background:rgba(53,224,208,.08); border:1px solid rgba(53,224,208,.25);
+}
+.badge .dot{ width:8px; height:8px; border-radius:50%; background:var(--accent-3); box-shadow:0 0 12px var(--accent-3); animation:pulse 2s infinite; }
+@keyframes pulse{ 50%{ opacity:.4; } }
+.hero h1{
+  margin:22px 0 18px;
+  font-size:clamp(38px, 6vw, 64px);
+  line-height:1.08; font-weight:800; letter-spacing:-.02em;
+}
+.hero h1 .grad{ background:var(--grad); -webkit-background-clip:text; background-clip:text; color:transparent; }
+.hero p.sub{ color:var(--muted); font-size:19px; max-width:520px; }
+.hero .cta{ display:flex; gap:14px; margin-top:34px; flex-wrap:wrap; }
+.hero .stats{ display:flex; gap:36px; margin-top:44px; flex-wrap:wrap; }
+.hero .stats b{ display:block; font-size:26px; letter-spacing:-.01em; }
+.hero .stats span{ color:var(--muted); font-size:14px; }
+
+/* щит в герое */
+.hero-visual{ display:flex; justify-content:center; }
+.shield-orb{
+  position:relative; width:min(340px, 80vw); aspect-ratio:1;
+  display:flex; align-items:center; justify-content:center;
+}
+.shield-orb::before{
+  content:""; position:absolute; inset:0; border-radius:50%;
+  background:radial-gradient(circle at 35% 30%, rgba(79,140,255,.35), rgba(155,92,255,.12) 55%, transparent 75%);
+  filter:blur(6px);
+}
+.shield-orb .ring{
+  position:absolute; inset:6%; border-radius:50%;
+  border:1px dashed rgba(255,255,255,.18);
+  animation:spin 26s linear infinite;
+}
+.shield-orb .ring.r2{ inset:16%; animation-duration:40s; animation-direction:reverse; border-color:rgba(79,140,255,.25); }
+@keyframes spin{ to{ transform:rotate(360deg); } }
+
+/* ---------- секции ---------- */
+section{ padding:84px 0; }
+.sec-head{ text-align:center; max-width:640px; margin:0 auto 52px; }
+.sec-head h2{ font-size:clamp(28px, 4vw, 40px); letter-spacing:-.02em; margin-bottom:12px; }
+.sec-head p{ color:var(--muted); font-size:17px; }
+.kicker{
+  display:inline-block; margin-bottom:14px; font-size:13px; font-weight:700;
+  letter-spacing:.14em; text-transform:uppercase;
+  background:var(--grad); -webkit-background-clip:text; background-clip:text; color:transparent;
+}
+
+/* ---------- преимущества ---------- */
+.grid{ display:grid; grid-template-columns:repeat(auto-fit, minmax(300px, 1fr)); gap:20px; }
+.card{
+  background:var(--panel); border:1px solid var(--line); border-radius:var(--radius);
+  padding:28px; transition:transform .2s, border-color .2s;
+}
+.card:hover{ transform:translateY(-4px); border-color:rgba(79,140,255,.4); }
+.card .ico{
+  width:48px; height:48px; border-radius:14px; display:flex; align-items:center; justify-content:center;
+  background:rgba(79,140,255,.12); border:1px solid rgba(79,140,255,.25); margin-bottom:18px;
+}
+.card h3{ font-size:18px; margin-bottom:8px; }
+.card p{ color:var(--muted); font-size:15px; }
+
+/* ---------- рефералка ---------- */
+.referral{
+  position:relative; overflow:hidden;
+  border-radius:28px; border:1px solid rgba(155,92,255,.35);
+  background:
+    radial-gradient(600px 300px at 85% 0%, rgba(155,92,255,.22), transparent 60%),
+    radial-gradient(500px 300px at 0% 100%, rgba(79,140,255,.18), transparent 60%),
+    var(--bg-2);
+  padding:56px 48px;
+  display:grid; grid-template-columns:1.1fr .9fr; gap:44px; align-items:center;
+  box-shadow:var(--shadow);
+}
+.referral h2{ font-size:clamp(26px, 3.6vw, 36px); letter-spacing:-.02em; margin-bottom:14px; }
+.referral p.lead{ color:var(--muted); font-size:17px; margin-bottom:26px; }
+.ref-steps{ display:grid; gap:14px; }
+.ref-step{ display:flex; gap:14px; align-items:flex-start; }
+.ref-step .num{
+  flex:0 0 34px; height:34px; border-radius:10px; display:flex; align-items:center; justify-content:center;
+  font-weight:800; font-size:15px; background:var(--grad); color:#fff;
+}
+.ref-step b{ display:block; font-size:15.5px; }
+.ref-step span{ color:var(--muted); font-size:14px; }
+
+.ref-card{
+  background:rgba(7,11,20,.65); border:1px solid var(--line); border-radius:var(--radius);
+  padding:28px; backdrop-filter:blur(8px);
+}
+.ref-card .label{ font-size:13px; color:var(--muted); text-transform:uppercase; letter-spacing:.1em; margin-bottom:10px; }
+.ref-link{
+  display:flex; gap:10px; margin-bottom:22px;
+}
+.ref-link input{
+  flex:1; min-width:0; padding:13px 16px; border-radius:12px;
+  border:1px solid var(--line); background:rgba(255,255,255,.04);
+  color:var(--text); font-size:14px; font-family:ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+.ref-link input:focus{ outline:none; border-color:var(--accent); }
+.ref-bonus{ display:grid; grid-template-columns:1fr 1fr; gap:12px; }
+.ref-bonus .cell{
+  border:1px solid var(--line); border-radius:14px; padding:16px; text-align:center;
+  background:rgba(255,255,255,.03);
+}
+.ref-bonus b{ display:block; font-size:24px; background:var(--grad); -webkit-background-clip:text; background-clip:text; color:transparent; }
+.ref-bonus span{ font-size:13px; color:var(--muted); }
+
+/* ---------- тарифы ---------- */
+.plans{ display:grid; grid-template-columns:repeat(auto-fit, minmax(280px, 1fr)); gap:20px; align-items:stretch; }
+.plan{
+  position:relative; display:flex; flex-direction:column;
+  background:var(--panel); border:1px solid var(--line); border-radius:var(--radius); padding:32px;
+}
+.plan.popular{
+  border-color:transparent; background:var(--bg-2);
+  box-shadow:var(--shadow);
+}
+.plan.popular::before{
+  content:""; position:absolute; inset:0; border-radius:var(--radius); padding:1.5px;
+  background:var(--grad);
+  -webkit-mask:linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite:xor; mask-composite:exclude;
+  pointer-events:none;
+}
+.plan .tag{
+  position:absolute; top:-13px; left:50%; transform:translateX(-50%);
+  padding:5px 16px; border-radius:999px; font-size:12.5px; font-weight:700;
+  background:var(--grad); color:#fff; white-space:nowrap;
+}
+.plan h3{ font-size:17px; color:var(--muted); font-weight:600; }
+.plan .price{ margin:14px 0 4px; font-size:44px; font-weight:800; letter-spacing:-.02em; }
+.plan .price small{ font-size:16px; font-weight:600; color:var(--muted); }
+.plan .per{ color:var(--muted); font-size:14px; margin-bottom:22px; }
+.plan ul{ list-style:none; display:grid; gap:11px; margin-bottom:28px; }
+.plan li{ display:flex; gap:10px; align-items:center; font-size:15px; color:#c8d2e8; }
+.plan li svg{ flex:0 0 auto; }
+.plan .btn{ margin-top:auto; width:100%; }
+
+/* ---------- FAQ ---------- */
+.faq{ max-width:760px; margin:0 auto; display:grid; gap:12px; }
+.faq details{
+  background:var(--panel); border:1px solid var(--line); border-radius:16px; padding:20px 24px;
+}
+.faq summary{
+  cursor:pointer; font-weight:700; font-size:16px; list-style:none;
+  display:flex; justify-content:space-between; align-items:center; gap:16px;
+}
+.faq summary::-webkit-details-marker{ display:none; }
+.faq summary::after{ content:"+"; font-size:22px; color:var(--accent); transition:transform .2s; }
+.faq details[open] summary::after{ transform:rotate(45deg); }
+.faq details p{ color:var(--muted); font-size:15px; margin-top:12px; }
+
+/* ---------- финальный CTA + футер ---------- */
+.final{
+  text-align:center; border-radius:28px; padding:72px 24px;
+  background:radial-gradient(600px 300px at 50% 0%, rgba(79,140,255,.18), transparent 70%), var(--bg-2);
+  border:1px solid var(--line);
+}
+.final h2{ font-size:clamp(28px, 4vw, 42px); letter-spacing:-.02em; margin-bottom:14px; }
+.final p{ color:var(--muted); margin-bottom:30px; }
+footer{ padding:48px 0 60px; color:var(--muted); font-size:14px; }
+.foot{ display:flex; justify-content:space-between; gap:20px; flex-wrap:wrap; align-items:center; }
+.foot a{ color:var(--muted); text-decoration:none; margin-left:22px; }
+.foot a:hover{ color:var(--text); }
+
+/* ---------- адаптив ---------- */
+@media (max-width: 900px){
+  .hero{ grid-template-columns:1fr; padding-top:56px; text-align:center; }
+  .hero p.sub{ margin:0 auto; }
+  .hero .cta, .hero .stats{ justify-content:center; }
+  .hero-visual{ order:-1; }
+  .shield-orb{ width:min(240px, 70vw); }
+  .referral{ grid-template-columns:1fr; padding:36px 24px; }
+  .nav a.link{ display:none; }
+  section{ padding:64px 0; }
+}
+</style>
+</head>
+<body>
+<div class="bg-fx"></div>
+
+<header>
+  <div class="wrap nav">
+    <a class="brand" href="#top" aria-label="555 VPN — на главную">
+      <!-- ЛОГОТИП: замените этот SVG на ваш логотип (или <img src="logo.svg">) -->
+      <svg width="36" height="36" viewBox="0 0 40 40" fill="none" aria-hidden="true">
+        <defs>
+          <linearGradient id="lg" x1="0" y1="0" x2="40" y2="40">
+            <stop offset="0" stop-color="#4f8cff"/><stop offset="1" stop-color="#9b5cff"/>
+          </linearGradient>
+        </defs>
+        <path d="M20 2 35 8v11c0 9.5-6.4 15.7-15 19C11.4 34.7 5 28.5 5 19V8l15-6z" stroke="url(#lg)" stroke-width="2.4" fill="rgba(79,140,255,.10)"/>
+        <text x="20" y="25" text-anchor="middle" font-size="11" font-weight="800" fill="url(#lg)" font-family="inherit">555</text>
+      </svg>
+      <b>555<span>VPN</span></b>
+    </a>
+    <a class="link" href="#features">Преимущества</a>
+    <a class="link" href="#referral">Рефералка</a>
+    <a class="link" href="#pricing">Тарифы</a>
+    <a class="link" href="#faq">FAQ</a>
+    <a class="btn small" href="#pricing">Подключиться</a>
+  </div>
+</header>
+
+<main id="top">
+
+  <!-- ГЕРОЙ -->
+  <div class="wrap hero">
+    <div>
+      <span class="badge"><span class="dot"></span> 10 000+ конфигов онлайн</span>
+      <h1>Свобода.<br>Скорость.<br><span class="grad">555&nbsp;VPN.</span></h1>
+      <p class="sub">Подключение за минуту, без логов и без ограничений скорости. Работает на всех устройствах — телефон, ноутбук, телевизор.</p>
+      <div class="cta">
+        <a class="btn" href="#pricing">Подключиться за 1 минуту</a>
+        <a class="btn ghost" href="#referral">Получить бесплатно</a>
+      </div>
+      <div class="stats">
+        <div><b>10 000+</b><span>готовых конфигов</span></div>
+        <div><b>0</b><span>логов и слежки</span></div>
+        <div><b>&lt; 60 сек</b><span>до подключения</span></div>
+      </div>
+    </div>
+    <div class="hero-visual">
+      <div class="shield-orb">
+        <div class="ring"></div>
+        <div class="ring r2"></div>
+        <!-- крупная версия логотипа: тоже замените на ваш -->
+        <svg width="150" height="150" viewBox="0 0 40 40" fill="none" aria-hidden="true">
+          <path d="M20 2 35 8v11c0 9.5-6.4 15.7-15 19C11.4 34.7 5 28.5 5 19V8l15-6z" stroke="url(#lg)" stroke-width="1.8" fill="rgba(7,11,20,.75)"/>
+          <text x="20" y="24.5" text-anchor="middle" font-size="10" font-weight="800" fill="url(#lg)" font-family="inherit">555</text>
+        </svg>
+      </div>
+    </div>
+  </div>
+
+  <!-- ПРЕИМУЩЕСТВА -->
+  <section id="features">
+    <div class="wrap">
+      <div class="sec-head">
+        <span class="kicker">Почему 555</span>
+        <h2>VPN, который просто работает</h2>
+        <p>Никаких настроек и танцев с бубном — выбрали тариф, получили конфиг, подключились.</p>
+      </div>
+      <div class="grid">
+        <div class="card">
+          <div class="ico"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#4f8cff" stroke-width="2"><path d="M13 2 3 14h7l-1 8L21 9h-7l-1-7z"/></svg></div>
+          <h3>Максимальная скорость</h3>
+          <p>Серверы с запасом мощности: стримы в 4K, звонки и игры без лагов и ограничений трафика.</p>
+        </div>
+        <div class="card">
+          <div class="ico"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#9b5cff" stroke-width="2"><path d="M12 2 4 5v7c0 5 3.4 8.6 8 10 4.6-1.4 8-5 8-10V5l-8-3z"/><path d="M9 12l2 2 4-4"/></svg></div>
+          <h3>Ноль логов</h3>
+          <p>Мы не записываем историю, не храним трафик и не знаем, чем вы заняты. Ваши дела — только ваши.</p>
+        </div>
+        <div class="card">
+          <div class="ico"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#35e0d0" stroke-width="2"><rect x="3" y="4" width="18" height="12" rx="2"/><path d="M8 20h8M12 16v4"/></svg></div>
+          <h3>Все устройства</h3>
+          <p>iPhone, Android, Mac, Windows, ТВ-приставки. Один тариф — используйте на нескольких устройствах.</p>
+        </div>
+        <div class="card">
+          <div class="ico"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#4f8cff" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c3 3.5 3 14 0 18-3-4-3-14.5 0-18z"/></svg></div>
+          <h3>Обход любых блокировок</h3>
+          <p>Современные протоколы, которые не видно и не заблокировать. Всё открывается — всегда.</p>
+        </div>
+        <div class="card">
+          <div class="ico"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#9b5cff" stroke-width="2"><path d="M4 6h16M4 12h16M4 18h10"/></svg></div>
+          <h3>10 000+ конфигов</h3>
+          <p>Огромный пул готовых конфигураций: если один сервер под нагрузкой — мгновенно берёте другой.</p>
+        </div>
+        <div class="card">
+          <div class="ico"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#35e0d0" stroke-width="2"><path d="M21 12a9 9 0 1 1-9-9"/><path d="M21 3v6h-6"/></svg></div>
+          <h3>Поддержка 24/7</h3>
+          <p>Живые люди в чате, а не бот. Поможем подключиться и решим любой вопрос в течение минут.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- РЕФЕРАЛКА -->
+  <section id="referral">
+    <div class="wrap">
+      <div class="referral">
+        <div>
+          <span class="kicker">Реферальная программа</span>
+          <h2>Приведи друга — месяц бесплатно. Обоим.</h2>
+          <p class="lead">Делитесь личной ссылкой. Каждый друг, который подключится, приносит +30 дней VPN и вам, и ему. Друзей — сколько угодно.</p>
+          <div class="ref-steps">
+            <div class="ref-step"><span class="num">1</span><div><b>Скопируйте свою ссылку</b><span>Она закреплена за вами в личном кабинете</span></div></div>
+            <div class="ref-step"><span class="num">2</span><div><b>Отправьте другу</b><span>В любой мессенджер — Telegram, WhatsApp, куда угодно</span></div></div>
+            <div class="ref-step"><span class="num">3</span><div><b>Получите бонус оба</b><span>+30 дней вам и +30 дней другу сразу после его оплаты</span></div></div>
+          </div>
+        </div>
+        <div class="ref-card">
+          <div class="label">Ваша реферальная ссылка</div>
+          <div class="ref-link">
+            <!-- ЗАМЕНИТЕ домен и подставляйте реальный код пользователя -->
+            <input id="refLink" type="text" readonly value="https://555vpn.example/?ref=VASH-KOD" />
+            <button class="btn small" id="copyBtn" type="button">Копировать</button>
+          </div>
+          <div class="ref-bonus">
+            <div class="cell"><b>+30 дней</b><span>вам за каждого друга</span></div>
+            <div class="cell"><b>+30 дней</b><span>другу на старте</span></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ТАРИФЫ -->
+  <section id="pricing">
+    <div class="wrap">
+      <div class="sec-head">
+        <span class="kicker">Тарифы</span>
+        <h2>Честные цены, без мелкого шрифта</h2>
+        <p>Все тарифы включают полную скорость, все серверы и все устройства.</p>
+      </div>
+      <div class="plans">
+        <div class="plan">
+          <h3>1 месяц</h3>
+          <div class="price">199 <small>₽</small></div>
+          <div class="per">разовый платёж</div>
+          <ul>
+            <li><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#35e0d0" stroke-width="2.5"><path d="M5 13l4 4L19 7"/></svg> Полная скорость</li>
+            <li><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#35e0d0" stroke-width="2.5"><path d="M5 13l4 4L19 7"/></svg> Все серверы и конфиги</li>
+            <li><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#35e0d0" stroke-width="2.5"><path d="M5 13l4 4L19 7"/></svg> До 3 устройств</li>
+          </ul>
+          <a class="btn ghost" href="#">Выбрать</a>
+        </div>
+        <div class="plan popular">
+          <span class="tag">Хит — 555 ₽</span>
+          <h3>6 месяцев</h3>
+          <div class="price">555 <small>₽</small></div>
+          <div class="per">≈ 93 ₽ в месяц</div>
+          <ul>
+            <li><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#35e0d0" stroke-width="2.5"><path d="M5 13l4 4L19 7"/></svg> Полная скорость</li>
+            <li><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#35e0d0" stroke-width="2.5"><path d="M5 13l4 4L19 7"/></svg> Все серверы и конфиги</li>
+            <li><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#35e0d0" stroke-width="2.5"><path d="M5 13l4 4L19 7"/></svg> До 5 устройств</li>
+            <li><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#35e0d0" stroke-width="2.5"><path d="M5 13l4 4L19 7"/></svg> Приоритетная поддержка</li>
+          </ul>
+          <a class="btn" href="#">Выбрать</a>
+        </div>
+        <div class="plan">
+          <h3>12 месяцев</h3>
+          <div class="price">999 <small>₽</small></div>
+          <div class="per">≈ 83 ₽ в месяц</div>
+          <ul>
+            <li><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#35e0d0" stroke-width="2.5"><path d="M5 13l4 4L19 7"/></svg> Всё из тарифа на 6 месяцев</li>
+            <li><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#35e0d0" stroke-width="2.5"><path d="M5 13l4 4L19 7"/></svg> До 10 устройств</li>
+            <li><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#35e0d0" stroke-width="2.5"><path d="M5 13l4 4L19 7"/></svg> +1 месяц в подарок</li>
+          </ul>
+          <a class="btn ghost" href="#">Выбрать</a>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- FAQ -->
+  <section id="faq">
+    <div class="wrap">
+      <div class="sec-head">
+        <span class="kicker">FAQ</span>
+        <h2>Частые вопросы</h2>
+      </div>
+      <div class="faq">
+        <details>
+          <summary>Как быстро я подключусь?</summary>
+          <p>Меньше минуты: оплачиваете тариф, получаете конфиг, импортируете его в приложение — готово. Инструкции есть для всех платформ.</p>
+        </details>
+        <details>
+          <summary>Вы правда не храните логи?</summary>
+          <p>Да. Мы не записываем историю посещений, не храним содержимое трафика и не привязываем активность к аккаунту.</p>
+        </details>
+        <details>
+          <summary>На скольких устройствах можно пользоваться?</summary>
+          <p>Зависит от тарифа: от 3 до 10 устройств одновременно. Конфиги легко переносить между устройствами.</p>
+        </details>
+        <details>
+          <summary>Как работает реферальная программа?</summary>
+          <p>У каждого пользователя есть личная ссылка. Когда друг переходит по ней и оплачивает любой тариф, вы оба получаете +30 дней. Количество друзей не ограничено.</p>
+        </details>
+        <details>
+          <summary>Что если сервер перестанет работать?</summary>
+          <p>В пуле больше 10 000 конфигов — просто берёте следующий. Это делается в один клик, подписку менять не нужно.</p>
+        </details>
+      </div>
+    </div>
+  </section>
+
+  <!-- ФИНАЛЬНЫЙ CTA -->
+  <section>
+    <div class="wrap">
+      <div class="final">
+        <h2>Подключите <span class="grad" style="background:var(--grad);-webkit-background-clip:text;background-clip:text;color:transparent;">555&nbsp;VPN</span> прямо сейчас</h2>
+        <p>Минута на подключение. Месяц бесплатно за каждого друга.</p>
+        <a class="btn" href="#pricing">Начать за 199 ₽</a>
+      </div>
+    </div>
+  </section>
+
+</main>
+
+<footer>
+  <div class="wrap foot">
+    <span>© 2026 555 VPN. Свобода. Скорость. Приватность.</span>
+    <nav>
+      <a href="#features">Преимущества</a>
+      <a href="#referral">Рефералка</a>
+      <a href="#pricing">Тарифы</a>
+      <a href="#faq">FAQ</a>
+    </nav>
+  </div>
+</footer>
+
+<script>
+// Копирование реферальной ссылки (работает и без https через fallback)
+document.getElementById('copyBtn').addEventListener('click', function(){
+  var input = document.getElementById('refLink');
+  var btn = this;
+  function done(){
+    btn.textContent = 'Скопировано!';
+    setTimeout(function(){ btn.textContent = 'Копировать'; }, 2000);
+  }
+  if (navigator.clipboard && window.isSecureContext){
+    navigator.clipboard.writeText(input.value).then(done);
+  } else {
+    input.select();
+    input.setSelectionRange(0, 99999);
+    document.execCommand('copy');
+    done();
+  }
+});
+</script>
+</body>
+</html>
