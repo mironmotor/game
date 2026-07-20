@@ -1,0 +1,5 @@
+{
+  "_note": "ВРЕМЕННАЯ тестовая привязка прода к мосту Max17 на Маке Мирона. Работает ТОЛЬКО на Vercel и ТОЛЬКО пока env MAX17_BRIDGE_URL не задан — env всегда побеждает. После перезапуска run_bridge_mac.sh туннель меняется: обнови url/token здесь или сделай `vercel login` + `vercel link`, чтобы скрипт сам прописывал env.",
+  "url": "https://presented-rom-contamination-cumulative.trycloudflare.com",
+  "token": "63161feaa20c174716c95618503adf64"
+}

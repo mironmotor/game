@@ -1,4 +1,7 @@
 import MaxGraph from '@/components/maxgraph/MaxGraph';
+import AuthGate from '@/components/auth/AuthGate';
+import Paywall from '@/components/auth/Paywall';
+import AccountChip from '@/components/auth/AccountChip';
 
 export const metadata = {
   title: 'Синапс-граф ядра Max',
@@ -6,5 +9,12 @@ export const metadata = {
 };
 
 export default function MaxGraphPage() {
-  return <MaxGraph />;
+  return (
+    <AuthGate>
+      <AccountChip />
+      <Paywall feature="maxgraph">
+        <MaxGraph />
+      </Paywall>
+    </AuthGate>
+  );
 }
