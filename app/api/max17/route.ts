@@ -103,8 +103,23 @@ function runMax17Bridge(event: unknown) {
   });
 }
 
+// Временный тестовый фолбэк: если env моста не заданы, на Vercel берём адрес
+// Мак-туннеля из bridge.fallback.json. Env всегда побеждает; в dev не участвует
+// (там события идут через локальный python3).
+import bridgeFallback from './bridge.fallback.json';
+
+function fallbackBridge(): { url: string; token: string } {
+  if (!process.env.VERCEL) return { url: '', token: '' };
+  return {
+    url: String(bridgeFallback.url || ''),
+    token: String(bridgeFallback.token || ''),
+  };
+}
+
 function remoteBridgeUrl() {
-  return (process.env.MAX17_REMOTE_BRIDGE_URL || process.env.MAX17_BRIDGE_URL || '').trim().replace(/\/+$/, '');
+  return (process.env.MAX17_REMOTE_BRIDGE_URL || process.env.MAX17_BRIDGE_URL || fallbackBridge().url)
+    .trim()
+    .replace(/\/+$/, '');
 }
 
 // Диагностика моста: POST {type:"bridge_health"} — сконфигурирован ли удалённый
@@ -195,7 +210,7 @@ export async function POST(request: Request) {
 
 async function proxyToRemoteBridge(event: unknown): Promise<Record<string, unknown>> {
   const base = remoteBridgeUrl();
-  const token = process.env.MAX17_REMOTE_BRIDGE_TOKEN || process.env.MAX17_BRIDGE_TOKEN;
+  const token = process.env.MAX17_REMOTE_BRIDGE_TOKEN || process.env.MAX17_BRIDGE_TOKEN || fallbackBridge().token || undefined;
   const bridgePath =
     process.env.MAX17_BRIDGE_PATH || (process.env.MAX17_REMOTE_BRIDGE_URL ? '/api/max17' : '/event');
   const controller = new AbortController();
