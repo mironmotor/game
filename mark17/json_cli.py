@@ -28,6 +28,7 @@ from mark17.consolidation import ConsolidationEngine
 from mark17.voice_state import VoiceProfiles, process_voice_event
 from mark17.planner import build_plan
 from mark17.big_idea import generate as generate_big_idea
+from mark17.dream_sim import generate as generate_dream_sim
 
 ALLOWED_EVENTS = frozenset(
     {
@@ -42,6 +43,7 @@ ALLOWED_EVENTS = frozenset(
         "auto_plan",
         "synapse_graph",
         "big_idea",
+        "simulation",
     }
 )
 
@@ -83,6 +85,9 @@ def _as_event(data: dict[str, Any]) -> Event:
     elif event_type == "big_idea":
         for key in ("domain", "audience", "trend", "twist"):
             payload[key] = str(data.get(key) or "")
+    elif event_type == "simulation":
+        prompt = data.get("prompt") or data.get("text") or data.get("message") or ""
+        payload["prompt"] = str(prompt)
 
     return Event(
         type=event_type,
@@ -258,6 +263,9 @@ def normalize(result: dict[str, Any]) -> dict[str, Any]:
     big = result.get("big_idea")
     if isinstance(big, dict):
         normalized["big_idea"] = big
+    sim = result.get("sim")
+    if isinstance(sim, dict):
+        normalized["sim"] = sim
     return normalized
 
 
@@ -317,6 +325,8 @@ def _handle_event(event: Event, args: argparse.Namespace, state_dir: Path) -> di
         return _handle_auto_plan(event, brain, vector_memory, synapse_graph)
     if event.type == "big_idea":
         return _handle_big_idea(event, brain, synapse_graph)
+    if event.type == "simulation":
+        return _handle_simulation(event, brain, synapse_graph)
     if event.type == "synapse_graph":
         return _handle_synapse_graph(event, synapse_graph)
 
@@ -401,6 +411,34 @@ def _handle_big_idea(event: Event, brain: Mark17Brain, synapse_graph: SynapseGra
                                           "seed": seed, "reinforce": "big_idea"}, source="funnel"),
         hint=result_idea["idea"].get("tagline", ""), action="big_idea",
     )
+    brain.plasticity.save()
+    return result
+
+
+def _handle_simulation(event: Event, brain: Mark17Brain, synapse_graph: SynapseGraph) -> dict[str, Any]:
+    """Симуляция Макса: промпт → параметры мира частиц (LLM или детерминированно)."""
+    prompt = str(event.payload.get("prompt") or "")
+    sim = generate_dream_sim(prompt, brain.llm)
+    result: dict[str, Any] = {
+        "ok": True,
+        "event_type": event.type,
+        "route": "simulation",
+        "sim": sim,
+        "memory": {"hint": sim.get("thought", "")},
+        "plasticity": {"confidence": 0.85 if sim["source"].startswith("llm") else 0.6,
+                        "action": "simulation", "learned": True},
+        "llm": {"status": "ok" if sim["source"].startswith("llm") else "skipped",
+                "text": f"source={sim['source']}", "latency_ms": 0.0},
+        "next_adaptation": sim.get("thought", ""),
+        "self_evaluation": {"score": 0.75, "reason": f"simulation via {sim['source']}",
+                             "store_memory": bool(prompt), "reinforce": "simulation"},
+    }
+    result["synapses"] = synapse_graph.update_from_event(event, result, result["self_evaluation"])
+    if prompt:
+        brain.memory.remember(
+            Event(type="remember", payload={"note": prompt, "reinforce": "simulation"}, source="simulation"),
+            hint=sim.get("thought", ""), action="simulation",
+        )
     brain.plasticity.save()
     return result
 

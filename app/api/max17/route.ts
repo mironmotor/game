@@ -17,6 +17,7 @@ const ALLOWED_EVENTS = new Set([
   'auto_plan',
   'synapse_graph',
   'big_idea',
+  'simulation',
 ]);
 
 const DEFAULT_RESPONSE = {
