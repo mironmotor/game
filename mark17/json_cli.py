@@ -29,6 +29,7 @@ from mark17.voice_state import VoiceProfiles, process_voice_event
 from mark17.planner import build_plan
 from mark17.big_idea import generate as generate_big_idea
 from mark17.dream_sim import generate as generate_dream_sim
+from mark17.ingest import generate as generate_ingest, split_stream
 
 ALLOWED_EVENTS = frozenset(
     {
@@ -44,6 +45,7 @@ ALLOWED_EVENTS = frozenset(
         "synapse_graph",
         "big_idea",
         "simulation",
+        "ingest",
     }
 )
 
@@ -88,6 +90,13 @@ def _as_event(data: dict[str, Any]) -> Event:
     elif event_type == "simulation":
         prompt = data.get("prompt") or data.get("text") or data.get("message") or ""
         payload["prompt"] = str(prompt)
+    elif event_type == "ingest":
+        payload["interest"] = str(data.get("interest") or data.get("prompt") or "")
+        raw_items = data.get("items")
+        if isinstance(raw_items, list):
+            payload["items"] = [str(x) for x in raw_items]
+        else:
+            payload["items"] = split_stream(str(data.get("stream") or data.get("text") or ""))
 
     return Event(
         type=event_type,
@@ -266,6 +275,9 @@ def normalize(result: dict[str, Any]) -> dict[str, Any]:
     sim = result.get("sim")
     if isinstance(sim, dict):
         normalized["sim"] = sim
+    ingest = result.get("ingest")
+    if isinstance(ingest, dict):
+        normalized["ingest"] = ingest
     return normalized
 
 
@@ -327,6 +339,8 @@ def _handle_event(event: Event, args: argparse.Namespace, state_dir: Path) -> di
         return _handle_big_idea(event, brain, synapse_graph)
     if event.type == "simulation":
         return _handle_simulation(event, brain, synapse_graph)
+    if event.type == "ingest":
+        return _handle_ingest(event, brain, synapse_graph)
     if event.type == "synapse_graph":
         return _handle_synapse_graph(event, synapse_graph)
 
@@ -439,6 +453,50 @@ def _handle_simulation(event: Event, brain: Mark17Brain, synapse_graph: SynapseG
             Event(type="remember", payload={"note": prompt, "reinforce": "simulation"}, source="simulation"),
             hint=sim.get("thought", ""), action="simulation",
         )
+    brain.plasticity.save()
+    return result
+
+
+def _handle_ingest(event: Event, brain: Mark17Brain, synapse_graph: SynapseGraph) -> dict[str, Any]:
+    """Инбокс Макса: фильтр потока по промпту; важное → память + синапсы."""
+    interest = str(event.payload.get("interest") or "")
+    items = event.payload.get("items")
+    if not isinstance(items, list):
+        items = []
+    ingest = generate_ingest(interest, [str(x) for x in items], brain.llm)
+
+    # Важное закрепляем в памяти и растим граф.
+    for entry in ingest["kept"]:
+        brain.memory.remember(
+            Event(
+                type="remember",
+                payload={"note": entry["text"], "interest": interest,
+                         "score": entry["score"], "reinforce": "ingest"},
+                source="inbox",
+            ),
+            hint=entry["text"][:80], action="ingest",
+        )
+
+    self_eval = {
+        "score": 0.7,
+        "reason": f"ingest kept {ingest['kept_count']}/{ingest['total']} via {ingest['source']}",
+        "store_memory": ingest["kept_count"] > 0,
+        "reinforce": "ingest",
+    }
+    result: dict[str, Any] = {
+        "ok": True,
+        "event_type": event.type,
+        "route": "ingest",
+        "ingest": ingest,
+        "memory": {"hint": f"важного: {ingest['kept_count']} из {ingest['total']}"},
+        "plasticity": {"confidence": 0.85 if ingest["source"].startswith("llm") else 0.6,
+                        "action": "ingest", "learned": ingest["kept_count"] > 0},
+        "llm": {"status": "ok" if ingest["source"].startswith("llm") else "skipped",
+                "text": f"source={ingest['source']}", "latency_ms": 0.0},
+        "next_adaptation": f"В память ушло {ingest['kept_count']} важных фрагментов.",
+        "self_evaluation": self_eval,
+    }
+    result["synapses"] = synapse_graph.update_from_event(event, result, self_eval)
     brain.plasticity.save()
     return result
 
