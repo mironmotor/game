@@ -17,6 +17,7 @@ const MODES: { href: string; label: string; c: string }[] = [
   { href: '/evolution', label: 'Эволюция · 1 трлн', c: '#c9a0ff' },
   { href: '/brain', label: 'EdgeAI · Нейро-мозг', c: '#00ffc8' },
   { href: '/funnel', label: 'Воронка → Big Idea', c: '#00ff88' },
+  { href: '/tg', label: 'Big Idea · Telegram', c: '#35d0ff' },
 ];
 
 export default function ModeMenu() {
