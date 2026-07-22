@@ -3,6 +3,7 @@ import { Orbitron, Roboto_Mono } from 'next/font/google';
 import './globals.css';
 import RegisterSW from '@/components/RegisterSW';
 import { AuthProvider } from '@/lib/auth';
+import { Analytics } from '@vercel/analytics/next';
 
 const orbitron = Orbitron({
   subsets: ['latin'],
@@ -66,6 +67,7 @@ export default function RootLayout({children}: {children: React.ReactNode}) {
       <body className="font-mono bg-[#0a0818] text-white antialiased" suppressHydrationWarning>
         <RegisterSW />
         <AuthProvider>{children}</AuthProvider>
+        <Analytics />
       </body>
     </html>
   );
