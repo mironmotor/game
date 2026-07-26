@@ -8,7 +8,9 @@
 
 set -uo pipefail
 
-TOKEN_RE='^[0-9]{6,}:[A-Za-z0-9_-]{20,}$'
+# Настоящий токен Telegram: ID бота, двоеточие и ровно 35 символов.
+# Требование «ровно 35» отсекает похожие строки, которые могут валяться рядом.
+TOKEN_RE='^[0-9]{6,12}:[A-Za-z0-9_-]{35}$'
 
 say()  { printf '\n\033[1m%s\033[0m\n' "$*"; }
 ok()   { printf '  \033[32m✓\033[0m %s\n' "$*"; }
@@ -91,7 +93,7 @@ ok "Файл настроек .env готов"
 TOKEN=$(env_value BOT_TOKEN)
 if [[ ! $TOKEN =~ $TOKEN_RE ]]; then
   # В .env токена нет (или осталась подсказка-заглушка) — ищем на рабочем столе.
-  FOUND=$(grep -rhoaE '[0-9]{6,}:[A-Za-z0-9_-]{20,}' "$HOME/Desktop" 2>/dev/null | head -1 || true)
+  FOUND=$(grep -rhoaE '[0-9]{6,12}:[A-Za-z0-9_-]{35}' "$HOME/Desktop" 2>/dev/null | head -1 || true)
   if [[ -n ${FOUND:-} && $FOUND =~ $TOKEN_RE ]]; then
     TOKEN="$FOUND"
     ok "Токен найден в файле на рабочем столе"
