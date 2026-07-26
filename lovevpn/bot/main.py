@@ -15,6 +15,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from aiogram import Bot, Dispatcher  # noqa: E402
 from aiogram.client.default import DefaultBotProperties  # noqa: E402
 from aiogram.enums import ParseMode  # noqa: E402
+from aiogram.exceptions import TelegramNetworkError, TelegramUnauthorizedError  # noqa: E402
 from aiogram.types import BotCommand  # noqa: E402
 
 from bot.config import BOT_TOKEN, BRAND, CONFIGS_FILE, DB_PATH, admin_ids  # noqa: E402
@@ -52,7 +53,23 @@ async def run() -> None:
     dispatcher = Dispatcher()
     dispatcher.include_routers(*routers)
 
-    me = await bot.get_me()
+    # Первый же запрос проверяет токен и связь — понятные ошибки вместо трейсбека.
+    try:
+        me = await bot.get_me()
+    except TelegramUnauthorizedError:
+        await bot.session.close()
+        raise SystemExit(
+            "Telegram отклонил токен.\n"
+            "Проверьте BOT_TOKEN в файле lovevpn/.env — он выглядит так: 1234567890:AAH-xxxxx\n"
+            "Новый токен можно взять у @BotFather: ваш бот → Bot Settings → API Token."
+        )
+    except TelegramNetworkError as exc:
+        await bot.session.close()
+        raise SystemExit(
+            f"Нет связи с Telegram: {exc}\n"
+            "Проверьте интернет. Если сидите через VPN или прокси — попробуйте выключить их."
+        )
+
     logger.info("%s запущен как @%s", BRAND, me.username)
     logger.info("База: %s", DB_PATH)
     logger.info("Свободных ключей: %s из %s", pool.free_count(), pool.total_count())
