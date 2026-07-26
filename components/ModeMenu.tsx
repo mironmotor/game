@@ -10,7 +10,7 @@ const MODES: { href: string; label: string; c: string }[] = [
   { href: '/simulation', label: 'Симуляция Макса', c: '#59ffb2' },
   { href: '/neurodance', label: 'Хаос Нейро Дэнс', c: '#a855f7' },
   { href: '/splats', label: 'Брейнданс · 4D сплаты', c: '#be78ff' },
-  { href: '/attractor', label: 'Хаос-аттрактор · 3D', c: '#d9b8ff' },
+  { href: '/attractor', label: 'Бездна Хаоса ∞', c: '#d9b8ff' },
   { href: '/handbrain', label: 'Нейро-рука · камера', c: '#ff6ae0' },
   { href: '/maxgraph', label: 'Синапс-граф Max', c: '#4ea8ff' },
   { href: '/autoplan', label: 'Автоплан · ядро Max', c: '#ffb14e' },
