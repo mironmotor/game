@@ -2,6 +2,11 @@
 # mark17 is the internal package name for the Max17 core.
 numpy>=1.24.0
 
+# Optional runtime extras — the core works WITHOUT them (soft fallback), they
+# just make it faster/richer. Recommended for a local install:
+# hnswlib>=0.8.0   # full-corpus ANN recall; without it — exact scan
+# pypdf>=4.0       # PDF ingest into «Корпус» (ingest_corpus)
+
 # Optional demo-only dependencies (not required by json_cli.py or /api/max17):
 # matplotlib>=3.7.0
 # snntorch>=0.7.0

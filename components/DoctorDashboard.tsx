@@ -9,8 +9,9 @@
  */
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Activity, HeartPulse, Loader2, RefreshCw, Wrench, X } from 'lucide-react';
+import { Activity, Check, HeartPulse, Loader2, RefreshCw, Sparkles, Wrench, X } from 'lucide-react';
 import { getApiPath } from '@/lib/max17-client';
+import { recordOutcome } from '@/lib/outcome';
 
 type Issue = {
   id: string;
@@ -20,6 +21,18 @@ type Issue = {
   detail?: string;
   fixable?: boolean;
   fix_action?: string;
+};
+
+// Предложение агента само-улучшения (применяется только по согласованию).
+type Proposal = {
+  id: string;
+  title: string;
+  problem: string;
+  action: string;
+  kind: 'operational' | 'code';
+  fix_action?: string;
+  code_instruction?: string;
+  risk: 'low' | 'med' | 'high';
 };
 
 type Health = {
@@ -69,6 +82,10 @@ export default function DoctorDashboard() {
   const [busy, setBusy] = useState(false);
   const [fixing, setFixing] = useState<string | null>(null);
   const [note, setNote] = useState<string | null>(null);
+  const [proposals, setProposals] = useState<Proposal[] | null>(null);
+  const [diagnosing, setDiagnosing] = useState(false);
+  const [applying, setApplying] = useState<string | null>(null);
+  const [applied, setApplied] = useState<Record<string, string>>({});
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const call = useCallback(async (payload: Record<string, unknown>) => {
@@ -100,6 +117,13 @@ export default function DoctorDashboard() {
         const out = await call({ fix: issue.fix_action });
         setResp(out);
         setNote(out.ok ? `Починено: ${issue.title}` : `Не удалось: ${issue.title}`);
+        // Петля исхода: сработал ли этот фикс на этой проблеме.
+        void recordOutcome({
+          goal: `здоровье системы: ${issue.title}`,
+          action: `фикс ${issue.fix_action}`,
+          ok: Boolean(out.ok),
+          agent: 'doctor',
+        });
       } catch (e) {
         setNote(e instanceof Error ? e.message : String(e));
       } finally {
@@ -108,6 +132,70 @@ export default function DoctorDashboard() {
     },
     [call],
   );
+
+  // Агент само-улучшения: только ПРЕДЛАГАЕТ (diagnose).
+  const diagnose = useCallback(async () => {
+    setDiagnosing(true);
+    setNote(null);
+    try {
+      const r = await fetch(getApiPath('self-heal'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'diagnose' }),
+      });
+      if (r.status === 401) {
+        setNote('Само-улучшение — только для админа (войди через Google как Мирон).');
+        setProposals([]);
+        return;
+      }
+      const d = (await r.json()) as { proposals?: Proposal[] };
+      setProposals(d.proposals ?? []);
+    } catch (e) {
+      setNote(e instanceof Error ? e.message : String(e));
+    } finally {
+      setDiagnosing(false);
+    }
+  }, []);
+
+  // Применяем предложение ТОЛЬКО по нажатию «Согласовать».
+  const applyProposal = useCallback(
+    async (p: Proposal) => {
+      setApplying(p.id);
+      setNote(null);
+      try {
+        const r = await fetch(getApiPath('self-heal'), {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ action: 'apply', proposal: p }),
+        });
+        const d = (await r.json()) as { ok?: boolean; applied?: string; result?: { answer?: string; error?: string } };
+        const msg =
+          d.applied === 'code'
+            ? `Агент проработал в песочнице: ${d.result?.answer ? String(d.result.answer).slice(0, 160) : d.result?.error || 'см. результат'}`
+            : d.ok
+              ? 'Операционный фикс применён ✓'
+              : 'Фикс не прошёл';
+        setApplied((m) => ({ ...m, [p.id]: msg }));
+        // Петля исхода: согласованное улучшение — сработало или нет.
+        void recordOutcome({
+          goal: `улучшение системы: ${p.problem || p.title}`,
+          action: p.title,
+          ok: Boolean(d.ok),
+          agent: 'self-heal',
+        });
+        if (d.applied === 'operational' && d.ok) void sweep();
+      } catch (e) {
+        setApplied((m) => ({ ...m, [p.id]: e instanceof Error ? e.message : String(e) }));
+      } finally {
+        setApplying(null);
+      }
+    },
+    [sweep],
+  );
+
+  const rejectProposal = useCallback((id: string) => {
+    setProposals((ps) => (ps ?? []).filter((p) => p.id !== id));
+  }, []);
 
   useEffect(() => {
     const onToggle = () => setOpen((v) => !v);
@@ -254,6 +342,67 @@ export default function DoctorDashboard() {
               </div>
             );
           })}
+        </div>
+
+        <div className="mt-4 rounded-xl border border-violet-400/25 bg-violet-400/[0.05] p-3">
+          <div className="flex items-center gap-2">
+            <Sparkles className="h-3.5 w-3.5 text-violet-300" />
+            <span className="text-[11px] uppercase tracking-widest text-violet-200/80">Само-улучшение · агент</span>
+            <button
+              type="button"
+              onClick={() => void diagnose()}
+              disabled={diagnosing}
+              className="ml-auto flex items-center gap-1 rounded-lg bg-violet-500/25 px-2.5 py-1 text-[11px] font-semibold text-violet-100 hover:bg-violet-500/40 disabled:opacity-40"
+            >
+              {diagnosing ? <Loader2 className="h-3 w-3 animate-spin" /> : <Sparkles className="h-3 w-3" />}
+              Предложить улучшения
+            </button>
+          </div>
+          <p className="mt-1 text-[10px] leading-relaxed text-white/40">
+            MAX анализирует здоровье и предлагает фиксы. Ничего не применяется без твоего «Согласовать».
+            Кодовые правки прорабатываются в песочнице — выкат в живой GAME остаётся отдельным шагом.
+          </p>
+          {proposals && proposals.length === 0 && !diagnosing && (
+            <div className="mt-2 text-[11px] text-white/40">Предложений нет — система в порядке. 🟢</div>
+          )}
+          <div className="mt-2 space-y-2">
+            {(proposals ?? []).map((p) => (
+              <div key={p.id} className="rounded-lg border border-white/10 bg-black/30 p-2.5">
+                <div className="text-[13px] font-semibold text-white/90">{p.title}</div>
+                <div className="mt-0.5 flex flex-wrap items-center gap-1.5 text-[10px]">
+                  <span className={`rounded px-1.5 py-0.5 ${p.kind === 'code' ? 'bg-amber-500/20 text-amber-200' : 'bg-cyan-500/20 text-cyan-200'}`}>
+                    {p.kind === 'code' ? 'КОД · песочница' : 'ОПЕРАЦИОННЫЙ'}
+                  </span>
+                  <span className="text-white/40">риск: {p.risk}</span>
+                </div>
+                {p.problem && <div className="mt-1 text-[11px] text-white/55">{p.problem}</div>}
+                {p.action && <div className="mt-0.5 text-[11px] text-white/70">→ {p.action}</div>}
+                {applied[p.id] ? (
+                  <div className="mt-2 rounded border border-emerald-400/20 bg-emerald-400/5 px-2 py-1 text-[11px] text-emerald-100">{applied[p.id]}</div>
+                ) : (
+                  <div className="mt-2 flex gap-1.5">
+                    <button
+                      type="button"
+                      onClick={() => void applyProposal(p)}
+                      disabled={applying !== null}
+                      className="flex items-center gap-1 rounded-lg bg-emerald-500/25 px-2.5 py-1 text-[11px] font-semibold text-emerald-100 hover:bg-emerald-500/40 disabled:opacity-40"
+                    >
+                      {applying === p.id ? <Loader2 className="h-3 w-3 animate-spin" /> : <Check className="h-3 w-3" />}
+                      Согласовать
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => rejectProposal(p.id)}
+                      disabled={applying !== null}
+                      className="flex items-center gap-1 rounded-lg bg-white/10 px-2.5 py-1 text-[11px] text-white/60 hover:bg-white/20 disabled:opacity-40"
+                    >
+                      <X className="h-3 w-3" /> Отклонить
+                    </button>
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
         </div>
 
         {note && <div className="mt-3 rounded-lg border border-cyan-400/20 bg-cyan-400/5 px-3 py-2 text-xs text-cyan-100">{note}</div>}

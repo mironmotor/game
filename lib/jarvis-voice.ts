@@ -1,11 +1,14 @@
 /**
- * JARVIS-style Russian voice for MAX, via the browser SpeechSynthesis API.
+ * JARVIS-style system voice fallback for MAX, via SpeechSynthesis.
  *
  * Not a clone of the film's actor (real person's voice — rights/ethics, and not
  * reproducible offline). It speaks in a calm, low, measured register and lets the
  * user pick whichever installed voice sounds most JARVIS-like on their machine
  * (the auto-pick prefers a Russian male voice like macOS "Yuri" / Windows "Pavel").
  */
+
+import { baseLanguage } from '@/lib/i18n/config';
+import { getActiveLocale } from '@/lib/i18n/runtime';
 
 const NAME_KEY = 'max_voice_name';
 const PREFERRED_MALE = ['yuri', 'pavel', 'dmitri', 'aleksandr', 'artem'];
@@ -28,23 +31,30 @@ function savedName(): string | null {
   }
 }
 
-function autoPick(): SpeechSynthesisVoice | null {
-  const ru = allVoices().filter((v) => /^ru(-|_|$)/i.test(v.lang));
-  if (!ru.length) return null;
-  for (const name of PREFERRED_MALE) {
-    const hit = ru.find((v) => v.name.toLowerCase().includes(name));
-    if (hit) return hit;
+function autoPick(locale = getActiveLocale()): SpeechSynthesisVoice | null {
+  const base = baseLanguage(locale);
+  const matching = allVoices().filter((voice) => baseLanguage(voice.lang) === base);
+  if (!matching.length) return allVoices()[0] ?? null;
+  if (base === 'ru') {
+    for (const name of PREFERRED_MALE) {
+      const hit = matching.find((voice) => voice.name.toLowerCase().includes(name));
+      if (hit) return hit;
+    }
   }
-  return ru.find((v) => /google/i.test(v.name)) ?? ru[0];
+  return matching.find((voice) => /google|premium|enhanced/i.test(voice.name)) ?? matching[0];
 }
 
-function resolve(): SpeechSynthesisVoice | null {
+function resolve(locale = getActiveLocale()): SpeechSynthesisVoice | null {
+  const base = baseLanguage(locale);
   const name = savedName();
   if (name) {
-    const v = allVoices().find((x) => x.name === name);
-    if (v) return v;
+    const voice = allVoices().find((candidate) => candidate.name === name);
+    if (voice && baseLanguage(voice.lang) === base) return voice;
   }
-  return cached ?? autoPick();
+  if (cached && baseLanguage(cached.lang) === base) {
+    return cached;
+  }
+  return autoPick(locale);
 }
 
 /** Call once on the client so voices are warmed (they load async). */
@@ -60,12 +70,13 @@ export function jarvisAvailable(): boolean {
   return available();
 }
 
-/** Russian voices first, then the rest — for the picker. */
+/** Active-language voices first, then the rest — for the picker. */
 export function listVoices(): { name: string; lang: string }[] {
-  const v = allVoices();
-  const ru = v.filter((x) => /^ru/i.test(x.lang));
-  const rest = v.filter((x) => !/^ru/i.test(x.lang));
-  return [...ru, ...rest].map((x) => ({ name: x.name, lang: x.lang }));
+  const voices = allVoices();
+  const base = baseLanguage(getActiveLocale());
+  const matching = voices.filter((voice) => baseLanguage(voice.lang) === base);
+  const rest = voices.filter((voice) => baseLanguage(voice.lang) !== base);
+  return [...matching, ...rest].map((voice) => ({ name: voice.name, lang: voice.lang }));
 }
 
 export function getVoiceName(): string {
@@ -78,50 +89,51 @@ export function setVoiceByName(name: string): void {
   } catch {
     /* ignore */
   }
-  cached = allVoices().find((v) => v.name === name) ?? null;
+  cached = allVoices().find((voice) => voice.name === name) ?? null;
 }
 
 export function jarvisSpeak(text: string, hooks?: { onStart?: () => void; onEnd?: () => void }): void {
   if (!available()) return;
   const clean = text.trim();
   if (!clean) return;
+  const locale = getActiveLocale();
   const synth = window.speechSynthesis;
   synth.cancel();
-  const u = new SpeechSynthesisUtterance(clean);
-  u.lang = 'ru-RU';
-  const voice = resolve();
+  const utterance = new SpeechSynthesisUtterance(clean);
+  utterance.lang = locale;
+  const voice = resolve(locale);
   if (voice) {
     cached = voice;
-    u.voice = voice;
+    utterance.voice = voice;
   }
-  u.pitch = 0.74; // deep, composed — JARVIS register
-  u.rate = 0.95; // measured, unhurried
-  u.volume = 1;
-  // Notify the Iron-Man HUD so the arc-reactor glows gold while JARVIS speaks.
+  utterance.pitch = 0.74;
+  utterance.rate = 0.95;
+  utterance.volume = 1;
   const signal = (active: boolean) => {
     if (typeof window !== 'undefined') {
       window.dispatchEvent(new CustomEvent('max:speaking', { detail: { active } }));
     }
   };
-  u.onstart = () => {
+  utterance.onstart = () => {
     signal(true);
     hooks?.onStart?.();
   };
-  u.onend = () => {
+  utterance.onend = () => {
     signal(false);
     hooks?.onEnd?.();
   };
-  u.onerror = () => {
+  utterance.onerror = () => {
     signal(false);
     hooks?.onEnd?.();
   };
-  synth.speak(u);
+  synth.speak(utterance);
 }
 
-/** Speak a short JARVIS-flavored sample (optionally switching voice first). */
+/** Speak a short neutral sample (optionally switching voice first). */
 export function jarvisPreview(name?: string): void {
   if (name) setVoiceByName(name);
-  jarvisSpeak('Системы в норме, сэр. Я Макс, к вашим услугам.');
+  const locale = baseLanguage(getActiveLocale());
+  jarvisSpeak(locale === 'ru' ? 'Системы в норме. Я Макс, к вашим услугам.' : 'Systems online. MAX is ready.');
 }
 
 export function jarvisStop(): void {

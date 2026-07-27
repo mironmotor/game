@@ -5,8 +5,13 @@ import {
   BookOpen,
   Briefcase,
   AudioLines,
+  CalendarClock,
   Camera,
   Globe,
+  Atom,
+  HeartPulse,
+  ShieldCheck,
+  Infinity as InfinityIcon,
   Image as ImageIcon,
   MapPin,
   Maximize2,
@@ -32,18 +37,16 @@ import { NeuralCore, type NeuralCoreStatus } from './NeuralCore';
 import { HudWindow } from './HudWindow';
 import {
   useWindowManager,
-  WINDOW_META,
   WINDOW_ORDER,
   type WindowId,
 } from './window-manager';
 import { getBackground } from './backgrounds';
 import { SolarSystem } from './SolarSystem';
 import type { Task } from '@/hooks/use-game-state';
+import { useI18n } from '@/components/I18nProvider';
+import type { MessageKey } from '@/lib/i18n/messages';
 
 export type HudNavId = 'inventory' | 'skills' | 'codex' | 'quests' | 'friends';
-
-const AGI_TAGLINE =
-  'Цифровой агент GAME. Управляй интерфейсом голосом или текстом: «закрой миссии», «открой карту», «смени фон», «сбрось окна». Двигай и меняй размер любого окна.';
 
 export interface GameHudProps {
   rank: number;
@@ -74,7 +77,7 @@ export interface GameHudProps {
   isVoiceOpen: boolean;
   coreStatus: NeuralCoreStatus;
   activeNav: HudNavId;
-  friendsBadge?: number;
+  navBadges?: Partial<Record<HudNavId, number>>;
   onInputChange: (value: string) => void;
   onSend: () => void;
   onToggleListen: () => void;
@@ -89,18 +92,36 @@ export interface GameHudProps {
   onToggleAppearance?: () => void;
   onNavChange: (id: HudNavId) => void;
   onMissionToggle: (taskId: string) => void;
+  /** Клик по демо-миссии новичка: завести её настоящей задачей и закрыть. */
+  onDefaultMissionComplete: (label: string) => void;
   onKeyDown?: (e: KeyboardEvent) => void;
 }
 
-const NAV_ITEMS: { id: HudNavId; label: string; icon: ReactNode }[] = [
-  { id: 'inventory', label: 'ИНВЕНТАРЬ', icon: <Briefcase size={20} /> },
-  { id: 'skills', label: 'НАВЫКИ', icon: <Plus size={20} /> },
-  { id: 'codex', label: 'КОДЕКС', icon: <Menu size={20} /> },
-  { id: 'quests', label: 'КВЕСТЫ', icon: <BookOpen size={20} /> },
-  { id: 'friends', label: 'ДРУЗЬЯ', icon: <Users size={20} /> },
+const NAV_ITEMS: { id: HudNavId; labelKey: MessageKey; icon: ReactNode }[] = [
+  { id: 'inventory', labelKey: 'nav.inventory', icon: <Briefcase size={20} /> },
+  { id: 'skills', labelKey: 'nav.skills', icon: <Plus size={20} /> },
+  { id: 'codex', labelKey: 'nav.codex', icon: <Menu size={20} /> },
+  { id: 'quests', labelKey: 'nav.quests', icon: <BookOpen size={20} /> },
+  { id: 'friends', labelKey: 'nav.friends', icon: <Users size={20} /> },
 ];
 
-const DEFAULT_MISSIONS = ['Завершить сценарий', 'Найти скрытые квесты', 'Прокачать репутацию'];
+const DEFAULT_MISSIONS: MessageKey[] = [
+  'mission.dailyFocus',
+  'mission.systemCheck',
+  'mission.learnSkill',
+];
+
+const WINDOW_TITLE_KEYS: Record<WindowId, MessageKey> = {
+  rank: 'window.rank',
+  clock: 'window.clock',
+  missions: 'window.missions',
+  minimap: 'window.map',
+  status: 'window.system',
+  agi: 'window.agi',
+  player: 'window.player',
+  output: 'window.output',
+  chat: 'window.chat',
+};
 
 function WireframeGlobe() {
   return (
@@ -147,7 +168,7 @@ function SystemStatusIcon() {
 
 function HudDock({ onOpenAppearance }: { onOpenAppearance?: () => void }) {
   const wm = useWindowManager();
-  const bg = getBackground(wm.background);
+  const { t } = useI18n();
 
   return (
     <div className="hud-dock">
@@ -161,9 +182,9 @@ function HudDock({ onOpenAppearance }: { onOpenAppearance?: () => void }) {
               type="button"
               className={`hud-dock-chip ${open ? 'is-open' : ''}`}
               onClick={() => (open ? wm.closeWindow(id) : wm.openWindow(id))}
-              title={open ? 'Скрыть окно' : 'Показать окно'}
+              title={open ? t('dock.hideWindow') : t('dock.showWindow')}
             >
-              {WINDOW_META[id].title}
+              {t(WINDOW_TITLE_KEYS[id])}
             </button>
           );
         })}
@@ -173,36 +194,90 @@ function HudDock({ onOpenAppearance }: { onOpenAppearance?: () => void }) {
           type="button"
           className="hud-dock-tool"
           onClick={() => window.dispatchEvent(new CustomEvent('angels:open'))}
-          title="Совет Ангелов — спросить MAX и 7 агентов"
+          title={t('dock.council')}
         >
           <Sparkles size={13} />
-          <span>Совет</span>
+          <span>{t('dock.council')}</span>
         </button>
         <button
           type="button"
           className="hud-dock-tool"
           onClick={() => window.dispatchEvent(new CustomEvent('angels:kickoff'))}
-          title="Разгон дня — MAX даёт миссию и берёт топ-задачу в работу"
+          title={t('dock.kickoff')}
         >
           <Zap size={13} />
-          <span>Разгон</span>
+          <span>{t('dock.kickoff')}</span>
         </button>
         <button
           type="button"
           className="hud-dock-tool"
           onClick={() => (onOpenAppearance ? onOpenAppearance() : wm.cycleBackground())}
-          title="Вид: темы, фоны и генератор снов"
+          title={t('dock.appearance')}
         >
           <ImageIcon size={13} />
-          <span>{bg.label}</span>
+          <span>{t('dock.appearance')}</span>
         </button>
-        <button type="button" className="hud-dock-tool" onClick={() => wm.showAll()} title="Показать все окна">
+        <button
+          type="button"
+          className="hud-dock-tool"
+          onClick={() => window.dispatchEvent(new CustomEvent('doctor:toggle'))}
+          title={t('dock.doctor')}
+        >
+          <HeartPulse size={13} />
+          <span>{t('dock.doctor')}</span>
+        </button>
+        <button
+          type="button"
+          className="hud-dock-tool"
+          onClick={() => window.dispatchEvent(new CustomEvent('cyberlab:open'))}
+          title="Cyber Lab: этичная безопасность, легальные лаборатории и bug bounty scope"
+        >
+          <ShieldCheck size={13} />
+          <span>Cyber Lab</span>
+        </button>
+        <button
+          type="button"
+          className="hud-dock-tool"
+          onClick={() => window.dispatchEvent(new CustomEvent('coreflow:open'))}
+          title="Ядро MAX · Поток — живой 3D-аттрактор из синапсов ядра"
+        >
+          <Atom size={13} />
+          <span>Ядро 3D</span>
+        </button>
+        <button
+          type="button"
+          className="hud-dock-tool"
+          onClick={() => window.dispatchEvent(new CustomEvent('phase:toggle'))}
+          title={t('dock.phase')}
+        >
+          <CalendarClock size={13} />
+          <span>{t('dock.phase')}</span>
+        </button>
+        <button
+          type="button"
+          className="hud-dock-tool"
+          onClick={() => window.dispatchEvent(new CustomEvent('reflection:toggle'))}
+          title={t('dock.reflection')}
+        >
+          <InfinityIcon size={13} />
+          <span>{t('dock.reflection')}</span>
+        </button>
+        <button
+          type="button"
+          className="hud-dock-tool"
+          onClick={() => window.dispatchEvent(new CustomEvent('aura:toggle'))}
+          title={t('dock.aura')}
+        >
+          <AudioLines size={13} />
+          <span>{t('dock.aura')}</span>
+        </button>
+        <button type="button" className="hud-dock-tool" onClick={() => wm.showAll()} title={t('dock.all')}>
           <Maximize2 size={13} />
-          <span>Всё</span>
+          <span>{t('dock.all')}</span>
         </button>
-        <button type="button" className="hud-dock-tool" onClick={() => wm.resetLayout()} title="Сбросить расположение">
+        <button type="button" className="hud-dock-tool" onClick={() => wm.resetLayout()} title={t('dock.reset')}>
           <RotateCcw size={13} />
-          <span>Сброс</span>
+          <span>{t('dock.reset')}</span>
         </button>
       </div>
     </div>
@@ -239,7 +314,7 @@ export function GameHud(props: GameHudProps) {
     isVoiceOpen,
     coreStatus,
     activeNav,
-    friendsBadge = 2,
+    navBadges = {},
     onInputChange,
     onSend,
     onToggleListen,
@@ -254,11 +329,13 @@ export function GameHud(props: GameHudProps) {
     onToggleAppearance,
     onNavChange,
     onMissionToggle,
+    onDefaultMissionComplete,
     onKeyDown,
   } = props;
 
   const wm = useWindowManager();
   const bg = getBackground(wm.background);
+  const { t, formatNumber } = useI18n();
   const displayMissions =
     missions.length > 0 ? missions.filter((t) => t.status !== 'completed').slice(0, 4) : null;
   const outputLines = log.length > 0 ? log : agiMessage ? [agiMessage] : [];
@@ -285,7 +362,7 @@ export function GameHud(props: GameHudProps) {
       <div className="hud-windows">
       <HudWindow id="rank" accent="purple">
         <div className="hud-window-pad relative">
-          <div className="hud-label">WORLD RANK</div>
+          <div className="hud-label">{t('hud.worldRank')}</div>
           <div className="hud-rank-number hud-mono mt-1">#{rank}</div>
           <div className="hud-label mt-1">TOP {topPercent}%</div>
           <div className="absolute right-3 top-3 opacity-80">
@@ -303,10 +380,10 @@ export function GameHud(props: GameHudProps) {
             <span className="text-lg font-medium">{temperature}°C</span>
           </div>
           <div className="flex items-center justify-between mt-3 gap-2">
-            <span className="hud-label">SUNSET</span>
+            <span className="hud-label">{t('hud.sunset')}</span>
             <span className="hud-label flex items-center gap-1">
               <MapPin size={10} />
-              MIAMI BEACH
+              {t('hud.location')}
             </span>
           </div>
         </div>
@@ -328,15 +405,22 @@ export function GameHud(props: GameHudProps) {
                     </span>
                   </label>
                 ))
-              : DEFAULT_MISSIONS.map((text, i) => (
-                  <label key={i} className="hud-mission-item">
-                    <input type="checkbox" readOnly />
-                    <span>{text}</span>
+              : DEFAULT_MISSIONS.map((key) => (
+                  // Демо-миссии для новичка. Раньше чекбокс был readOnly — он
+                  // физически не отмечался, и человек думал, что интерфейс сломан.
+                  // Теперь клик заводит настоящую задачу и сразу её закрывает.
+                  <label key={key} className="hud-mission-item">
+                    <input
+                      type="checkbox"
+                      checked={false}
+                      onChange={() => onDefaultMissionComplete(t(key))}
+                    />
+                    <span>{t(key)}</span>
                   </label>
                 ))}
           </div>
           <div className="hud-label mt-3 pt-3 border-t border-white/10">
-            НАГРАДА: {rewardXp.toLocaleString('ru-RU')} XP
+            {t('hud.reward')}: {formatNumber(rewardXp)} XP
           </div>
         </div>
       </HudWindow>
@@ -345,12 +429,12 @@ export function GameHud(props: GameHudProps) {
         <div className="hud-window-pad">
           <div className="flex items-center gap-1 mb-2">
             <Star size={10} className="text-[var(--hud-purple)]" fill="currentColor" />
-            <span className="hud-label text-[8px]">MIAMI BEACH</span>
+            <span className="hud-label text-[8px]">{t('hud.location')}</span>
           </div>
           <MinimapSvg />
           <div className="flex items-center gap-2 mt-2 text-[10px] text-white/70">
             <span className="hud-online-dot" />
-            <span>ONLINE: {onlineCount.toLocaleString('en-US')}</span>
+            <span>{t('common.online')}: {formatNumber(onlineCount)}</span>
           </div>
         </div>
       </HudWindow>
@@ -361,7 +445,7 @@ export function GameHud(props: GameHudProps) {
             <div className="text-base font-semibold tracking-wide">JARVIS AGI</div>
             <div className="flex items-center gap-2 mt-2 text-xs">
               <span className="hud-online-dot" />
-              <span style={{ color: 'var(--hud-online)' }}>ONLINE</span>
+              <span style={{ color: 'var(--hud-online)' }}>{t('common.online')}</span>
             </div>
           </div>
           <SystemStatusIcon />
@@ -374,9 +458,9 @@ export function GameHud(props: GameHudProps) {
             <Globe size={12} className="text-[var(--hud-cyan)]" />
             <span className="hud-label">AGI EXTENSION</span>
           </div>
-          <h2 className="text-lg font-bold tracking-wide mt-2">ВСТРЕЧАЙТЕ, GAME.</h2>
+          <h2 className="text-lg font-bold tracking-wide mt-2">{t('hud.meetGame')}</h2>
           <AgiWaveform />
-          <p className="hud-agi-text flex-1">{AGI_TAGLINE}</p>
+          <p className="hud-agi-text flex-1">{t('hud.tagline')}</p>
         </div>
       </HudWindow>
 
@@ -384,12 +468,12 @@ export function GameHud(props: GameHudProps) {
         <div className="hud-window-pad">
           <div className="flex items-center gap-2 mb-3">
             <Triangle size={12} className="text-[var(--hud-cyan)] fill-current" />
-            <span className="hud-label">СТАТУС ИГРОКА</span>
+            <span className="hud-label">{t('hud.playerStatus')}</span>
           </div>
           <div className="space-y-3">
             <div>
               <div className="flex justify-between text-[10px] mb-1">
-                <span className="hud-label">ЭНЕРГИЯ</span>
+                <span className="hud-label">{t('hud.energy')}</span>
                 <span className="hud-mono text-[var(--hud-cyan)]">{energy}%</span>
               </div>
               <div className="hud-progress-track">
@@ -398,7 +482,7 @@ export function GameHud(props: GameHudProps) {
             </div>
             <div>
               <div className="flex justify-between text-[10px] mb-1">
-                <span className="hud-label">ФОКУС</span>
+                <span className="hud-label">{t('hud.focus')}</span>
                 <span className="hud-mono text-[var(--hud-cyan)]">{focus}%</span>
               </div>
               <div className="hud-progress-track">
@@ -407,13 +491,18 @@ export function GameHud(props: GameHudProps) {
             </div>
             <div className="flex justify-between pt-2 text-sm">
               <div>
-                <div className="hud-label text-[8px]">РЕПУТАЦИЯ</div>
+                <div className="hud-label text-[8px]">{t('hud.reputation')}</div>
                 <div className="font-semibold mt-0.5">LVL {reputationLevel}</div>
               </div>
-              <div className="text-right">
-                <div className="hud-label text-[8px]">БАЛАНС</div>
-                <div className="font-semibold mt-0.5 hud-mono">$ {balance.toLocaleString('en-US')}</div>
-              </div>
+              <button
+                type="button"
+                onClick={() => window.dispatchEvent(new CustomEvent('mircoin:toggle'))}
+                className="text-right transition hover:opacity-80"
+                title={t('hud.wallet')}
+              >
+                <div className="hud-label text-[8px]">MIRCOIN</div>
+                <div className="font-semibold mt-0.5 hud-mono">Ⓜ {formatNumber(balance)}</div>
+              </button>
             </div>
           </div>
         </div>
@@ -423,7 +512,7 @@ export function GameHud(props: GameHudProps) {
       <HudWindow id="output" accent="cyan" bodyClassName="hud-window-body-scroll">
         <div className="hud-output">
           {outputLines.length === 0 ? (
-            <p className="hud-output-empty">Max17 на связи. Жду команду или сообщение…</p>
+            <p className="hud-output-empty">{t('hud.outputReady')}</p>
           ) : (
             outputLines.map((line, i) => (
               <p key={`${i}-${line.slice(0, 12)}`} className={`hud-output-line ${i === 0 ? 'is-latest' : ''}`}>
@@ -442,7 +531,7 @@ export function GameHud(props: GameHudProps) {
               type="button"
               className={`hud-icon-btn ${isCameraActive ? 'active' : ''}`}
               onClick={onToggleCamera}
-              aria-label={isCameraActive ? 'Отключить камеру' : 'Включить камеру'}
+              aria-label={t('hud.camera')}
             >
               <Camera size={18} />
             </button>
@@ -450,7 +539,7 @@ export function GameHud(props: GameHudProps) {
               type="button"
               className={`hud-icon-btn ${isSpeechEnabled ? 'active' : ''}`}
               onClick={onToggleSpeech}
-              aria-label={isSpeechEnabled ? 'Отключить голос Max17' : 'Включить голос Max17'}
+              aria-label={isSpeechEnabled ? t('hud.soundOff') : t('hud.soundOn')}
             >
               <Volume2 size={18} />
             </button>
@@ -458,8 +547,8 @@ export function GameHud(props: GameHudProps) {
               type="button"
               className={`hud-icon-btn ${isCodeOpen ? 'active' : ''}`}
               onClick={onToggleCode}
-              aria-label={isCodeOpen ? 'Закрыть код-режим' : 'Код-режим (Qwen3-агент)'}
-              title="Код-режим: Qwen3-агент с файлами и командами"
+              aria-label={t('hud.terminal')}
+              title={t('hud.terminal')}
             >
               <Terminal size={18} />
             </button>
@@ -467,8 +556,8 @@ export function GameHud(props: GameHudProps) {
               type="button"
               className={`hud-icon-btn ${isDesktopOpen ? 'active' : ''}`}
               onClick={onToggleDesktop}
-              aria-label={isDesktopOpen ? 'Закрыть desktop-режим' : 'Управление рабочим столом (с подтверждением)'}
-              title="Рабочий стол: Qwen3 управляет macOS с подтверждением"
+              aria-label={t('hud.desktop')}
+              title={t('hud.desktop')}
             >
               <Monitor size={18} />
             </button>
@@ -476,8 +565,8 @@ export function GameHud(props: GameHudProps) {
               type="button"
               className={`hud-icon-btn ${isArchitectOpen ? 'active' : ''}`}
               onClick={onToggleArchitect}
-              aria-label={isArchitectOpen ? 'Закрыть архитектора' : 'Архитектор: ИИ предлагает ветки развития'}
-              title="Архитектор: ИИ предлагает новые ветки развития"
+              aria-label={t('hud.architect')}
+              title={t('hud.architect')}
             >
               <GitBranch size={18} />
             </button>
@@ -485,8 +574,8 @@ export function GameHud(props: GameHudProps) {
               type="button"
               className={`hud-icon-btn ${isModelsOpen ? 'active' : ''}`}
               onClick={onToggleModels}
-              aria-label={isModelsOpen ? 'Закрыть выбор модели' : 'Выбор модели ИИ'}
-              title="Выбор модели ИИ (Ollama / Gemini / Groq)"
+              aria-label={t('hud.models')}
+              title={t('hud.models')}
             >
               <Cpu size={18} />
             </button>
@@ -503,8 +592,8 @@ export function GameHud(props: GameHudProps) {
               type="button"
               className={`hud-icon-btn ${isHandsFree ? 'active' : ''}`}
               onClick={onToggleHandsFree}
-              aria-label={isHandsFree ? 'Выключить hands-free (вейк-слово/хлопок)' : 'Включить hands-free: «Макс17, проснись» или хлопок'}
-              title='Hands-free: «Макс17, проснись» или хлопок'
+              aria-label={isHandsFree ? t('hud.handsFreeOff') : t('hud.handsFreeOn')}
+              title={t('hud.handsFreeTitle')}
             >
               <Ear size={18} />
             </button>
@@ -512,7 +601,7 @@ export function GameHud(props: GameHudProps) {
               type="button"
               className={`hud-icon-btn ${isListening ? 'active' : ''}`}
               onClick={onToggleListen}
-              aria-label={isListening ? 'Остановить запись' : 'Голосовой ввод'}
+              aria-label={isListening ? t('hud.stopRecording') : t('hud.voiceInput')}
             >
               <Mic size={18} />
             </button>
@@ -520,15 +609,18 @@ export function GameHud(props: GameHudProps) {
               value={input}
               onChange={(e) => onInputChange(e.target.value)}
               onKeyDown={onKeyDown}
-              placeholder="Скажите запрос или команду…"
+              placeholder={t('hud.inputPlaceholder')}
               disabled={isLoading}
+              dir="auto"
             />
             <button
               type="button"
-              className="hud-icon-btn"
-              onClick={onSend}
+              className="hud-icon-btn hud-send-btn"
+              onClick={() => onSend()}
               disabled={isLoading || !input.trim()}
-              aria-label="Отправить"
+              aria-label={t('common.send')}
+              title={t('hud.sendTitle')}
+              data-testid="max17-send"
             >
               <Play size={18} fill="currentColor" />
             </button>
@@ -538,7 +630,7 @@ export function GameHud(props: GameHudProps) {
       </div>
 
       <nav className="hud-nav">
-        {NAV_ITEMS.map(({ id, label, icon }) => (
+        {NAV_ITEMS.map(({ id, labelKey, icon }) => (
           <button
             key={id}
             type="button"
@@ -546,8 +638,8 @@ export function GameHud(props: GameHudProps) {
             onClick={() => onNavChange(id)}
           >
             {icon}
-            <span className="hud-nav-label">{label}</span>
-            {id === 'friends' && friendsBadge > 0 && <span className="hud-nav-badge">{friendsBadge}</span>}
+            <span className="hud-nav-label">{t(labelKey)}</span>
+            {(navBadges[id] ?? 0) > 0 && <span className="hud-nav-badge">{navBadges[id]}</span>}
           </button>
         ))}
       </nav>

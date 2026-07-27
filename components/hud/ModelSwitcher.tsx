@@ -1,8 +1,9 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { X, Loader2, Cpu, Cloud, HardDrive, Check } from 'lucide-react';
+import { X, Loader2, Cpu, Cloud, HardDrive, Check, Crown, Lock } from 'lucide-react';
 import { getLlmConfig, setLlmModel, type LlmPreset, type LlmRoleRoute } from '@/lib/max17-client';
+import { usePremium } from '@/hooks/use-premium';
 
 export function ModelSwitcher({ onClose }: { onClose: () => void }) {
   const [presets, setPresets] = useState<LlmPreset[]>([]);
@@ -10,6 +11,9 @@ export function ModelSwitcher({ onClose }: { onClose: () => void }) {
   const [envModel, setEnvModel] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
+  const { premium, unlock, lock } = usePremium();
+  const [code, setCode] = useState('');
+  const [codeErr, setCodeErr] = useState(false);
 
   const load = async () => {
     setBusy(true);
@@ -66,6 +70,48 @@ export function ModelSwitcher({ onClose }: { onClose: () => void }) {
       </div>
 
       <div className="flex-1 space-y-2 overflow-y-auto px-3 py-2 text-[11px] text-cyan-100/80">
+        {/* Премиум: полное локальное ядро MAX (667к синапсов). Доступ по коду — ручная выдача. */}
+        <div className={`rounded-md border p-2.5 ${premium ? 'border-amber-400/50 bg-amber-400/10' : 'border-amber-400/25 bg-amber-400/[0.05]'}`}>
+          <div className="flex items-center gap-2">
+            {premium ? <Crown size={14} className="text-amber-300" /> : <Lock size={14} className="text-amber-300/80" />}
+            <span className="text-[12px] font-semibold text-amber-100">Ядро Мирона · Премиум</span>
+            {premium && <span className="ml-auto text-[9px] uppercase tracking-widest text-amber-300/80">активно ✓</span>}
+          </div>
+          <p className="mt-1 text-[10px] leading-snug text-white/50">
+            Полное суверенное ядро MAX — 667к синапсов, живая память, голос. Не облачная заглушка, а настоящий MAX.
+          </p>
+          {premium ? (
+            <button type="button" onClick={lock} className="mt-1.5 text-[10px] text-white/40 underline hover:text-white/70">
+              выйти из премиума
+            </button>
+          ) : (
+            <div className="mt-2 flex items-center gap-1.5">
+              <input
+                value={code}
+                onChange={(e) => {
+                  setCode(e.target.value);
+                  setCodeErr(false);
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') void unlock(code).then((ok) => { if (!ok) setCodeErr(true); });
+                }}
+                placeholder="код доступа"
+                className="min-w-0 flex-1 rounded border border-amber-400/20 bg-black/50 px-2 py-1 text-[11px] text-amber-100 placeholder:text-white/30 outline-none"
+              />
+              <button
+                type="button"
+                onClick={() => {
+                  void unlock(code).then((ok) => { if (!ok) setCodeErr(true); });
+                }}
+                className="shrink-0 rounded bg-amber-500/30 px-2.5 py-1 text-[11px] font-semibold text-amber-50 hover:bg-amber-400/40"
+              >
+                Открыть
+              </button>
+            </div>
+          )}
+          {codeErr && <div className="mt-1 text-[10px] text-rose-300/80">Неверный код. Код выдаёт Мирон после оплаты.</div>}
+        </div>
+
         {busy && presets.length === 0 && (
           <div className="flex items-center gap-2 text-cyan-100/55">
             <Loader2 size={13} className="animate-spin" /> загрузка…

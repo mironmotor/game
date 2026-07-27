@@ -1,3 +1,6 @@
+import { appBasePath } from './base-path';
+import { getConversationLocale } from './i18n/runtime';
+
 export interface Max17RecalledMemory {
   id?: number;
   timestamp?: number;
@@ -217,32 +220,14 @@ export interface Max17Response {
   details?: unknown;
 }
 
-const FALLBACK_BASE_PATH = '/game';
-
-function normalizeBasePath(basePath: string | undefined) {
-  if (!basePath || basePath === '/') {
-    return '';
-  }
-  return basePath.startsWith('/') ? basePath : `/${basePath}`;
+export function getApiPath(endpoint: string) {
+  const normalizedEndpoint = endpoint.replace(/^\/+/, '');
+  return `${appBasePath}/api/${normalizedEndpoint}`;
 }
 
-export function getApiPath(endpoint: string) {
-  const envBasePath = normalizeBasePath(process.env.NEXT_PUBLIC_BASE_PATH);
-  if (envBasePath) {
-    return `${envBasePath}/api/${endpoint}`;
-  }
-
-  const fallbackBasePath = normalizeBasePath(FALLBACK_BASE_PATH);
-  if (
-    typeof window !== 'undefined' &&
-    fallbackBasePath &&
-    (window.location.pathname === fallbackBasePath ||
-      window.location.pathname.startsWith(`${fallbackBasePath}/`))
-  ) {
-    return `${fallbackBasePath}/api/${endpoint}`;
-  }
-
-  return `/api/${endpoint}`;
+export function getPublicPath(path: string) {
+  const normalizedPath = path.replace(/^\/+/, '');
+  return `${appBasePath}/${normalizedPath}`;
 }
 
 function getMax17ApiPath() {
@@ -285,6 +270,15 @@ function agentHeaders(): Record<string, string> {
   return headers;
 }
 
+function readPremiumCode(): string {
+  if (typeof window === 'undefined') return '';
+  try {
+    return (localStorage.getItem('mir_premium_code') || '').trim();
+  } catch {
+    return '';
+  }
+}
+
 export async function sendMax17Event(event: Record<string, unknown>): Promise<Max17Response> {
   // The bridge can blip on a cold start (daemon still booting → a transient 5xx or
   // a dropped connection). A single blip used to surface as "мост недоступен" on the
@@ -299,7 +293,13 @@ export async function sendMax17Event(event: Record<string, unknown>): Promise<Ma
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify(event),
+        body: JSON.stringify({
+          ...event,
+          locale: typeof event.locale === 'string' ? event.locale : getConversationLocale(),
+          // Премиум-код (если введён): сервер по нему маршрутизирует чат в
+          // настоящее ядро MAX на локалке Мирона (через туннель).
+          ...(readPremiumCode() ? { premium_code: readPremiumCode() } : {}),
+        }),
       });
     } catch (networkError) {
       if (attempt < MAX_ATTEMPTS) {

@@ -3,7 +3,7 @@
 /**
  * DubbingStudio — NOESIS-дубляж на ядре Max17. MAX оркеструет пайплайн:
  *   текст/скрипт + язык → MAX переводит (изохронно, под тайминг) → озвучивает
- *   (ElevenLabs multilingual) → готовый дубль (play + WAV/MP3).
+ *   (MAX Voice / ElevenLabs) → готовый дубль (play + WAV/MP3).
  *
  * Это шаблон NOESIS-конвейера: вход → этапы под управлением MAX → аутпут.
  * Перевод — llm_raw (Gonka), голос — /api/tts. Всё на Max17 core.
@@ -43,6 +43,8 @@ export default function DubbingStudio() {
   const [stage, setStage] = useState<'' | 'translate' | 'voice' | 'done' | 'err'>('');
   const [note, setNote] = useState('');
   const [audioUrl, setAudioUrl] = useState<string | null>(null);
+  const [audioMime, setAudioMime] = useState('audio/mpeg');
+  const [voiceProvider, setVoiceProvider] = useState('');
   const [playing, setPlaying] = useState(false);
   const [transcribing, setTranscribing] = useState(false);
   const audioRef = useRef<HTMLAudioElement | null>(null);
@@ -97,6 +99,7 @@ export default function DubbingStudio() {
       URL.revokeObjectURL(audioUrl);
       setAudioUrl(null);
     }
+    setVoiceProvider('');
     try {
       // Этап 1 — перевод под тайминг (изохронность) силами ядра.
       const prompt =
@@ -108,13 +111,13 @@ export default function DubbingStudio() {
       if (!out) throw new Error('перевод пуст (LLM недоступен)');
       setTranslated(out);
 
-      // Этап 2 — озвучка переведённого текста (ElevenLabs multilingual).
+      // Этап 2 — озвучка переведённого текста (MAX Voice с облачным fallback).
       setStage('voice');
       setNote('MAX озвучивает…');
       const res = await fetch(getApiPath('tts'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ text: out, persona: getPersona() }),
+        body: JSON.stringify({ text: out, persona: getPersona(), language: tgt }),
       });
       const ct = res.headers.get('content-type') || '';
       if (!res.ok || !ct.includes('audio')) {
@@ -122,10 +125,17 @@ export default function DubbingStudio() {
         throw new Error(`озвучка недоступна (${res.status}) ${detail.slice(0, 60)}`);
       }
       const buf = await res.arrayBuffer();
-      const url = URL.createObjectURL(new Blob([buf], { type: 'audio/mpeg' }));
+      const mime = ct.split(';')[0] || 'audio/mpeg';
+      const provider = res.headers.get('x-tts-provider') || '';
+      const url = URL.createObjectURL(new Blob([buf], { type: mime }));
       setAudioUrl(url);
+      setAudioMime(mime);
+      setVoiceProvider(provider);
       setStage('done');
-      setNote(`Готов дубль ${langName(src)} → ${langName(tgt)}`);
+      setNote(
+        `Готов дубль ${langName(src)} → ${langName(tgt)}` +
+          (provider ? ` · ${provider === 'max-local' ? 'MAX Voice' : 'ElevenLabs'}` : ''),
+      );
       // авто-проигрыш
       setTimeout(() => {
         const a = audioRef.current;
@@ -148,6 +158,13 @@ export default function DubbingStudio() {
   }
 
   const busy = stage === 'translate' || stage === 'voice';
+  const audioExtension = audioMime.includes('wav')
+    ? 'wav'
+    : audioMime.includes('ogg')
+      ? 'ogg'
+      : audioMime.includes('webm')
+        ? 'webm'
+        : 'mp3';
 
   return (
     <div className="rounded-xl border border-emerald-400/25 bg-emerald-400/[0.04] p-3">
@@ -219,7 +236,7 @@ export default function DubbingStudio() {
           </button>
         )}
         {audioUrl && (
-          <a href={audioUrl} download={`noesis-dub-${tgt}.mp3`} className="ml-auto flex items-center gap-1 rounded-lg bg-emerald-500/20 px-2.5 py-1.5 text-xs text-emerald-100 hover:bg-emerald-500/35">
+          <a href={audioUrl} download={`noesis-dub-${tgt}.${audioExtension}`} className="ml-auto flex items-center gap-1 rounded-lg bg-emerald-500/20 px-2.5 py-1.5 text-xs text-emerald-100 hover:bg-emerald-500/35">
             <Download className="h-3.5 w-3.5" /> скачать
           </a>
         )}
@@ -232,6 +249,11 @@ export default function DubbingStudio() {
         </div>
       )}
       {note && <div className={`mt-1.5 text-[11px] ${stage === 'err' ? 'text-rose-300/80' : 'text-emerald-200/80'}`}>{note}</div>}
+      {voiceProvider && stage === 'done' && (
+        <div className="mt-1 text-[9px] uppercase tracking-widest text-white/30">
+          Голос: {voiceProvider === 'max-local' ? 'локальное ядро MAX' : 'облачный резерв'}
+        </div>
+      )}
 
       <audio ref={audioRef} src={audioUrl ?? undefined} onEnded={() => setPlaying(false)} className="hidden" />
     </div>

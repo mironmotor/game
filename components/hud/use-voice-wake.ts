@@ -46,7 +46,7 @@ function normalize(text: string): string {
   return text
     .toLowerCase()
     .replace(/ё/g, 'е')
-    .replace(/[^a-zа-я0-9 ]/g, ' ')
+    .replace(/[^\p{L}\p{N} ]/gu, ' ')
     .replace(/\s+/g, ' ')
     .trim();
 }

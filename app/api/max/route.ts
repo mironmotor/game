@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { createMax } from '@/lib/agents';
 import { Max17MemoryStore } from '@/lib/max17-memory-store';
 import { max17Llm } from '@/lib/max17-llm';
+import { baseLanguage, canonicalizeLocale } from '@/lib/i18n/config';
 
 export const runtime = 'nodejs';
 
@@ -55,14 +56,15 @@ export async function POST(request: Request) {
     // MAX refines mission/answer/actions with the real model.
     // LLM is always wired so MAX can auto-escalate to deep on low confidence;
     // it only fires when needed (explicit deep, or confidence below threshold).
-    const deep = body.deep === true;
+    const locale = canonicalizeLocale(body.locale);
+    const deep = body.deep === true || baseLanguage(locale) !== 'ru';
     const max = createMax({
       services: { memory: new Max17MemoryStore(), llm: max17Llm },
     });
     const synthesis = await max.processUserInput(
       {
         text,
-        locale: typeof body.locale === 'string' ? body.locale : undefined,
+        locale,
         metadata:
           body.metadata && typeof body.metadata === 'object'
             ? (body.metadata as Record<string, unknown>)

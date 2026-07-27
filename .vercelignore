@@ -15,6 +15,7 @@ tsconfig.tsbuildinfo
 
 mark17/state
 mark17/output
+mark17/.venv-tts
 code-workspace
 certificates
 public/game-lan-ca.*

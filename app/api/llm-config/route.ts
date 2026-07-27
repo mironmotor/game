@@ -5,7 +5,7 @@ import { NextResponse } from 'next/server';
 export const runtime = 'nodejs';
 
 const IS_VERCEL = process.env.VERCEL === '1';
-const DEFAULT_GONKA_MODEL = 'Qwen/Qwen3-235B-A22B-Instruct-2507-FP8';
+const DEFAULT_GONKA_MODEL = 'MiniMaxAI/MiniMax-M2.7';
 
 const CLOUD_ROLES = [
   { id: 'chat', label: 'Чат' },
@@ -16,12 +16,16 @@ const CLOUD_ROLES = [
   { id: 'ultra', label: 'Ультра-оркестратор' },
 ];
 
-function cloudConfig(active = 'gonka-qwen3') {
-  const gonkaModel = process.env.GONKA_MODEL || DEFAULT_GONKA_MODEL;
+function cloudConfig(active = 'gonka-minimax') {
+  const configuredGonkaModel = process.env.GONKA_MODEL?.trim();
+  const gonkaModel =
+    configuredGonkaModel === 'Qwen/Qwen3-235B-A22B-Instruct-2507-FP8'
+      ? DEFAULT_GONKA_MODEL
+      : configuredGonkaModel || DEFAULT_GONKA_MODEL;
   const presets = [
     {
-      id: 'gonka-qwen3',
-      label: 'Gonka · Qwen3-235B — облако Vercel',
+      id: 'gonka-minimax',
+      label: 'Gonka · MiniMax-M2.7 — облако Vercel',
       model: gonkaModel,
       local: false,
       available: Boolean(process.env.GONKA_API_KEY),
@@ -117,7 +121,7 @@ export async function POST(request: Request) {
     return NextResponse.json({ ok: false, error: 'Invalid JSON body' }, { status: 400 });
   }
   if (IS_VERCEL) {
-    return NextResponse.json(cloudConfig(id || 'gonka-qwen3'));
+    return NextResponse.json(cloudConfig(id || 'gonka-minimax'));
   }
   try {
     return NextResponse.json(await runLlmConfig({ action: 'set', id, role }));

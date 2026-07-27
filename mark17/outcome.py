@@ -80,9 +80,15 @@ def evaluate_outcome(
     status = _status_for_event(event.type)
     score = _score_for_status(status)
     action = _top_action(plan)
-    action_title = _clean(action.get("title") or _event_text(event))
-    goal = ""
-    if isinstance(working_memory, dict):
+    # Поверхность, рапортующая «я выполнил шаг X», знает действие точнее плана:
+    # явный payload.action побеждает; иначе — действие плана, иначе текст события.
+    action_title = _clean(event.payload.get("action")) or _clean(action.get("title") or _event_text(event))
+    # Цель для причинной связи. Приоритет — у САМОГО события: поверхность,
+    # которая закрывает петлю (автопилот, прогон, Доктор, тьютор), знает свою
+    # цель точнее, чем рабочая память. Без цели `leads_to` не создаётся вовсе —
+    # именно поэтому причинных связей было всего 1.1%.
+    goal = _clean(event.payload.get("goal") or event.payload.get("related_goal"))
+    if not goal and isinstance(working_memory, dict):
         goal = _clean(working_memory.get("active_goal") or working_memory.get("current_topic"))
     if not goal and isinstance(plan, dict):
         goal = _clean(plan.get("goal"))
@@ -137,7 +143,9 @@ def update_outcome_synapses(
     goal = _clean(outcome.get("related_goal"))
     adjustment = _clean(outcome.get("next_adjustment"))
     action = _top_action(plan)
-    action_title = _clean(action.get("title") or _event_text(event))
+    # Поверхность, рапортующая «я выполнил шаг X», знает действие точнее плана:
+    # явный payload.action побеждает; иначе — действие плана, иначе текст события.
+    action_title = _clean(event.payload.get("action")) or _clean(action.get("title") or _event_text(event))
     plan_goal = _clean(plan.get("goal")) if isinstance(plan, dict) else goal
     outcome_id = _stable_id(event.type, status, goal, action_title, _event_text(event))
     weight = max(0.05, min(1.0, score))

@@ -29,10 +29,14 @@ from mark17 import llm_config
 from mark17.web_sense import _SSL_CONTEXT  # verified TLS context (certifi-backed)
 
 DEFAULT_BASE_URL = "https://proxy.gonkabroker.com/v1"
-DEFAULT_MODEL = "Qwen/Qwen3-235B-A22B-Instruct-2507-FP8"
+DEFAULT_MODEL = "MiniMaxAI/MiniMax-M2.7"
 DEFAULT_TIMEOUT_SEC = 25
 
 _THINK_RE = re.compile(r"<think>.*?</think>", re.IGNORECASE | re.DOTALL)
+# Ризонеры (Kimi/MiniMax) часто отдают незакрытый <think> или висячий </think>:
+# режем открытый блок до конца и подчищаем одиночные теги, чтобы они не текли в ответ.
+_THINK_OPEN_RE = re.compile(r"<think>.*\Z", re.IGNORECASE | re.DOTALL)
+_THINK_TAG_RE = re.compile(r"</?think>", re.IGNORECASE)
 
 
 @dataclass
@@ -166,6 +170,14 @@ def _chat_once(
             if choices and isinstance(choices[0], dict):
                 text = str((choices[0].get("message") or {}).get("content") or "").strip()
             text = _THINK_RE.sub("", text).strip()
+            # Висячий </think> без открывающего: всё до него — рассуждения модели.
+            lowered = text.lower()
+            close_at = lowered.rfind("</think>")
+            if close_at != -1 and "<think>" not in lowered:
+                text = text[close_at + len("</think>") :].strip()
+            # Незакрытый <think>: рассуждения тянутся до конца ответа.
+            text = _THINK_OPEN_RE.sub("", text).strip()
+            text = _THINK_TAG_RE.sub("", text).strip()
             ms = round((time.time() - started) * 1000, 1)
             if not text:
                 return GonkaResponse(ok=False, text="", model=model, status="error", role=role, latency_ms=ms, error="empty response")

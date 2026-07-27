@@ -2,31 +2,30 @@
 
 /**
  * MaxCore3D — объёмное 3D-присутствие MAX в центре меты (WebGL / three.js).
- * Икосфера с шейдерной шумовой деформацией (живое «дыхание»), френель-свечение
- * магента→циан, облако точек-оболочка и гало. РЕАГИРУЕТ на:
+ * Молотое ядро-сердце + деформирующаяся икосфера (шейдерное «дыхание»), богатый
+ * градиент магента→фиолет→циан с бело-горячими гребнями, двуслойная атмосфера,
+ * мягкие мерцающие частицы и КИНЕМАТОГРАФИЧНЫЙ bloom (UnrealBloomPass).
+ * РЕАГИРУЕТ на:
  *   • микрофон («уши» MAX) — lib/ambient-audio (level + спектр),
- *   • max:thinking / max:speaking (мысли и речь).
+ *   • max:thinking / max:speaking (мысли и речь) — свечение вспыхивает на речи,
+ *   • мышь — лёгкий параллакс камеры (живое присутствие).
  *
- * Аддитивно к 2D-мете: полноэкранный оверлей, дефолт скрыт. Тумблер — событие
- * `max3d:toggle` (или `/3d` / `/ядро` в чате), Esc — закрыть. Не ломает текущий
- * фон: пока закрыт — рендерит null, никакого WebGL-контекста.
+ * Полноэкранный оверлей, дефолт скрыт. Тумблер — событие `max3d:toggle`
+ * (или `/3d` / `/ядро` в чате), Esc — закрыть. Пока закрыт — рендерит null,
+ * никакого WebGL-контекста.
  */
 
 import { useEffect, useRef, useState } from 'react';
 import * as THREE from 'three';
+import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer.js';
+import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
+import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass.js';
+import { OutputPass } from 'three/examples/jsm/postprocessing/OutputPass.js';
 import { X } from 'lucide-react';
 import { ambientFrame, ambientActive, startAmbient } from '@/lib/ambient-audio';
 
-const VERT = /* glsl */ `
-uniform float uTime;
-uniform float uAudio;
-uniform float uThinking;
-uniform float uSpeaking;
-varying float vNoise;
-varying vec3 vNormalW;
-varying vec3 vViewDir;
-
-// Ashima simplex noise 3D (public domain)
+// Ashima simplex noise 3D (public domain) — общий для всех шейдеров с деформацией.
+const SNOISE = /* glsl */ `
 vec4 permute(vec4 x){return mod(((x*34.0)+1.0)*x,289.0);}
 vec4 taylorInvSqrt(vec4 r){return 1.79284291400159 - 0.85373472095314 * r;}
 float snoise(vec3 v){
@@ -71,12 +70,24 @@ float snoise(vec3 v){
   m = m * m;
   return 42.0 * dot(m*m, vec4(dot(p0,x0), dot(p1,x1), dot(p2,x2), dot(p3,x3)));
 }
+`;
 
+// Оболочка: деформирующаяся икосфера — тело MAX.
+const VERT = /* glsl */ `
+uniform float uTime;
+uniform float uAudio;
+uniform float uThinking;
+uniform float uSpeaking;
+varying float vNoise;
+varying vec3 vNormalW;
+varying vec3 vViewDir;
+${SNOISE}
 void main(){
-  float speed = 0.35 + uThinking*0.9 + uSpeaking*0.5;
-  float amp = 0.16 + uAudio*0.5 + uThinking*0.16 + uSpeaking*0.12;
+  float speed = 0.32 + uThinking*0.9 + uSpeaking*0.5;
+  float amp = 0.15 + uAudio*0.5 + uThinking*0.16 + uSpeaking*0.12;
   float n = snoise(normal * 1.6 + vec3(uTime*speed));
   n += 0.5 * snoise(normal * 3.4 + vec3(uTime*speed*1.6));
+  n += 0.25 * snoise(normal * 6.8 + vec3(uTime*speed*2.2));
   vNoise = n;
   vec3 displaced = position + normal * n * amp;
   vec4 mv = modelViewMatrix * vec4(displaced, 1.0);
@@ -88,21 +99,62 @@ void main(){
 
 const FRAG = /* glsl */ `
 uniform float uAudio;
-uniform vec3 uColorA;
-uniform vec3 uColorB;
+uniform float uSpeaking;
+uniform vec3 uColorA; // magenta
+uniform vec3 uColorB; // cyan
+uniform vec3 uColorM; // violet (середина)
 varying float vNoise;
 varying vec3 vNormalW;
 varying vec3 vViewDir;
 void main(){
-  float fres = pow(1.0 - max(dot(vNormalW, vViewDir), 0.0), 2.0);
-  float mixv = clamp(vNoise*0.5 + 0.5, 0.0, 1.0);
-  vec3 col = mix(uColorA, uColorB, mixv);
-  col += fres * (0.7 + uAudio*0.7);
-  float alpha = 0.5 + fres*0.5;
+  float fres = pow(1.0 - max(dot(vNormalW, vViewDir), 0.0), 2.2);
+  float m = clamp(vNoise*0.5 + 0.5, 0.0, 1.0);
+  // Тройной градиент: магента → фиолет → циан.
+  vec3 col = m < 0.5 ? mix(uColorA, uColorM, m*2.0) : mix(uColorM, uColorB, (m-0.5)*2.0);
+  // Френель-обод.
+  col += fres * (0.36 + uAudio*0.4 + uSpeaking*0.22);
+  // Тёпло-магентовые гребни на пиках шума — «жар» ядра (не выжигаем в белый).
+  col += smoothstep(0.72, 1.0, m) * (0.26 + uSpeaking*0.3) * vec3(1.0, 0.5, 0.88);
+  float alpha = 0.26 + fres*0.34;
   gl_FragColor = vec4(col, alpha);
 }
 `;
 
+// Внутреннее ядро-сердце: горячий центр, чтобы сфера не была полой.
+const CORE_VERT = /* glsl */ `
+uniform float uTime;
+uniform float uAudio;
+varying vec3 vNormalW;
+varying vec3 vViewDir;
+${SNOISE}
+void main(){
+  float n = snoise(normal * 2.2 + vec3(uTime*0.5));
+  vec3 displaced = position + normal * n * (0.06 + uAudio*0.14);
+  vec4 mv = modelViewMatrix * vec4(displaced, 1.0);
+  vNormalW = normalize(normalMatrix * normal);
+  vViewDir = normalize(-mv.xyz);
+  gl_Position = projectionMatrix * mv;
+}
+`;
+
+const CORE_FRAG = /* glsl */ `
+uniform float uAudio;
+uniform float uSpeaking;
+uniform vec3 uHot;
+uniform vec3 uEdge;
+varying vec3 vNormalW;
+varying vec3 vViewDir;
+void main(){
+  float facing = max(dot(vNormalW, vViewDir), 0.0);
+  float hot = pow(facing, 2.5);
+  vec3 col = mix(uEdge, uHot, hot);
+  col *= 1.0 + uAudio*0.55 + uSpeaking*0.35;
+  float alpha = (0.08 + hot*0.17);
+  gl_FragColor = vec4(col, alpha);
+}
+`;
+
+// Атмосфера: внешние френель-оболочки (объёмное свечение).
 const HALO_VERT = /* glsl */ `
 varying vec3 vNormalW;
 varying vec3 vViewDir;
@@ -116,20 +168,76 @@ void main(){
 
 const HALO_FRAG = /* glsl */ `
 uniform float uAudio;
+uniform float uPower;
+uniform float uIntensity;
 uniform vec3 uColor;
 varying vec3 vNormalW;
 varying vec3 vViewDir;
 void main(){
-  float fres = pow(1.0 - max(dot(vNormalW, vViewDir), 0.0), 3.0);
-  gl_FragColor = vec4(uColor * fres * (1.0 + uAudio), fres * (0.5 + uAudio*0.4));
+  float fres = pow(1.0 - max(dot(vNormalW, vViewDir), 0.0), uPower);
+  float e = fres * uIntensity * (1.0 + uAudio);
+  gl_FragColor = vec4(uColor * e, fres * (0.4 + uAudio*0.4) * uIntensity);
 }
 `;
+
+// Частицы-оболочка: мягкие круглые точки с мерцанием и разбросом размера.
+const PT_VERT = /* glsl */ `
+uniform float uTime;
+uniform float uAudio;
+uniform float uSize;
+attribute float aPhase;
+attribute float aScale;
+varying float vTw;
+void main(){
+  float tw = 0.5 + 0.5*sin(uTime*1.6 + aPhase*6.2831853);
+  vTw = tw;
+  vec4 mv = modelViewMatrix * vec4(position, 1.0);
+  gl_PointSize = uSize * aScale * (0.55 + tw*0.85) * (1.0 + uAudio*1.3) * (1.0 / -mv.z);
+  gl_Position = projectionMatrix * mv;
+}
+`;
+
+const PT_FRAG = /* glsl */ `
+uniform vec3 uColor;
+varying float vTw;
+void main(){
+  vec2 uv = gl_PointCoord - 0.5;
+  float d = length(uv);
+  if (d > 0.5) discard;
+  float a = smoothstep(0.5, 0.0, d);
+  gl_FragColor = vec4(uColor * (0.55 + vTw*0.7), a * (0.3 + vTw*0.55));
+}
+`;
+
+// Точки-оболочка по распределению Фибоначчи + случайные фаза/масштаб для мерцания.
+function shellGeometry(count: number, radius: number, jitter = 0): THREE.BufferGeometry {
+  const pos = new Float32Array(count * 3);
+  const phase = new Float32Array(count);
+  const scale = new Float32Array(count);
+  for (let i = 0; i < count; i++) {
+    const y = 1 - (i / (count - 1)) * 2;
+    const r = Math.sqrt(Math.max(0, 1 - y * y));
+    const phi = i * Math.PI * (3 - Math.sqrt(5));
+    const rad = radius + (jitter ? (Math.random() - 0.5) * jitter : 0);
+    pos[i * 3] = Math.cos(phi) * r * rad;
+    pos[i * 3 + 1] = y * rad;
+    pos[i * 3 + 2] = Math.sin(phi) * r * rad;
+    phase[i] = Math.random();
+    scale[i] = 0.5 + Math.random() * 1.4;
+  }
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+  geo.setAttribute('aPhase', new THREE.BufferAttribute(phase, 1));
+  geo.setAttribute('aScale', new THREE.BufferAttribute(scale, 1));
+  return geo;
+}
 
 export default function MaxCore3D() {
   const [open, setOpen] = useState(false);
   const hostRef = useRef<HTMLDivElement>(null);
   const thinkingRef = useRef(0);
   const speakingRef = useRef(0);
+  const pointerRef = useRef({ x: 0, y: 0 });
 
   // Тумблер + события состояния.
   useEffect(() => {
@@ -165,24 +273,40 @@ export default function MaxCore3D() {
     const W = () => window.innerWidth;
     const H = () => window.innerHeight;
     const scene = new THREE.Scene();
+    scene.background = new THREE.Color(0x04010a);
     const camera = new THREE.PerspectiveCamera(50, W() / H(), 0.1, 100);
-    camera.position.z = 3.25;
-    const renderer = new THREE.WebGLRenderer({ alpha: true, antialias: true });
+    camera.position.z = 4.4;
+    const renderer = new THREE.WebGLRenderer({ antialias: true });
     renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
     renderer.setSize(W(), H());
-    renderer.setClearColor(0x000000, 0);
     host.appendChild(renderer.domElement);
     renderer.domElement.style.cssText = 'position:absolute;inset:0;width:100%;height:100%;';
 
     const COL_A = new THREE.Color(1.0, 0.23, 0.86);   // magenta
     const COL_B = new THREE.Color(0.30, 0.85, 1.0);   // cyan
+    const COL_M = new THREE.Color(0.60, 0.30, 1.0);   // violet
+    const HOT = new THREE.Color(1.0, 0.40, 0.78);     // розово-магента жар
+    const EDGE = new THREE.Color(0.32, 0.07, 0.58);   // тёмный край сердца
 
-    // Ядро — деформирующаяся икосфера.
-    const coreGeo = new THREE.IcosahedronGeometry(1, 20);
+    // Внутреннее ядро-сердце.
+    const innerGeo = new THREE.IcosahedronGeometry(0.72, 12);
+    const innerMat = new THREE.ShaderMaterial({
+      uniforms: {
+        uTime: { value: 0 }, uAudio: { value: 0 }, uSpeaking: { value: 0 },
+        uHot: { value: HOT }, uEdge: { value: EDGE },
+      },
+      vertexShader: CORE_VERT, fragmentShader: CORE_FRAG,
+      transparent: true, depthWrite: false, blending: THREE.AdditiveBlending,
+    });
+    const inner = new THREE.Mesh(innerGeo, innerMat);
+    scene.add(inner);
+
+    // Оболочка — деформирующаяся икосфера.
+    const coreGeo = new THREE.IcosahedronGeometry(1, 24);
     const coreMat = new THREE.ShaderMaterial({
       uniforms: {
         uTime: { value: 0 }, uAudio: { value: 0 }, uThinking: { value: 0 }, uSpeaking: { value: 0 },
-        uColorA: { value: COL_A }, uColorB: { value: COL_B },
+        uColorA: { value: COL_A }, uColorB: { value: COL_B }, uColorM: { value: COL_M },
       },
       vertexShader: VERT, fragmentShader: FRAG,
       transparent: true, depthWrite: false, blending: THREE.AdditiveBlending,
@@ -190,39 +314,61 @@ export default function MaxCore3D() {
     const core = new THREE.Mesh(coreGeo, coreMat);
     scene.add(core);
 
-    // Гало — внешняя оболочка с френелем.
-    const haloGeo = new THREE.IcosahedronGeometry(1.55, 6);
-    const haloMat = new THREE.ShaderMaterial({
-      uniforms: { uAudio: { value: 0 }, uColor: { value: COL_A.clone() } },
-      vertexShader: HALO_VERT, fragmentShader: HALO_FRAG,
-      transparent: true, depthWrite: false, side: THREE.BackSide, blending: THREE.AdditiveBlending,
-    });
-    const halo = new THREE.Mesh(haloGeo, haloMat);
-    scene.add(halo);
+    // Атмосфера — две френель-оболочки.
+    const makeHalo = (radius: number, power: number, intensity: number, color: THREE.Color) => {
+      const geo = new THREE.IcosahedronGeometry(radius, 6);
+      const mat = new THREE.ShaderMaterial({
+        uniforms: {
+          uAudio: { value: 0 }, uPower: { value: power },
+          uIntensity: { value: intensity }, uColor: { value: color.clone() },
+        },
+        vertexShader: HALO_VERT, fragmentShader: HALO_FRAG,
+        transparent: true, depthWrite: false, side: THREE.BackSide, blending: THREE.AdditiveBlending,
+      });
+      const mesh = new THREE.Mesh(geo, mat);
+      scene.add(mesh);
+      return { geo, mat, mesh };
+    };
+    const haloInner = makeHalo(1.5, 3.4, 0.5, COL_A);
+    const haloOuter = makeHalo(2.1, 2.2, 0.34, COL_B);
 
-    // Облако точек-оболочка (распределение Фибоначчи).
-    const PN = 900;
-    const pos = new Float32Array(PN * 3);
-    for (let i = 0; i < PN; i++) {
-      const y = 1 - (i / (PN - 1)) * 2;
-      const r = Math.sqrt(Math.max(0, 1 - y * y));
-      const phi = i * Math.PI * (3 - Math.sqrt(5));
-      pos[i * 3] = Math.cos(phi) * r * 1.32;
-      pos[i * 3 + 1] = y * 1.32;
-      pos[i * 3 + 2] = Math.sin(phi) * r * 1.32;
-    }
-    const ptsGeo = new THREE.BufferGeometry();
-    ptsGeo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
-    const ptsMat = new THREE.PointsMaterial({
-      color: new THREE.Color(1.0, 0.45, 0.95), size: 0.022,
-      transparent: true, opacity: 0.85, depthWrite: false,
-      blending: THREE.AdditiveBlending, sizeAttenuation: true,
-    });
-    const points = new THREE.Points(ptsGeo, ptsMat);
-    scene.add(points);
+    // Частицы: основная оболочка + тонкий пылевой подслой.
+    const makePoints = (count: number, radius: number, jitter: number, size: number, color: THREE.Color, opacity: number) => {
+      const geo = shellGeometry(count, radius, jitter);
+      const mat = new THREE.ShaderMaterial({
+        uniforms: {
+          uTime: { value: 0 }, uAudio: { value: 0 }, uSize: { value: size }, uColor: { value: color.clone() },
+        },
+        vertexShader: PT_VERT, fragmentShader: PT_FRAG,
+        transparent: true, depthWrite: false, blending: THREE.AdditiveBlending,
+      });
+      mat.uniforms.uColor.value.multiplyScalar(opacity);
+      const pts = new THREE.Points(geo, mat);
+      scene.add(pts);
+      return { geo, mat, pts };
+    };
+    const shell = makePoints(1100, 1.34, 0.04, 46, new THREE.Color(1.0, 0.5, 0.95), 1.0);
+    const dust = makePoints(700, 1.9, 0.55, 30, new THREE.Color(0.55, 0.8, 1.0), 0.7);
+
+    // Постпроцессинг: настоящий bloom.
+    const composer = new EffectComposer(renderer);
+    composer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+    composer.setSize(W(), H());
+    composer.addPass(new RenderPass(scene, camera));
+    const bloom = new UnrealBloomPass(new THREE.Vector2(W(), H()), 0.34, 0.42, 0.62);
+    composer.addPass(bloom);
+    composer.addPass(new OutputPass());
+
+    const onPointer = (e: PointerEvent) => {
+      pointerRef.current.x = (e.clientX / W()) * 2 - 1;
+      pointerRef.current.y = (e.clientY / H()) * 2 - 1;
+    };
+    window.addEventListener('pointermove', onPointer);
 
     let audio = 0;
     let raf = 0;
+    let camX = 0;
+    let camY = 0;
     const clock = new THREE.Clock();
     const tick = () => {
       raf = requestAnimationFrame(tick);
@@ -237,18 +383,45 @@ export default function MaxCore3D() {
       coreMat.uniforms.uAudio.value = audio;
       coreMat.uniforms.uThinking.value = thinking;
       coreMat.uniforms.uSpeaking.value = speaking;
-      haloMat.uniforms.uAudio.value = audio;
+      innerMat.uniforms.uTime.value = t;
+      innerMat.uniforms.uAudio.value = audio;
+      innerMat.uniforms.uSpeaking.value = speaking;
+      haloInner.mat.uniforms.uAudio.value = audio;
+      haloOuter.mat.uniforms.uAudio.value = audio;
+      shell.mat.uniforms.uTime.value = t;
+      shell.mat.uniforms.uAudio.value = audio;
+      dust.mat.uniforms.uTime.value = t;
+      dust.mat.uniforms.uAudio.value = audio;
+
+      // Свечение вспыхивает на речи и звуке (умеренно — без выжигания в белый).
+      bloom.strength = 0.3 + speaking * 0.26 + audio * 0.3 + thinking * 0.1;
 
       const spin = 0.12 + thinking * 0.35 + speaking * 0.18 + audio * 0.5;
-      core.rotation.y += 0.0025 * (1 + spin * 8);
-      core.rotation.x = Math.sin(t * 0.15) * 0.25;
-      points.rotation.y -= 0.0016 * (1 + spin * 6);
-      points.rotation.x = Math.cos(t * 0.12) * 0.2;
-      const s = 1 + audio * 0.12 + speaking * 0.04;
-      points.scale.setScalar(s);
-      halo.scale.setScalar(1 + audio * 0.06);
+      core.rotation.y += 0.0022 * (1 + spin * 8);
+      core.rotation.x = Math.sin(t * 0.15) * 0.22;
+      inner.rotation.y -= 0.0018 * (1 + spin * 5);
+      inner.rotation.z = Math.sin(t * 0.1) * 0.2;
+      shell.pts.rotation.y -= 0.0014 * (1 + spin * 6);
+      shell.pts.rotation.x = Math.cos(t * 0.12) * 0.18;
+      dust.pts.rotation.y += 0.0009 * (1 + spin * 3);
+      dust.pts.rotation.z = Math.sin(t * 0.08) * 0.15;
 
-      renderer.render(scene, camera);
+      const s = 1 + audio * 0.12 + speaking * 0.04;
+      shell.pts.scale.setScalar(s);
+      haloInner.mesh.scale.setScalar(1 + audio * 0.06);
+      haloOuter.mesh.scale.setScalar(1 + audio * 0.09);
+      inner.scale.setScalar(1 + audio * 0.1 + speaking * 0.05);
+
+      // Живая камера: мягкий параллакс от мыши + медленный дрейф.
+      const targetX = pointerRef.current.x * 0.5 + Math.sin(t * 0.13) * 0.12;
+      const targetY = -pointerRef.current.y * 0.35 + Math.cos(t * 0.11) * 0.1;
+      camX += (targetX - camX) * 0.04;
+      camY += (targetY - camY) * 0.04;
+      camera.position.x = camX;
+      camera.position.y = camY;
+      camera.lookAt(0, 0, 0);
+
+      composer.render();
     };
     tick();
 
@@ -256,16 +429,24 @@ export default function MaxCore3D() {
       camera.aspect = W() / H();
       camera.updateProjectionMatrix();
       renderer.setSize(W(), H());
+      composer.setSize(W(), H());
+      bloom.setSize(W(), H());
     };
     window.addEventListener('resize', onResize);
 
     return () => {
       cancelAnimationFrame(raf);
       window.removeEventListener('resize', onResize);
+      window.removeEventListener('pointermove', onPointer);
       renderer.domElement.remove();
+      innerGeo.dispose(); innerMat.dispose();
       coreGeo.dispose(); coreMat.dispose();
-      haloGeo.dispose(); haloMat.dispose();
-      ptsGeo.dispose(); ptsMat.dispose();
+      haloInner.geo.dispose(); haloInner.mat.dispose();
+      haloOuter.geo.dispose(); haloOuter.mat.dispose();
+      shell.geo.dispose(); shell.mat.dispose();
+      dust.geo.dispose(); dust.mat.dispose();
+      bloom.dispose();
+      composer.dispose();
       renderer.dispose();
     };
   }, [open]);
@@ -275,6 +456,8 @@ export default function MaxCore3D() {
   return (
     <div className="fixed inset-0 z-[55]" style={{ background: 'radial-gradient(circle at 50% 50%, rgba(10,4,20,0.35), rgba(2,1,8,0.86))' }}>
       <div ref={hostRef} className="absolute inset-0" style={{ pointerEvents: 'none' }} />
+      {/* Виньетка поверх — мягко затемняет края, фокус на ядре. */}
+      <div className="pointer-events-none absolute inset-0" style={{ background: 'radial-gradient(circle at 50% 46%, transparent 40%, rgba(2,1,8,0.55) 100%)' }} />
       <button
         type="button"
         onClick={() => setOpen(false)}
@@ -285,7 +468,7 @@ export default function MaxCore3D() {
       </button>
       <div className="pointer-events-none absolute inset-x-0 bottom-8 text-center">
         <p className="text-[11px] uppercase tracking-[0.4em] text-fuchsia-200/70">MAX · ядро</p>
-        <p className="mt-1 text-xs text-white/40">говори — я слышу пространство · Esc — выйти</p>
+        <p className="mt-1 text-xs text-white/40">говори — я слышу пространство · двигай мышью · Esc — выйти</p>
       </div>
     </div>
   );

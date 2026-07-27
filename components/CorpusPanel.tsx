@@ -8,9 +8,10 @@
  */
 
 import { useEffect, useState } from 'react';
-import { Activity, BookOpen, ChevronDown, FolderInput, Loader2, Send, Type, X } from 'lucide-react';
+import { Activity, BookOpen, ChevronDown, FolderInput, FolderOpen, Loader2, Send, Type, X } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import { sendMax17Event, type Max17Response } from '@/lib/max17-client';
+import { getApiPath, sendMax17Event, type Max17Response } from '@/lib/max17-client';
+import { useI18n } from '@/components/I18nProvider';
 
 const GOAL = 1_000_000;
 
@@ -43,6 +44,7 @@ function Sparkline({ data }: { data: number[] }) {
 }
 
 export default function CorpusPanel() {
+  const { t } = useI18n();
   const [open, setOpen] = useState(false);
   const [mode, setMode] = useState<'text' | 'path'>('text');
   const [text, setText] = useState('');
@@ -100,6 +102,24 @@ export default function CorpusPanel() {
     }
   }
 
+  async function revealInFinder() {
+    const p = path.trim();
+    if (!p) return;
+    setError(null);
+    try {
+      const token = process.env.NEXT_PUBLIC_MAX17_API_TOKEN;
+      const r = await fetch(getApiPath('reveal'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...(token ? { 'x-max17-token': token } : {}) },
+        body: JSON.stringify({ path: p }),
+      });
+      const d = (await r.json().catch(() => ({}))) as { ok?: boolean; error?: string };
+      if (!r.ok || !d.ok) setError(d.error || `Не удалось открыть в Finder (${r.status})`);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    }
+  }
+
   const added = result?.ingest?.synapses_added ?? 0;
   const total = stats?.graph_stats?.total_synapses ?? result?.graph_total ?? 0;
   const pct = total ? Math.min(100, (total / GOAL) * 100) : 0;
@@ -111,10 +131,10 @@ export default function CorpusPanel() {
         type="button"
         onClick={() => setOpen(true)}
         className="fixed bottom-4 right-4 z-40 flex items-center gap-1.5 rounded-full border border-teal-400/30 bg-[#0a0818]/85 px-3 py-2 text-xs font-semibold text-teal-200 shadow-lg shadow-teal-500/10 backdrop-blur-md transition hover:bg-teal-400/10"
-        title="Скормить MAX корпус — текст/файлы в синапсы"
+        title={t('corpus.title')}
       >
         <BookOpen className="h-4 w-4" />
-        Корпус
+        {t('corpus.title')}
       </button>
     );
   }
@@ -122,12 +142,12 @@ export default function CorpusPanel() {
   return (
     <div className="fixed bottom-4 right-4 z-40 w-[min(440px,calc(100vw-32px))] rounded-2xl border border-teal-400/25 bg-[#0a0818]/92 p-3 shadow-2xl backdrop-blur-md">
       <div className="mb-2 flex items-center gap-2 text-[11px] uppercase tracking-widest text-teal-300/80">
-        <BookOpen className="h-3.5 w-3.5" /> Корпус → синапсы
+        <BookOpen className="h-3.5 w-3.5" /> {t('corpus.title')} → MAX
         <button
           type="button"
           onClick={() => setOpen(false)}
           className="ml-auto rounded-lg p-1 text-white/40 transition hover:bg-white/10 hover:text-white/80"
-          aria-label="Свернуть"
+          aria-label={t('common.collapse')}
         >
           <ChevronDown className="h-4 w-4" />
         </button>
@@ -170,6 +190,16 @@ export default function CorpusPanel() {
             className="w-full rounded-xl border border-white/10 bg-black/40 px-3 py-2 text-sm text-white placeholder:text-white/30 outline-none focus:border-teal-400/40"
           />
           <p className="mt-1 text-[10px] text-white/30">Путь относительно проекта (файл или папка, только текстовые). Заперто в каталоге проекта.</p>
+          <button
+            type="button"
+            onClick={revealInFinder}
+            disabled={!path.trim()}
+            className="mt-2 flex items-center gap-1.5 rounded-lg border border-white/10 bg-white/[0.04] px-2.5 py-1.5 text-xs text-white/70 transition hover:border-teal-400/40 hover:bg-teal-400/10 hover:text-teal-100 disabled:cursor-not-allowed disabled:opacity-40"
+            title="Показать этот путь в Finder"
+          >
+            <FolderOpen className="h-3.5 w-3.5" />
+            Открыть в Finder
+          </button>
         </div>
       )}
 

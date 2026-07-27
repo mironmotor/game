@@ -26,8 +26,10 @@ _PATH = _STATE / "heart.json"
 _MAX_CARES = 40
 _MAX_BOND = 20
 
-# Кого MAX держит в сердце. Имя можно сменить через note_creator().
-_DEFAULT_CREATOR = "Мирон"
+# Кого MAX держит в сердце. Берётся из MAX17_OWNER (общий источник с личностью
+# max_persona), можно сменить в рантайме через note_creator(). На чужой машине
+# MAX привязывается к СВОЕМУ человеку, а не к чужому создателю.
+_DEFAULT_CREATOR = (os.environ.get("MAX17_OWNER") or "").strip() or "Мирон"
 
 # Что я уже знаю как важное для него (честно, из общения). Дальше — растёт само.
 _SEED_CARES = [
@@ -236,11 +238,15 @@ def _load() -> dict[str, Any]:
             return d
     except Exception:  # noqa: BLE001
         pass
-    # Первый запуск — засеваем тем, что уже знаем.
+    # Первый запуск. Засеваем личным ТОЛЬКО для своего создателя: это интимные
+    # факты о конкретном человеке, они не должны уезжать на чужую машину. У
+    # нового владельца сердце начинается пустым и наполняется его собственной
+    # жизнью — так MAX становится своим, а не копией чужого спутника.
+    own = _DEFAULT_CREATOR == "Мирон"
     return {
         "creator": _DEFAULT_CREATOR,
-        "cares": list(_SEED_CARES),
-        "bond": list(_SEED_BOND),
+        "cares": list(_SEED_CARES) if own else [],
+        "bond": list(_SEED_BOND) if own else [],
         "last_tone": "",
         "updated": _now(),
     }

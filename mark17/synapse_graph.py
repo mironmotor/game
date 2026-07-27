@@ -557,6 +557,65 @@ class SynapseGraph:
             )
             return int(cur.rowcount or 0)
 
+    def compress_links(
+        self,
+        *,
+        relation_type: str = "similar_to",
+        keep_per_node: int = 12,
+        apply: bool = False,
+    ) -> dict[str, Any]:
+        """Сжатие механических связей: у каждого узла оставить только K сильнейших
+        соседей, длинный хвост забыть.
+
+        Зачем: `similar_to` — это ВЫЧИСЛЕННОЕ косинусное сходство, а не выученное
+        знание. Оно плодится веером (на узле находили до 444 связей при среднем
+        13), раздувая граф и топя настоящие причинные связи. Сильнейшие соседи
+        несут почти весь сигнал, хвост — балласт.
+
+        Осторожно по умолчанию:
+          • трогает ТОЛЬКО указанный relation_type (причинные/структурные не тронет);
+          • `apply=False` — сухой прогон: считает, но НЕ удаляет;
+          • оставляет сильнейшие по (weight, evidence_count).
+        Возвращает отчёт: сколько было, сколько останется, сколько срезано.
+        """
+        rel = str(relation_type or "similar_to")
+        keep = max(1, int(keep_per_node))
+        with self._conn() as c:
+            total = int(c.execute("SELECT COUNT(*) FROM synapses").fetchone()[0])
+            before = int(
+                c.execute("SELECT COUNT(*) FROM synapses WHERE relation_type = ?", (rel,)).fetchone()[0]
+            )
+            # id связей, НЕ попавших в топ-K своего узла
+            doomed_sql = """
+                SELECT id FROM (
+                    SELECT id, ROW_NUMBER() OVER (
+                        PARTITION BY source_type || ':' || source_id
+                        ORDER BY weight DESC, evidence_count DESC, id ASC
+                    ) AS rn
+                    FROM synapses WHERE relation_type = ?
+                ) WHERE rn > ?
+            """
+            doomed = int(
+                c.execute(f"SELECT COUNT(*) FROM ({doomed_sql})", (rel, keep)).fetchone()[0]
+            )
+            removed = 0
+            if apply and doomed:
+                cur = c.execute(f"DELETE FROM synapses WHERE id IN ({doomed_sql})", (rel, keep))
+                removed = int(cur.rowcount or 0)
+
+        return {
+            "relation_type": rel,
+            "keep_per_node": keep,
+            "applied": bool(apply),
+            "total_before": total,
+            "relation_before": before,
+            "candidates": doomed,
+            "removed": removed,
+            "relation_after": before - removed,
+            "total_after": total - removed,
+            "percent_of_relation": round(100.0 * doomed / before, 1) if before else 0.0,
+        }
+
     def get_top_synapses(self, limit: int = 5) -> list[dict[str, Any]]:
         with self._conn() as c:
             rows = c.execute(

@@ -5,6 +5,7 @@
 
 import type { MaxSynthesis } from './agents/types';
 import { getApiPath } from './max17-client';
+import { getConversationLocale } from './i18n/runtime';
 
 export interface MaxOrchestratorResponse extends MaxSynthesis {
   ok?: boolean;
@@ -35,7 +36,10 @@ export async function runMaxOrchestrator(
   const response = await fetch(getApiPath('max'), {
     method: 'POST',
     headers: headers(),
-    body: JSON.stringify(payload),
+    body: JSON.stringify({
+      ...payload,
+      locale: payload.locale || getConversationLocale(),
+    }),
   });
   const data = (await response.json()) as MaxOrchestratorResponse;
   if (!response.ok) {

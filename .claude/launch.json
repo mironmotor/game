@@ -1,0 +1,17 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "game (next dev)",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["run", "dev"],
+      "port": 3000
+    },
+    {
+      "name": "game LAN (https :3002)",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["run", "dev:lan"],
+      "port": 3002
+    }
+  ]
+}

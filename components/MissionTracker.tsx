@@ -10,6 +10,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Target, X, Plus, Check, Star, ChevronUp, Loader2 } from 'lucide-react';
 import { sendMax17Event } from '@/lib/max17-client';
+import { useMirCoin } from '@/hooks/use-mircoin';
 
 type Mission = {
   id: string; title: string; why: string; status: string;
@@ -25,6 +26,7 @@ export default function MissionTracker() {
   const [snap, setSnap] = useState<Snap | null>(null);
   const [title, setTitle] = useState('');
   const [busy, setBusy] = useState(false);
+  const { earn: earnMirCoin } = useMirCoin();
 
   const send = useCallback(async (payload: Record<string, unknown>) => {
     setBusy(true);
@@ -41,16 +43,23 @@ export default function MissionTracker() {
   useEffect(() => {
     const onToggle = () => setOpen((v) => !v);
     const onOpen = () => setOpen(true);
+    // Кто-то добавил миссии извне (агент заработка и т.п.) — открываем и перечитываем.
+    const onRefresh = () => {
+      setOpen(true);
+      void send({ action: 'list' });
+    };
     const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setOpen(false); };
     window.addEventListener('missions:toggle', onToggle);
     window.addEventListener('missions:open', onOpen);
+    window.addEventListener('missions:refresh', onRefresh);
     window.addEventListener('keydown', onKey);
     return () => {
       window.removeEventListener('missions:toggle', onToggle);
       window.removeEventListener('missions:open', onOpen);
+      window.removeEventListener('missions:refresh', onRefresh);
       window.removeEventListener('keydown', onKey);
     };
-  }, []);
+  }, [send]);
 
   useEffect(() => { if (open) void send({ action: 'list' }); }, [open, send]);
 
@@ -88,8 +97,13 @@ export default function MissionTracker() {
           <div className="flex gap-1">
             <button type="button" onClick={() => void send({ action: 'update', id: m.id, progress: Math.min(100, m.progress + 20) })}
               className="rounded bg-white/10 px-1.5 text-[11px] text-white/70 hover:bg-white/20">+20</button>
-            <button type="button" onClick={() => void send({ action: 'complete', id: m.id })}
-              className="rounded bg-emerald-500/25 p-1 text-emerald-200 hover:bg-emerald-500/40" title="Выполнено">
+            <button
+              type="button"
+              onClick={() => {
+                void send({ action: 'complete', id: m.id });
+                earnMirCoin(150, `Миссия: ${m.title}`);
+              }}
+              className="rounded bg-emerald-500/25 p-1 text-emerald-200 hover:bg-emerald-500/40" title="Выполнено · +150 MirCoin">
               <Check className="h-3.5 w-3.5" />
             </button>
           </div>

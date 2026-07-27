@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import { appBasePath } from '@/lib/base-path';
 import { daemonStatus, rewarmDaemon } from '../max17/max17-daemon';
 
 export const runtime = 'nodejs';
@@ -9,12 +10,11 @@ export const runtime = 'nodejs';
 //   POST {client_errors?}  -> sweep including recent browser errors
 //   POST {fix}             -> run a fix (rewarm_daemon here; others forwarded to core), then re-sweep
 
-function coreUrl(request: Request): string {
-  const url = new URL(request.url);
-  // Next strips basePath from request.url, so rebuild it explicitly (matches
-  // next.config basePath '/game'; the bare /api/max17 path is a 404).
-  const basePath = process.env.NEXT_PUBLIC_BASE_PATH || '/game';
-  return `${url.origin}${basePath}/api/max17`;
+function coreUrl(_request: Request): string {
+  // ВНУТРЕННИЙ вызов ядра — ТОЛЬКО на localhost. За nginx origin запроса =
+  // публичный https://mir.care, а сервер не может зафетчить свой публичный URL
+  // (fetch failed → Доктор показывал 0%). Порт = где слушает next (3000).
+  return `http://127.0.0.1:${process.env.PORT || '3000'}${appBasePath}/api/max17`;
 }
 
 async function callCore(request: Request, event: Record<string, unknown>) {
@@ -27,7 +27,14 @@ async function callCore(request: Request, event: Record<string, unknown>) {
 }
 
 async function sweep(request: Request, clientErrors: unknown[]) {
-  const daemon = daemonStatus();
+  // Демон засыпает от простоя и греется по требованию — это НЕ поломка. Но свип
+  // на холодном демоне давал ложные 0% («demon_down» critical). Раз Доктор
+  // активно проверяет здоровье — законно разбудить демона и мерить уже живого.
+  let daemon = daemonStatus();
+  if (!daemon.alive) {
+    rewarmDaemon();
+    daemon = daemonStatus();
+  }
   const data = await callCore(request, { type: 'health', action: 'sweep', client_errors: clientErrors, daemon });
   return { ok: data.ok ?? false, health: data.health ?? null, daemon, error: data.error };
 }

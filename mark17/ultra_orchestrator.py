@@ -192,7 +192,10 @@ def decide(state: dict[str, Any]) -> dict[str, Any]:
                 {"role": "user", "content": "Состояние ядра:\n" + json.dumps(state, ensure_ascii=False)[:1800]},
             ],
             role="ultra",
-            max_tokens=2000,
+            # The decision is a tiny JSON ({action, query<=160, reason<=200}) —
+            # ~100 tokens. 2000 made the model generate 10x longer than needed;
+            # 300 keeps it concise and cuts decision latency a lot.
+            max_tokens=300,
             temperature=0.2,
             response_format={"type": "json_object"},
         )

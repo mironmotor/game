@@ -194,13 +194,18 @@ def web_research(
             else:
                 errors.append(f"{url}: {fetched.error}")
     elif allow_network:
-        # No explicit URLs: search by meaning. Wikipedia is reachable here and
-        # natively bilingual (ru/en); DuckDuckGo is a best-effort fallback that
-        # may be blocked/TLS-intercepted on some networks.
+        # No explicit URLs: search by meaning. Tavily first when a key is set
+        # (чистые релевантные результаты по бизнесу/реальному времени); иначе
+        # Wikipedia (bilingual ru/en) и DuckDuckGo как best-effort фолбэк.
         try:
-            pages = _wikipedia_pages(clean_query, limit=limit)
+            pages = _search_tavily(clean_query, limit=limit)
         except Exception as exc:  # noqa: BLE001 - network failures are data here.
-            errors.append(f"wikipedia search failed: {exc}")
+            errors.append(f"tavily search failed: {exc}")
+        if not pages:
+            try:
+                pages = _wikipedia_pages(clean_query, limit=limit)
+            except Exception as exc:  # noqa: BLE001 - network failures are data here.
+                errors.append(f"wikipedia search failed: {exc}")
         if not pages:
             try:
                 for url in _search_duckduckgo(clean_query, limit=limit):
@@ -293,6 +298,39 @@ def web_research(
         "latency_ms": round((time.time() - started) * 1000, 1),
         "source": "web_sense_v0",
     }
+
+
+def _search_tavily(query: str, *, limit: int) -> list[tuple[str, str, str]]:
+    """Настоящий веб-поиск через Tavily (нужен TAVILY_API_KEY). Возвращает готовые
+    страницы (url, title, content) — Tavily уже отдаёт очищенный контент, без
+    отдельного скачивания. Без ключа — пусто (падаем на Wikipedia/DuckDuckGo)."""
+    key = os.environ.get("TAVILY_API_KEY", "").strip()
+    if not key:
+        return []
+    payload = json.dumps(
+        {"api_key": key, "query": query, "max_results": max(1, min(8, limit + 2)), "search_depth": "basic"}
+    ).encode("utf-8")
+    request = urllib.request.Request(
+        "https://api.tavily.com/search",
+        data=payload,
+        headers={"Content-Type": "application/json", "User-Agent": "Max17-WebSense/0.1"},
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=15, context=_SSL_CONTEXT) as response:  # noqa: S310
+            data = json.loads(response.read(1_500_000).decode("utf-8", errors="replace"))
+    except (urllib.error.URLError, TimeoutError, OSError, ValueError) as exc:
+        raise RuntimeError(f"tavily: {exc}")
+    pages: list[tuple[str, str, str]] = []
+    for item in (data.get("results") or [])[:limit]:
+        if not isinstance(item, dict):
+            continue
+        url = str(item.get("url") or "").strip()
+        title = str(item.get("title") or "").strip()
+        content = str(item.get("content") or "").strip()
+        if url and content:
+            pages.append((url, title, content))
+    return pages
 
 
 def _search_duckduckgo(query: str, *, limit: int) -> list[str]:

@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import { appBasePath } from '@/lib/base-path';
 
 export const runtime = 'nodejs';
 
@@ -9,10 +10,8 @@ export const runtime = 'nodejs';
 export async function GET(request: Request) {
   const url = new URL(request.url);
   const clear = url.searchParams.get('clear') === '1';
-  // Next strips basePath from request.url, so rebuild it explicitly (matches
-  // next.config basePath '/game'; the bare /api/max17 path is a 404).
-  const basePath = process.env.NEXT_PUBLIC_BASE_PATH || '/game';
-  const target = `${url.origin}${basePath}/api/max17`;
+  // Next strips its configured basePath from request.url inside route handlers.
+  const target = `${url.origin}${appBasePath}/api/max17`;
   try {
     const res = await fetch(target, {
       method: 'POST',

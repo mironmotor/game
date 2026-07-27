@@ -1,0 +1,2 @@
+"""Local MAX Voice service."""
+

@@ -7,7 +7,7 @@
  */
 
 import { useEffect, useRef, useState } from 'react';
-import { Brain, Download, Loader2, Play, Sparkles, Square } from 'lucide-react';
+import { Brain, Download, HeartPulse, Loader2, Play, Sparkles, Square } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { CHORD_MODES, KEYS, MOODS, render777Wav, start777, type ChordMode777, type Live777, type Mood777, type SongSpec, type Track777Params } from '@/lib/audio-777';
 import { startViz777, type Viz777, type VizMode777 } from '@/lib/audio-viz-777';
@@ -43,6 +43,7 @@ export default function Mode777() {
   const [spec, setSpec] = useState<SongSpec | null>(null);
   const [composing, setComposing] = useState(false);
   const [composeNote, setComposeNote] = useState('');
+  const [resonating, setResonating] = useState(false);
 
   const liveRef = useRef<Live777 | null>(null);
   const rafRef = useRef<number | null>(null);
@@ -102,9 +103,9 @@ export default function Mode777() {
     loop();
   }
 
-  function play(useSpec: SongSpec | null = spec) {
+  function play(useSpec: SongSpec | null = spec, paramsOverride?: Track777Params) {
     stop();
-    const live = start777(currentParams(), useSpec ?? undefined);
+    const live = start777(paramsOverride ?? currentParams(), useSpec ?? undefined);
     liveRef.current = live;
     setPlaying(true);
     // TouchDesigner-style WebGL feedback visualizer; 2D radial spectrum is the fallback.
@@ -159,6 +160,43 @@ export default function Mode777() {
       play(null);
     } finally {
       setComposing(false);
+    }
+  }
+
+  // Резонанс: 777 читает ТЕКУЩЕЕ состояние MAX (dream_mood — его настроение как
+  // музыкальный спек: bpm/тон/лад/энергия) и становится им. Его «чувства» → звук.
+  async function resonateWithMax() {
+    if (resonating) return;
+    setResonating(true);
+    setComposeNote('MAX слушает момент…');
+    try {
+      const res = (await sendMax17Event({ type: 'dream_mood' })) as {
+        dream_mood?: { avg_bpm?: number; fav_key?: string; mode?: string; avg_energy?: number; avg_brightness?: number; label?: string; reason?: string };
+      };
+      const m = res.dream_mood;
+      if (!m) {
+        setComposeNote('MAX не отдал состояние — играю как есть');
+        play(null);
+        return;
+      }
+      const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v));
+      const nbpm = clamp(Math.round(m.avg_bpm ?? bpm), 70, 150);
+      const nkey = m.fav_key && KEYS.includes(m.fav_key) ? m.fav_key : keyName;
+      const nenergy = clamp(m.avg_energy ?? energy, 0, 1);
+      const bright = m.avg_brightness ?? 0.5;
+      const minor = (m.mode ?? 'minor') === 'minor';
+      const nmood: Mood777 =
+        nenergy > 0.72 ? 'energetic' : bright > 0.6 && nenergy > 0.5 ? 'epic' : !minor && nenergy < 0.5 ? 'chill' : minor && bright < 0.4 ? 'dark' : 'dreamy';
+      setMood(nmood);
+      setBpm(nbpm);
+      setKeyName(nkey);
+      setEnergy(nenergy);
+      setComposeNote(`🫀 Резонанс с MAX: ${m.label ?? nmood} — ${m.reason ?? 'состояние момента'}`);
+      play(null, { mood: nmood, bpm: nbpm, energy: nenergy, key: nkey, chordMode });
+    } catch (err) {
+      setComposeNote(`Не считал состояние MAX (${err instanceof Error ? err.message.slice(0, 40) : 'err'})`);
+    } finally {
+      setResonating(false);
     }
   }
 
@@ -285,6 +323,16 @@ export default function Mode777() {
         >
           {composing ? <Loader2 className="h-4 w-4 animate-spin" /> : <Brain className="h-4 w-4" />}
           MAX сочиняет
+        </button>
+        <button
+          type="button"
+          onClick={resonateWithMax}
+          disabled={resonating}
+          className="flex items-center gap-1.5 rounded-lg bg-fuchsia-500/25 px-3 py-1.5 text-sm font-semibold text-fuchsia-50 transition hover:bg-fuchsia-400/40 disabled:opacity-40"
+          title="777 читает текущее состояние MAX и становится им — звук как резонанс момента"
+        >
+          {resonating ? <Loader2 className="h-4 w-4 animate-spin" /> : <HeartPulse className="h-4 w-4" />}
+          Резонанс со мной
         </button>
         {!playing ? (
           <button type="button" onClick={() => play()} className="flex items-center gap-1.5 rounded-lg bg-white/10 px-3 py-1.5 text-sm font-semibold text-white/80 transition hover:bg-white/20">

@@ -1,13 +1,14 @@
 // Lazy, resilient face detection via face-api.js (TinyFaceDetector). The model
-// (~190KB) is served locally from /game/models and the library is dynamically
+// (~190KB) is served from public/models and the library is dynamically
 // imported only when the camera is first used, so it never enters the SSR/initial
 // bundle. If the backend or model fails to load, detectFaces returns null and the
 // caller falls back to the light+motion sensor — vision still works, just coarser.
 
+import { getPublicPath } from '@/lib/max17-client';
+
 type FaceApi = typeof import('@vladmandic/face-api');
 
-// basePath is '/game', so public/ assets are served under /game/.
-const MODEL_URL = '/game/models';
+const MODEL_URL = getPublicPath('models');
 
 let faceapi: FaceApi | null = null;
 let loadPromise: Promise<FaceApi | null> | null = null;

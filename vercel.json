@@ -1,9 +1,4 @@
 {
-  "redirects": [
-    {
-      "source": "/",
-      "destination": "/game",
-      "permanent": false
-    }
-  ]
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "framework": "nextjs"
 }

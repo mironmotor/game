@@ -45,7 +45,7 @@ export const WINDOW_META: Record<WindowId, WindowMeta> = {
   status: { id: 'status', title: 'СТАТУС СИСТЕМЫ', minW: 200, minH: 96 },
   agi: { id: 'agi', title: 'AGI EXTENSION', minW: 220, minH: 140 },
   player: { id: 'player', title: 'СТАТУС ИГРОКА', minW: 220, minH: 160 },
-  chat: { id: 'chat', title: 'ЧАТ С MAX17', essential: true, minW: 300, minH: 110 },
+  chat: { id: 'chat', title: 'ЧАТ С MAX17', essential: true, minW: 300, minH: 212 },
   output: { id: 'output', title: 'ВЫВОД MAX17', essential: true, minW: 280, minH: 130 },
 };
 
@@ -120,7 +120,7 @@ function computeDefaultLayout(vw: number, vh: number): WindowMap {
     agi: place('agi', rightX, pad + 128, rightW, 176, 6, !compact),
     player: place('player', rightX, pad + 316, rightW, 196, 7),
     output: place('output', outputX, vh - 304, outW, 200, 8),
-    chat: place('chat', Math.round((vw - chatW) / 2), vh - 206, chatW, 128, 9),
+    chat: place('chat', Math.round((vw - chatW) / 2), vh - 292, chatW, 216, 9),
   };
 }
 

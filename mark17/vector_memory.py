@@ -13,7 +13,7 @@ import os
 import re
 import sqlite3
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
 
@@ -149,6 +149,57 @@ _SYNONYM_TOKENS = sorted(SYNONYM_INDEX.items())  # deterministic prefix scan
 # affect ranking — otherwise importance weighting sinks real matches below a
 # raw score threshold.
 SIM_FLOOR = 0.045
+
+# ─── Заземление памяти ──────────────────────────────────────────────────────
+# Внутренняя машинерия ядра (IR-компиляция, консолидация сна, сжатие концептов,
+# решения оркестратора) — это ПЛУМБИНГ, а не знание о мире. Она нужна ядру, но в
+# recall забивала выдачу: замер до фильтра дал 81% служебного мусора на реальных
+# вопросах («что просил починить» → доки golang). Из БД ничего не удаляем —
+# только исключаем из выдачи; internal-вызовы могут просить include_plumbing=True.
+PLUMBING_TYPES = frozenset({
+    "semantic_ir",
+    "compressed_concept",
+    "consolidated_pattern",
+    "ultra_decision",
+})
+
+# Заземлённое в реальности: слова человека, исходы дел, факты из веба.
+# Это то, ради чего память вообще существует — ранжируем выше.
+GROUNDED_TYPES = frozenset({
+    "user_message",
+    "task_completed",
+    "task_created",
+    "outcome_success",
+    "outcome_failure",
+    "outcome_partial",
+    "remember",
+    "web_fact",
+    "action_done",
+})
+GROUNDED_BOOST = 1.6
+
+
+def _dedup_key(text: str) -> str:
+    """Ключ схлопывания почти-дублей (одно наблюдение писалось десятки раз)."""
+    return " ".join(str(text or "").lower().split())[:70]
+
+
+def _rank_hits(hits: list["VectorHit"], limit: int, include_plumbing: bool) -> list["VectorHit"]:
+    """Общий пост-фильтр обоих путей recall: убрать плумбинг, поднять
+    заземлённое, схлопнуть дубли, отдать topN."""
+    out: list[VectorHit] = []
+    seen: set[str] = set()
+    for h in hits:
+        if not include_plumbing and h.event_type in PLUMBING_TYPES:
+            continue
+        key = _dedup_key(h.summary or h.text)
+        if key in seen:
+            continue
+        seen.add(key)
+        # VectorHit заморожен — новый объект вместо мутации.
+        out.append(replace(h, score=h.score * GROUNDED_BOOST) if h.event_type in GROUNDED_TYPES else h)
+    out.sort(key=lambda hit: (hit.score, hit.id), reverse=True)
+    return out[:limit]
 
 
 def _shared_prefix_len(a: str, b: str) -> int:
@@ -736,7 +787,11 @@ class VectorMemory:
                 self._refresh_ann()
         return new_id
 
-    def recall(self, query: str, *, limit: int = 3) -> list[VectorHit]:
+    def recall(self, query: str, *, limit: int = 3, include_plumbing: bool = False) -> list[VectorHit]:
+        """Вспомнить по смыслу. По умолчанию отдаёт только ЗНАНИЕ: внутренняя
+        машинерия (PLUMBING_TYPES) исключена, дубли схлопнуты, заземлённое
+        (слова человека, исходы дел) ранжируется выше. include_plumbing=True —
+        для внутренних вызовов, которым нужен сырой корпус."""
         query = query.strip()
         if not query:
             return []
@@ -750,7 +805,10 @@ class VectorMemory:
         self._ensure_hnsw()
         if self._hnsw is not None:
             try:
-                ids, sims = self._hnsw.query(query_vector, max(limit * 8, 48))
+                # Пул кандидатов шире: пост-фильтр отсеивает плумбинг и дубли
+                # (на реальном корпусе это ~80%), иначе выдача схлопнется в ноль.
+                pool = max(limit * 8, 48) if include_plumbing else max(limit * 40, 400)
+                ids, sims = self._hnsw.query(query_vector, pool)
                 pairs = [(i, s) for i, s in zip(ids, sims) if s >= SIM_FLOOR]
                 if pairs:
                     metas = self._fetch_meta_by_ids([i for i, _ in pairs])
@@ -771,9 +829,9 @@ class VectorMemory:
                                 reinforce=m["reinforce"][:180], importance=m["importance"], score=score,
                             )
                         )
-                    if hh:
-                        hh.sort(key=lambda hit: (hit.score, hit.id), reverse=True)
-                        return hh[:limit]
+                    ranked = _rank_hits(hh, limit, include_plumbing)
+                    if ranked:
+                        return ranked
             except Exception:  # noqa: BLE001 - scale path must never break recall
                 pass
 
@@ -822,5 +880,4 @@ class VectorMemory:
                 )
             )
 
-        hits.sort(key=lambda hit: (hit.score, hit.id), reverse=True)
-        return hits[:limit]
+        return _rank_hits(hits, limit, include_plumbing)

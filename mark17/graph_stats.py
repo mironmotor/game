@@ -32,6 +32,17 @@ class GraphStats:
                     COUNT(*) FILTER (WHERE weight >= 0.2 AND evidence_count >= 2) AS working_synapses,
                     COUNT(*) FILTER (WHERE weight >= 0.2 AND evidence_count >= 3) AS reinforced_synapses,
                     COUNT(*) FILTER (WHERE weight >= 0.2 AND evidence_count >= 5) AS strong_synapses,
+                    -- ЧЕСТНАЯ ЛЕСТНИЦА. 'similar_to' — это вычисленное косинусное
+                    -- сходство (арифметика, не знание), 'ir_node' — служебные узлы
+                    -- IR-компиляции. Они раздували счёт до 674k при 3k выученных.
+                    COUNT(*) FILTER (
+                        WHERE relation_type != 'similar_to' AND source_type != 'ir_node'
+                    ) AS structural_synapses,
+                    COUNT(*) FILTER (
+                        WHERE relation_type != 'similar_to' AND source_type != 'ir_node'
+                          AND weight >= 0.2 AND evidence_count >= 2
+                    ) AS earned_synapses,
+                    COUNT(*) FILTER (WHERE relation_type = 'leads_to') AS causal_synapses,
                     COALESCE(SUM(evidence_count), 0) AS total_evidence,
                     COALESCE(AVG(weight), 0) AS avg_weight,
                     COALESCE(MAX(weight), 0) AS max_weight
@@ -91,12 +102,23 @@ class GraphStats:
 
         total_synapses = int(totals["total_synapses"])
         useful_synapses = int(totals["useful_synapses"])
+        structural_synapses = int(totals["structural_synapses"])
+        earned_synapses = int(totals["earned_synapses"])
         progress = min(1.0, useful_synapses / self.target_synapses)
         remaining = max(0, self.target_synapses - useful_synapses)
+        # Путь к 1M считаем по ЗАРАБОТАННЫМ: связь засчитывается, только если она
+        # не механическое сходство и подтверждена опытом больше одного раза.
+        earned_progress = min(1.0, earned_synapses / self.target_synapses)
         return {
             "target_synapses": self.target_synapses,
             "total_synapses": total_synapses,
             "useful_synapses": useful_synapses,
+            "structural_synapses": structural_synapses,
+            "earned_synapses": earned_synapses,
+            "causal_synapses": int(totals["causal_synapses"]),
+            "earned_progress": round(earned_progress, 5),
+            "earned_percent": round(earned_progress * 100, 3),
+            "earned_remaining": max(0, self.target_synapses - earned_synapses),
             "working_synapses": int(totals["working_synapses"]),
             "reinforced_synapses": int(totals["reinforced_synapses"]),
             "strong_synapses": int(totals["strong_synapses"]),

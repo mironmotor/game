@@ -2,7 +2,9 @@
 
 import { useRef, type PointerEvent, type ReactNode } from 'react';
 import { Minus, X } from 'lucide-react';
-import { useWindowManager, WINDOW_META, type WindowId } from './window-manager';
+import { useWindowManager, type WindowId } from './window-manager';
+import { useI18n } from '@/components/I18nProvider';
+import type { MessageKey } from '@/lib/i18n/messages';
 
 type Accent = 'cyan' | 'purple' | 'magenta';
 
@@ -15,6 +17,18 @@ interface DragState {
   originW: number;
   originH: number;
 }
+
+const WINDOW_TITLE_KEYS: Record<WindowId, MessageKey> = {
+  rank: 'window.rank',
+  clock: 'window.clock',
+  missions: 'window.missions',
+  minimap: 'window.map',
+  status: 'window.system',
+  agi: 'window.agi',
+  player: 'window.player',
+  output: 'window.output',
+  chat: 'window.chat',
+};
 
 export function HudWindow({
   id,
@@ -29,7 +43,8 @@ export function HudWindow({
 }) {
   const wm = useWindowManager();
   const win = wm.windows[id];
-  const meta = WINDOW_META[id];
+  const { t } = useI18n();
+  const title = t(WINDOW_TITLE_KEYS[id]);
   const drag = useRef<DragState | null>(null);
 
   if (!wm.hydrated || !win || !win.open) return null;
@@ -86,7 +101,7 @@ export function HudWindow({
       data-window-id={id}
       style={{ left: win.x, top: win.y, width: win.w, height: win.minimized ? undefined : win.h, zIndex: win.z }}
       onPointerDown={() => wm.focusWindow(id)}
-      aria-label={meta.title}
+      aria-label={title}
     >
       <header
         className="hud-window-bar"
@@ -96,15 +111,15 @@ export function HudWindow({
         onPointerCancel={endDrag}
         onDoubleClick={() => wm.minimizeWindow(id)}
       >
-        <span className="hud-window-title">{meta.title}</span>
+        <span className="hud-window-title">{title}</span>
         <div className="hud-window-actions">
           <button
             type="button"
             className="hud-window-btn"
             onPointerDown={(e) => e.stopPropagation()}
             onClick={() => wm.minimizeWindow(id)}
-            aria-label={win.minimized ? 'Развернуть окно' : 'Свернуть окно'}
-            title={win.minimized ? 'Развернуть' : 'Свернуть'}
+            aria-label={win.minimized ? t('common.expand') : t('common.collapse')}
+            title={win.minimized ? t('common.expand') : t('common.collapse')}
           >
             <Minus size={13} />
           </button>
@@ -113,8 +128,8 @@ export function HudWindow({
             className="hud-window-btn hud-window-btn-close"
             onPointerDown={(e) => e.stopPropagation()}
             onClick={() => wm.closeWindow(id)}
-            aria-label="Закрыть окно"
-            title="Закрыть"
+            aria-label={t('common.close')}
+            title={t('common.close')}
           >
             <X size={13} />
           </button>

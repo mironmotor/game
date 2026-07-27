@@ -490,7 +490,7 @@ export function SolarSystem({ className = '' }: { className?: string }) {
         ref={canvasRef}
         onClick={onClick}
         style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', pointerEvents: 'auto', cursor: 'pointer' }}
-        aria-label="Навигатор Солнечной системы: клик по планете — перелёт и замедление, по Солнцу — GODMODE"
+        aria-label="GAME Solar System"
       />
     </div>
   );

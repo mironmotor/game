@@ -65,6 +65,7 @@ function saveToStorage(key: string, value: any) {
   if (typeof window === 'undefined') return;
   try {
     localStorage.setItem(key, JSON.stringify(value));
+    window.dispatchEvent(new CustomEvent('game:local-state-change'));
   } catch {}
 }
 
@@ -96,17 +97,23 @@ export function useGameState() {
     setRank(Math.max(1, 10000 - Math.floor(xp / 10)));
   }, [xp]);
 
-  // Cross-instance sync: when any consumer changes tasks/xp (e.g. the Angels
-  // panel takes a task into work), other mounted instances — the HUD missions —
-  // reload from storage so the change is reflected live in the same tab.
+  // Cross-instance and cloud sync. CloudStateSync also emits this event after
+  // hydrating an authenticated user's server snapshot.
   useEffect(() => {
     const onSync = () => {
       setTasks(loadFromStorage<Task[]>(STORAGE_KEYS.tasks, []));
       setXp(loadFromStorage<number>(STORAGE_KEYS.xp, 0));
       setDailyHistory(loadFromStorage<DailyXP[]>(STORAGE_KEYS.history, []));
+      setMessages(loadFromStorage<Message[]>(STORAGE_KEYS.messages, []));
+      setSessions(loadFromStorage<ChatSession[]>(STORAGE_KEYS.sessions, []));
+      setLastLaunch(loadFromStorage<string | null>(STORAGE_KEYS.lastLaunch, null));
     };
     window.addEventListener('game:tasks-sync', onSync);
-    return () => window.removeEventListener('game:tasks-sync', onSync);
+    window.addEventListener('game:state-sync', onSync);
+    return () => {
+      window.removeEventListener('game:tasks-sync', onSync);
+      window.removeEventListener('game:state-sync', onSync);
+    };
   }, []);
 
   const launchGame = useCallback(async () => {

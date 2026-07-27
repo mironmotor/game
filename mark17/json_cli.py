@@ -95,6 +95,7 @@ ALLOWED_EVENTS = frozenset(
         "action_skipped",
         "compress_memory",
         "graph_stats",
+        "compress_links",
         "system_scales",
         "skills",
         "synapse_forge",
@@ -824,12 +825,14 @@ def _handle_internal_dream(
         except Exception:  # noqa: BLE001
             heart_signal = None
 
+    theme = str(event.payload.get("theme") or "").strip().lower() or None
     dream = generate_synergies(
         recent_patterns,
         top_synapses,
         concepts,
         limit=limit,
         heart_signal=heart_signal if isinstance(heart_signal, dict) else None,
+        theme=theme,
     )
     persist_raw = event.payload.get("persist", True)
     persist = not (
@@ -2047,6 +2050,30 @@ def _enforce_crisis_safety(result: dict[str, Any], event: Event) -> None:
         pass
 
 
+def _detect_locale(text: str, fallback: str = "ru") -> str:
+    """Guess the reply language from the message itself when the caller gives no
+    explicit locale. A Cyrillic-majority message → 'ru', a Latin-majority one →
+    'en'. This keeps every path that forgets to pass `locale` (internal dreams,
+    reflection, the game buddy) from silently defaulting MAX to English — for a
+    Russian-first companion that default was wrong and wasteful. Ties fall back
+    to `fallback` (Russian, since MAX's creator is Russian)."""
+    cyr = lat = 0
+    for ch in text or "":
+        o = ord(ch)
+        if 0x0400 <= o <= 0x04FF:  # Cyrillic block
+            cyr += 1
+        elif ("a" <= ch <= "z") or ("A" <= ch <= "Z"):
+            lat += 1
+    if cyr == 0 and lat == 0:
+        return fallback
+    # English speakers essentially never type Cyrillic, while Russian speakers
+    # routinely mix in English tech terms — so any non-trivial Cyrillic share
+    # (≥25% of letters) means the user is writing Russian and wants Russian back.
+    if cyr > 0 and cyr * 3 >= lat:
+        return "ru"
+    return "en"
+
+
 def _synthesize_natural_answer(result: dict[str, Any], event: Event, working_memory: WorkingMemory) -> None:
     """Optional voice layer: turn the retrieved source-backed facts + live camera
     vision + the deterministic draft into a natural reply via the Gonka
@@ -2058,6 +2085,26 @@ def _synthesize_natural_answer(result: dict[str, Any], event: Event, working_mem
     question = _event_text(event)
     if not question:
         return
+
+    raw_locale = str(event.payload.get("locale") or _detect_locale(question)).strip().replace("_", "-")[:32]
+    locale = raw_locale if re.fullmatch(r"[A-Za-z]{2,8}(?:-[A-Za-z0-9]{1,8})*", raw_locale) else "en"
+    language_names = {
+        "ar": "Arabic", "bn": "Bengali", "de": "German", "en": "English",
+        "es": "Spanish", "fa": "Persian", "fr": "French", "he": "Hebrew",
+        "hi": "Hindi", "id": "Indonesian", "it": "Italian", "ja": "Japanese",
+        "ko": "Korean", "pl": "Polish", "pt": "Portuguese", "ru": "Russian",
+        "th": "Thai", "tr": "Turkish", "uk": "Ukrainian", "ur": "Urdu",
+        "vi": "Vietnamese", "zh": "Chinese",
+    }
+    language = language_names.get(locale.split("-", 1)[0].lower(), locale)
+    language_contract = (
+        "HIGHEST PRIORITY OUTPUT LANGUAGE CONTRACT: Write the ENTIRE final answer in "
+        + language
+        + f" ({locale}). Every sentence must use that language. "
+        + "The memory, persona and deterministic draft may contain Russian; understand them, "
+        + "but translate their meaning and NEVER copy their Russian wording into the answer. "
+        + "Only switch when the latest user message is clearly written in another language."
+    )
 
     facts_block = _gonka_facts_block(result)
     vision_block = _gonka_vision_block(working_memory)
@@ -2085,9 +2132,11 @@ def _synthesize_natural_answer(result: dict[str, Any], event: Event, working_mem
     else:
         # Личность MAX (живой персонаж), а не исполнительный JARVIS-контракт —
         # чтобы голос был своим, а не «меню задач».
-        from mark17.max_persona import MAX_SELF
+        from mark17.max_persona import max_self
 
-        system = MAX_SELF + "\n\n" + RUNTIME_GROUNDING
+        # Личность строится под ВЛАДЕЛЬЦА (MAX17_OWNER): на чужой машине MAX
+        # становится своим для того человека, а не копией чужого спутника.
+        system = max_self() + "\n\n" + RUNTIME_GROUNDING
         # Сердце — слой привязанности: MAX отвечает из памяти о том, что важно создателю,
         # подстраивая тепло под его тон. Никогда не ломает голос (мягкий фолбэк).
         try:
@@ -2118,7 +2167,9 @@ def _synthesize_natural_answer(result: dict[str, Any], event: Event, working_mem
                     system = system + "\n\n" + mc
             except Exception:  # noqa: BLE001
                 pass
+    system = language_contract + "\n\n" + system + "\n\n" + language_contract
     parts: list[str] = []
+    parts.append(language_contract)
     history_block = _gonka_history_block(working_memory)
     if history_block:
         parts.append("Недавний диалог (для контекста):\n" + history_block)
@@ -2132,7 +2183,10 @@ def _synthesize_natural_answer(result: dict[str, Any], event: Event, working_mem
         parts.append("Найденные факты (source-backed, retrieval-first):\n" + facts_block)
     if draft:
         parts.append("Черновик детерминированного ядра (можно улучшить/переформулировать):\n" + draft)
-    parts.append("Сформулируй финальный, естественный ответ пользователю.")
+    parts.append(
+        "Сформулируй финальный, естественный ответ пользователю. "
+        + "Before sending it, verify that every sentence follows the output language contract."
+    )
     user = "\n\n".join(parts)
 
     # Answer length follows the selected model: small for slow local CPU (snappy),
@@ -2234,6 +2288,9 @@ def normalize(result: dict[str, Any]) -> dict[str, Any]:
     graph_stats = result.get("graph_stats")
     if isinstance(graph_stats, dict):
         normalized["graph_stats"] = graph_stats
+    compression = result.get("compression")
+    if isinstance(compression, dict):
+        normalized["compression"] = compression
     system_scales = result.get("system_scales")
     if isinstance(system_scales, dict):
         normalized["system_scales"] = system_scales
@@ -2582,6 +2639,9 @@ def _handle_event(event: Event, args: argparse.Namespace, stores: Mark17Stores) 
     curiosity = stores.curiosity
     if event.type == "graph_stats" and not args.warmup:
         return _handle_graph_stats(event, state_dir, synapse_graph)
+
+    if event.type == "compress_links" and not args.warmup:
+        return _handle_compress_links(event, synapse_graph)
     if event.type == "system_scales" and not args.warmup:
         return _handle_system_scales(event, state_dir, synapse_graph)
     if event.type == "skills" and not args.warmup:
@@ -3007,6 +3067,26 @@ def _handle_system_scales(
             "guardian_blocked": _guard_total(),
         },
     }
+
+
+def _handle_compress_links(event: Event, synapse_graph: SynapseGraph) -> dict[str, Any]:
+    """Сжатие механических связей графа (см. SynapseGraph.compress_links).
+
+    ОСТОРОЖНО ПО УМОЛЧАНИЮ: без явного apply=true это сухой прогон — только
+    считает, сколько бы срезало. Удаляет лишь `similar_to`-хвост (вычисленное
+    сходство), причинные и структурные связи не трогает.
+    """
+    payload = event.payload
+    try:
+        keep = int(payload.get("keep_per_node") or 12)
+    except (TypeError, ValueError):
+        keep = 12
+    report = synapse_graph.compress_links(
+        relation_type=str(payload.get("relation_type") or "similar_to"),
+        keep_per_node=keep,
+        apply=payload.get("apply") is True,  # только явное true
+    )
+    return {"ok": True, "route": "compress_links", "compression": report}
 
 
 def _handle_graph_stats(

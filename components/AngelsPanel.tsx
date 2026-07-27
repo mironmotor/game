@@ -38,9 +38,11 @@ import { sendArchitect, sendCodeAgent, sendMax17Event } from '@/lib/max17-client
 import type { AgentOutput, AgentRole, PrioritizedAction } from '@/lib/agents/types';
 import { useGameState, type Task } from '@/hooks/use-game-state';
 import { getVoiceName, initJarvis, jarvisPreview, jarvisSpeak, jarvisStop, listVoices, setVoiceByName } from '@/lib/jarvis-voice';
+import { useI18n } from '@/components/I18nProvider';
+import type { MessageKey } from '@/lib/i18n/messages';
 
 interface AngelMeta {
-  label: string;
+  labelKey: MessageKey;
   Icon: typeof Eye;
   text: string;
   ring: string;
@@ -49,13 +51,13 @@ interface AngelMeta {
 }
 
 const ANGELS: Record<AgentRole, AngelMeta> = {
-  vision: { label: 'Зрение', Icon: Eye, text: 'text-sky-300', ring: 'border-sky-400/30', dot: 'bg-sky-400', glow: 'shadow-sky-500/10' },
-  voice: { label: 'Голос', Icon: Mic, text: 'text-violet-300', ring: 'border-violet-400/30', dot: 'bg-violet-400', glow: 'shadow-violet-500/10' },
-  memory: { label: 'Память', Icon: Brain, text: 'text-amber-300', ring: 'border-amber-400/30', dot: 'bg-amber-400', glow: 'shadow-amber-500/10' },
-  strategy: { label: 'Стратегия', Icon: Compass, text: 'text-emerald-300', ring: 'border-emerald-400/30', dot: 'bg-emerald-400', glow: 'shadow-emerald-500/10' },
-  product: { label: 'Продукт', Icon: Package, text: 'text-blue-300', ring: 'border-blue-400/30', dot: 'bg-blue-400', glow: 'shadow-blue-500/10' },
-  growth: { label: 'Рост', Icon: TrendingUp, text: 'text-pink-300', ring: 'border-pink-400/30', dot: 'bg-pink-400', glow: 'shadow-pink-500/10' },
-  guardian: { label: 'Защита', Icon: Shield, text: 'text-rose-300', ring: 'border-rose-400/30', dot: 'bg-rose-400', glow: 'shadow-rose-500/10' },
+  vision: { labelKey: 'angel.vision', Icon: Eye, text: 'text-sky-300', ring: 'border-sky-400/30', dot: 'bg-sky-400', glow: 'shadow-sky-500/10' },
+  voice: { labelKey: 'angel.voice', Icon: Mic, text: 'text-violet-300', ring: 'border-violet-400/30', dot: 'bg-violet-400', glow: 'shadow-violet-500/10' },
+  memory: { labelKey: 'angel.memory', Icon: Brain, text: 'text-amber-300', ring: 'border-amber-400/30', dot: 'bg-amber-400', glow: 'shadow-amber-500/10' },
+  strategy: { labelKey: 'angel.strategy', Icon: Compass, text: 'text-emerald-300', ring: 'border-emerald-400/30', dot: 'bg-emerald-400', glow: 'shadow-emerald-500/10' },
+  product: { labelKey: 'angel.product', Icon: Package, text: 'text-blue-300', ring: 'border-blue-400/30', dot: 'bg-blue-400', glow: 'shadow-blue-500/10' },
+  growth: { labelKey: 'angel.growth', Icon: TrendingUp, text: 'text-pink-300', ring: 'border-pink-400/30', dot: 'bg-pink-400', glow: 'shadow-pink-500/10' },
+  guardian: { labelKey: 'angel.guardian', Icon: Shield, text: 'text-rose-300', ring: 'border-rose-400/30', dot: 'bg-rose-400', glow: 'shadow-rose-500/10' },
 };
 
 function pct(n: number): string {
@@ -91,21 +93,21 @@ function signalThinking(active: boolean): void {
   }
 }
 
-/** One-click "kickstart the day": MAX builds the day's mission and takes the top into work. */
-const KICKOFF_PROMPT = 'Дай мне миссию на сегодня и первые конкретные шаги, и возьми главное в работу.';
-
 const ROLE_ORDER: AgentRole[] = ['strategy', 'product', 'growth', 'memory', 'guardian', 'vision', 'voice'];
 
 /** Technical tasks get a real code agent (architect); everything else gets a council breakdown. */
 const TECH_RE = /код|code|api|endpoint|фич|feature|баг|bug|рефактор|refactor|компонент|component|функц|function|деплой|deploy|build|сборк|тест(?!ост)|test|интеграц|скрипт|script|бэкенд|backend|фронт|frontend|миграц|migration|схем|типизац|типы|hook|хук|роут|route/i;
 
 export default function AngelsPanel() {
+  const { locale, t } = useI18n();
   const [open, setOpen] = useState(false);
   const [text, setText] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [data, setData] = useState<MaxOrchestratorResponse | null>(null);
-  const [dismissed, setDismissed] = useState(false);
+  // По умолчанию Совет скрыт — вызывается только кнопкой «Совет» / «Разгон»
+  // (событиями angels:open / angels:kickoff / angels:ask, все снимают dismissed).
+  const [dismissed, setDismissed] = useState(true);
   const [agentMode, setAgentMode] = useState(true);
   const [workIds, setWorkIds] = useState<string[]>([]);
   const [execId, setExecId] = useState<string | null>(null);
@@ -185,7 +187,7 @@ export default function AngelsPanel() {
     setWasDeep(deepMode);
     signalThinking(true);
     try {
-      const result = await runMaxOrchestrator({ text: q, deep: deepMode });
+      const result = await runMaxOrchestrator({ text: q, deep: deepMode, locale });
       setData(result);
       if (voiceOnRef.current && result.answer) jarvisSpeak(result.answer);
       if (agentMode || forceWork) takeIntoWork(result);
@@ -209,7 +211,7 @@ export default function AngelsPanel() {
   function kickoff() {
     setAgentMode(true);
     const open = tasksRef.current.filter((t) => t.status === 'active' || t.status === 'pending');
-    let prompt = KICKOFF_PROMPT;
+    let prompt = `${t('angels.kickoff')}. ${t('ai.replyLanguageInstruction', { language: locale })}`;
     if (open.length) {
       const list = open.slice(0, 8).map((t) => `«${t.desc}»`).join(', ');
       prompt =
@@ -243,7 +245,10 @@ export default function AngelsPanel() {
           setExecPlans((p) => ({ ...p, [task.id]: r.error || 'architect: пусто' }));
         }
       } else {
-        const r = await runMaxOrchestrator({ text: `Как выполнить: ${task.desc}` });
+        const r = await runMaxOrchestrator({
+          text: `${t('angels.ask')}: ${task.desc}`,
+          locale,
+        });
         const steps = (r.actions ?? []).map((a, i) => `${i + 1}. ${a.title}`).join('\n');
         setExecPlans((p) => ({ ...p, [task.id]: [r.answer, steps].filter(Boolean).join('\n') }));
       }
@@ -380,10 +385,10 @@ export default function AngelsPanel() {
             type="button"
             onClick={() => setOpen((o) => !o)}
             className="flex shrink-0 items-center gap-1.5 rounded-xl px-2 py-1 text-fuchsia-200 transition hover:bg-fuchsia-400/10"
-            title="Совет Ангелов"
+            title={t('angels.title')}
           >
             <Sparkles className="h-4 w-4" />
-            <span className="hidden text-xs font-semibold tracking-wide sm:inline">СОВЕТ&nbsp;АНГЕЛОВ</span>
+            <span className="hidden text-xs font-semibold tracking-wide sm:inline">{t('angels.title')}</span>
             {data && (
               <ChevronDown className={cn('h-3.5 w-3.5 transition-transform', open && 'rotate-180')} />
             )}
@@ -396,7 +401,8 @@ export default function AngelsPanel() {
             onKeyDown={(e) => {
               if (e.key === 'Enter') ask();
             }}
-            placeholder="Что сделать сегодня? (напр. продвинуть AstroMap и снять 3 Reels)"
+            placeholder={t('angels.placeholder')}
+            dir="auto"
             className="min-w-0 flex-1 bg-transparent px-2 text-sm text-white placeholder:text-white/35 focus:outline-none"
           />
 
@@ -405,10 +411,10 @@ export default function AngelsPanel() {
             onClick={kickoff}
             disabled={loading}
             className="flex shrink-0 items-center gap-1.5 rounded-xl border border-amber-400/40 bg-amber-400/15 px-2.5 py-1.5 text-xs font-semibold text-amber-200 transition hover:bg-amber-400/25 disabled:cursor-not-allowed disabled:opacity-40"
-            title="Разгон дня — MAX сам даёт миссию и берёт топ-задачу в работу"
+            title={t('angels.kickoff')}
           >
             <Zap className="h-4 w-4" />
-            <span className="hidden md:inline">Разгон</span>
+            <span className="hidden md:inline">{t('angels.kickoff')}</span>
           </button>
 
           <button
@@ -418,7 +424,7 @@ export default function AngelsPanel() {
             className="flex shrink-0 items-center gap-1.5 rounded-xl bg-fuchsia-500/90 px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-fuchsia-400 disabled:cursor-not-allowed disabled:opacity-40"
           >
             {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
-            <span className="hidden sm:inline">{loading ? 'Совещаются…' : 'Спросить'}</span>
+            <span className="hidden sm:inline">{loading ? t('angels.meeting') : t('angels.ask')}</span>
           </button>
 
           <button
@@ -426,10 +432,10 @@ export default function AngelsPanel() {
             onClick={deepThink}
             disabled={loading || !text.trim()}
             className="flex shrink-0 items-center gap-1.5 rounded-xl border border-violet-400/40 bg-violet-500/15 px-2.5 py-1.5 text-xs font-semibold text-violet-200 transition hover:bg-violet-500/25 disabled:cursor-not-allowed disabled:opacity-40"
-            title="Глубже — агенты рассуждают через реальную модель (Gonka), заземлённую на память (медленнее)"
+            title={t('angels.deep')}
           >
             {loading && wasDeep ? <Loader2 className="h-4 w-4 animate-spin" /> : <Brain className="h-4 w-4" />}
-            <span className="hidden md:inline">Глубже</span>
+            <span className="hidden md:inline">{t('angels.deep')}</span>
           </button>
 
           <button
@@ -445,7 +451,7 @@ export default function AngelsPanel() {
             aria-pressed={agentMode}
           >
             <Bot className="h-4 w-4" />
-            <span className="hidden md:inline">Агент</span>
+            <span className="hidden md:inline">{t('angels.agent')}</span>
           </button>
 
           <button
@@ -457,7 +463,7 @@ export default function AngelsPanel() {
             )}
             title={voiceOn ? 'Голос MAX (JARVIS) включён — отвечает вслух' : 'Озвучивать ответы MAX голосом (JARVIS)'}
             aria-pressed={voiceOn}
-            aria-label="Голос MAX"
+            aria-label={t('hud.voice')}
           >
             {voiceOn ? <Volume2 className="h-4 w-4" /> : <VolumeX className="h-4 w-4" />}
           </button>
@@ -469,8 +475,8 @@ export default function AngelsPanel() {
               jarvisStop();
             }}
             className="flex shrink-0 items-center justify-center rounded-xl px-1.5 py-1.5 text-white/40 transition hover:bg-white/10 hover:text-white/80"
-            title="Свернуть (открыть снова — кнопкой «Совет» в доке)"
-            aria-label="Свернуть Совет"
+            title={t('common.collapse')}
+            aria-label={t('common.collapse')}
           >
             <X className="h-4 w-4" />
           </button>
@@ -479,7 +485,7 @@ export default function AngelsPanel() {
         {voiceOn && (
           <div className="mt-1.5 flex items-center gap-2 rounded-xl border border-sky-400/20 bg-[#0a0818]/75 px-2.5 py-1.5 backdrop-blur-md">
             <Volume2 className="h-3.5 w-3.5 shrink-0 text-sky-300/80" />
-            <span className="shrink-0 text-[11px] text-white/45">Голос:</span>
+            <span className="shrink-0 text-[11px] text-white/45">{t('hud.voice')}:</span>
             <select
               value={selectedVoice}
               onChange={(e) => {
@@ -489,7 +495,7 @@ export default function AngelsPanel() {
               }}
               className="min-w-0 flex-1 rounded-lg border border-white/10 bg-black/40 px-2 py-1 text-xs text-white outline-none focus:border-sky-400/40"
             >
-              <option value="">Авто (лучший мужской ru)</option>
+              <option value="">{t('language.auto')} ({locale})</option>
               {voices.map((v) => (
                 <option key={v.name} value={v.name}>
                   {v.name} · {v.lang}
@@ -501,7 +507,7 @@ export default function AngelsPanel() {
               onClick={() => jarvisPreview()}
               className="shrink-0 rounded-lg bg-sky-500/20 px-2 py-1 text-[11px] text-sky-100 transition hover:bg-sky-500/35"
             >
-              Тест
+              {t('common.test')}
             </button>
           </div>
         )}
@@ -512,7 +518,7 @@ export default function AngelsPanel() {
             {loading && (
               <div className="mb-3 flex flex-col gap-2">
                 <span className="flex items-center gap-1.5 text-[11px] uppercase tracking-widest text-fuchsia-300/80">
-                  <Loader2 className="h-3.5 w-3.5 animate-spin" /> Совет совещается…
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" /> {t('angels.thinking')}…
                 </span>
                 <div className="flex flex-wrap gap-1.5">
                   {ROLE_ORDER.map((role, i) => {
@@ -524,7 +530,7 @@ export default function AngelsPanel() {
                         className={cn('flex animate-pulse items-center gap-1 rounded-full border px-2 py-0.5 text-[10px]', m.ring, m.text)}
                         style={{ animationDelay: `${i * 120}ms` }}
                       >
-                        <Icon className="h-3 w-3" /> {m.label}
+                        <Icon className="h-3 w-3" /> {t(m.labelKey)}
                       </span>
                     );
                   })}
@@ -692,7 +698,7 @@ export default function AngelsPanel() {
                             </span>
                             <span>
                               {a.title}
-                              <span className={cn('ml-1.5 text-[10px]', ANGELS[a.role]?.text)}>· {ANGELS[a.role]?.label}</span>
+                              <span className={cn('ml-1.5 text-[10px]', ANGELS[a.role]?.text)}>· {t(ANGELS[a.role].labelKey)}</span>
                             </span>
                           </li>
                         ))}
@@ -734,6 +740,7 @@ export default function AngelsPanel() {
 }
 
 function AngelCard({ agent }: { agent: AgentOutput }) {
+  const { t } = useI18n();
   const meta = ANGELS[agent.role];
   const available = agent.metadata?.['available'] !== false;
   const Icon = meta?.Icon ?? Sparkles;
@@ -754,7 +761,9 @@ function AngelCard({ agent }: { agent: AgentOutput }) {
     >
       <div className="flex items-center gap-2">
         <Icon className={cn('h-4 w-4', meta?.text)} />
-        <span className={cn('text-xs font-semibold', meta?.text)}>{meta?.label ?? agent.role}</span>
+        <span className={cn('text-xs font-semibold', meta?.text)}>
+          {meta ? t(meta.labelKey) : agent.role}
+        </span>
         <span className="ml-auto flex items-center gap-1 text-[10px] text-white/45">
           <span className={cn('h-1.5 w-1.5 rounded-full', meta?.dot)} />
           {pct(agent.confidence)}

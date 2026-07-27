@@ -738,11 +738,39 @@
 }
 
 .hud-window .hud-input-bar {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 8px;
   width: 100%;
   box-shadow: none;
   background: transparent;
   border: none;
   padding: 2px;
+}
+
+.hud-window .hud-input-bar .hud-icon-btn {
+  width: min(44px, 100%);
+  min-width: 0;
+  height: 44px;
+  justify-self: center;
+  touch-action: manipulation;
+}
+
+.hud-window .hud-input-bar input {
+  grid-column: 1 / span 4;
+  grid-row: 3;
+  min-width: 0;
+  width: 100%;
+  min-height: 44px;
+  padding: 0 12px;
+  border: 1px solid rgba(168, 85, 247, 0.3);
+  border-radius: 12px;
+  background: rgba(0, 0, 0, 0.24);
+}
+
+.hud-window .hud-input-bar .hud-send-btn {
+  grid-column: 5;
+  grid-row: 3;
 }
 
 .hud-window-resize {
@@ -1058,34 +1086,6 @@
 
   .hud-window-pad {
     padding: 12px;
-  }
-
-  .hud-window .hud-input-bar {
-    display: grid;
-    grid-template-columns: repeat(5, minmax(0, 1fr));
-    gap: 8px;
-  }
-
-  .hud-window .hud-input-bar .hud-icon-btn {
-    width: 44px;
-    height: 44px;
-    justify-self: center;
-  }
-
-  .hud-window .hud-input-bar input {
-    grid-column: 1 / span 4;
-    grid-row: 3;
-    width: 100%;
-    min-height: 44px;
-    padding: 0 12px;
-    border: 1px solid rgba(168, 85, 247, 0.3);
-    border-radius: 12px;
-    background: rgba(0, 0, 0, 0.24);
-  }
-
-  .hud-window .hud-input-bar > .hud-icon-btn:last-child {
-    grid-column: 5;
-    grid-row: 3;
   }
 
   .hud-mission-item {

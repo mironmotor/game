@@ -24,7 +24,7 @@ _ROOT = Path(__file__).resolve().parent.parent
 _STATE = _ROOT / "mark17" / "state" / "llm_active.json"
 
 DEFAULT_BASE_URL = "https://proxy.gonkabroker.com/v1"
-DEFAULT_MODEL = "Qwen/Qwen3-235B-A22B-Instruct-2507-FP8"
+DEFAULT_MODEL = "MiniMaxAI/MiniMax-M2.7"
 ROLES = ("chat", "code", "architect", "desktop", "bulk", "ultra")
 ROLE_LABELS = {
     "chat": "Чат",
@@ -38,15 +38,18 @@ ROLE_DEFAULTS = {
     # On Air 2015 local Ollama can be slow; prefer the selected/global cloud
     # preset for chat unless the user explicitly sets a local override.
     "chat": None,
-    "code": "gonka-qwen3",
-    "architect": "gonka-qwen3",
-    "desktop": "gonka-qwen3",
+    # gonka-qwen3's model (Qwen3-235B-…-FP8) is NOT served by the broker (404) —
+    # it only serves MiniMax-M2.7 and Kimi-K2.6. MiniMax is fast + real, so it is
+    # the primary; using the 404 model caused every call to fall through to Gemini.
+    "code": "gonka-minimax",
+    "architect": "gonka-minimax",
+    "desktop": "gonka-minimax",
     # Bulk graph growth should be cheap. If Ollama is not running, it will fail
     # soft and the deterministic pipeline remains the fallback.
     "bulk": "ollama-0.5b",
     # Ultra decides the core's OWN next action — needs judgment, calls are rare
     # (idle cadence) and tiny, so the smart model is worth it.
-    "ultra": "gonka-qwen3",
+    "ultra": "gonka-minimax",
 }
 
 # Resilience ladder per role: if the resolved primary backend fails (provider
@@ -55,12 +58,14 @@ ROLE_DEFAULTS = {
 # provider dying (Gonka 401, Gemini 429) no longer takes every feature dark.
 # Order = preference; unavailable presets (no key / Ollama down) are skipped.
 FALLBACK_CHAINS = {
-    "chat": ["gonka-qwen3", "gemini", "groq", "ollama-3b"],
-    "code": ["gonka-qwen3", "gonka-kimi", "gemini", "groq"],
-    "architect": ["gonka-qwen3", "gonka-kimi", "gemini"],
-    "desktop": ["gonka-qwen3", "gemini", "groq"],
-    "bulk": ["ollama-0.5b", "ollama-3b", "gemini"],
-    "ultra": ["gonka-qwen3", "gonka-kimi", "gemini"],
+    # lmstudio-qwen3 sits BEFORE gemini so a local sovereign model (no rate limits)
+    # is preferred over Gemini's free-tier 429s whenever LM Studio (:1234) is up.
+    "chat": ["gonka-minimax", "gonka-kimi", "lmstudio-qwen3", "gemini", "groq", "ollama-3b"],
+    "code": ["gonka-minimax", "gonka-kimi", "lmstudio-qwen3", "gemini", "groq"],
+    "architect": ["gonka-minimax", "gonka-kimi", "lmstudio-qwen3", "gemini"],
+    "desktop": ["gonka-minimax", "gonka-kimi", "lmstudio-qwen3", "gemini", "groq"],
+    "bulk": ["ollama-0.5b", "ollama-3b", "lmstudio-qwen3", "gemini"],
+    "ultra": ["gonka-minimax", "gonka-kimi", "lmstudio-qwen3", "gemini"],
 }
 
 # id -> preset. `key` = literal API key; `key_env` = env var holding the key.

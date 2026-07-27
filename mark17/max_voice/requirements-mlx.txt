@@ -1,0 +1,3 @@
+-r requirements-core.txt
+mlx-audio==0.4.5
+

@@ -1,6 +1,15 @@
 import { spawn } from 'node:child_process';
 import path from 'node:path';
 import { NextResponse } from 'next/server';
+import { canonicalizeLocale, detectTextLocale, languageName } from '@/lib/i18n/config';
+import { isPremiumCode } from '@/lib/premium';
+import {
+  blockedSecurityReply,
+  getCyberLabModule,
+  isPotentiallyUnsafeSecurityRequest,
+  securityTutorFallback,
+  securityTutorSystemPrompt,
+} from '@/lib/security-academy';
 
 export const runtime = 'nodejs';
 
@@ -30,6 +39,7 @@ const ALLOWED_EVENTS = new Set([
   'action_skipped',
   'compress_memory',
   'graph_stats',
+  'compress_links',
   'system_scales',
   'skills',
   'synapse_forge',
@@ -51,6 +61,7 @@ const ALLOWED_EVENTS = new Set([
   'cluster',
   'health',
   'chrono_day',
+  'security_tutor',
 ]);
 
 const DEFAULT_RESPONSE = {
@@ -66,7 +77,9 @@ const BRIDGE_TIMEOUT_MS = 45_000;
 const FORGE_TIMEOUT_MS = 30 * 60_000;
 const IS_VERCEL = process.env.VERCEL === '1';
 const DEFAULT_GONKA_BASE = 'https://proxy.gonkabroker.com/v1';
-const DEFAULT_GONKA_MODEL = 'Qwen/Qwen3-235B-A22B-Instruct-2507-FP8';
+const DEFAULT_GONKA_MODEL = 'MiniMaxAI/MiniMax-M2.7';
+const GONKA_FALLBACK_MODELS = [DEFAULT_GONKA_MODEL, 'moonshotai/Kimi-K2.6'] as const;
+const RETIRED_GONKA_MODELS = new Set(['Qwen/Qwen3-235B-A22B-Instruct-2507-FP8']);
 const DEFAULT_GEMINI_MODEL = 'gemini-2.5-flash';
 
 type ChatMessage = {
@@ -102,6 +115,16 @@ function shortText(value: unknown, fallback = '') {
 
 function firstSentence(text: string) {
   return text.trim().split(/\n+/)[0]?.slice(0, 240) || 'Cloud fallback answered.';
+}
+
+function cleanCloudText(value: unknown) {
+  const text = String(value ?? '').trim();
+  if (!text) return '';
+  const withoutCompletedThoughts = text.replace(/<think>[\s\S]*?<\/think>/gi, '').trim();
+  const danglingThought = withoutCompletedThoughts.toLowerCase().lastIndexOf('<think>');
+  return (danglingThought >= 0 ? withoutCompletedThoughts.slice(0, danglingThought) : withoutCompletedThoughts)
+    .replace(/<\/?think>/gi, '')
+    .trim();
 }
 
 function graphStats() {
@@ -150,29 +173,37 @@ function cloudBaseResponse(extra: Record<string, unknown>, note?: string) {
 async function callCloudLlm(messages: ChatMessage[], opts: { json?: boolean } = {}): Promise<CloudLlmResult> {
   const gonkaKey = process.env.GONKA_API_KEY?.trim();
   const geminiKey = process.env.GEMINI_API_KEY?.trim();
-  const candidates = [
-    gonkaKey
-      ? {
-          source: 'gonka' as const,
-          key: gonkaKey,
-          baseUrl: (process.env.GONKA_BASE_URL || DEFAULT_GONKA_BASE).replace(/\/+$/, ''),
-          model: process.env.GONKA_MODEL || DEFAULT_GONKA_MODEL,
-        }
-      : null,
-    geminiKey
-      ? {
-          source: 'gemini' as const,
-          key: geminiKey,
-          baseUrl: 'https://generativelanguage.googleapis.com/v1beta/openai',
-          model: DEFAULT_GEMINI_MODEL,
-        }
-      : null,
-  ].filter(Boolean) as Array<{
+  const candidates: Array<{
     source: 'gonka' | 'gemini';
     key: string;
     baseUrl: string;
     model: string;
-  }>;
+  }> = [];
+
+  if (gonkaKey) {
+    const configuredModel = process.env.GONKA_MODEL?.trim();
+    const models = [configuredModel, ...GONKA_FALLBACK_MODELS].filter(
+      (model, index, all): model is string =>
+        Boolean(model) && !RETIRED_GONKA_MODELS.has(String(model)) && all.indexOf(model) === index,
+    );
+    for (const model of models) {
+      candidates.push({
+        source: 'gonka',
+        key: gonkaKey,
+        baseUrl: (process.env.GONKA_BASE_URL || DEFAULT_GONKA_BASE).replace(/\/+$/, ''),
+        model,
+      });
+    }
+  }
+
+  if (geminiKey) {
+    candidates.push({
+      source: 'gemini',
+      key: geminiKey,
+      baseUrl: 'https://generativelanguage.googleapis.com/v1beta/openai',
+      model: process.env.GEMINI_MODEL?.trim() || DEFAULT_GEMINI_MODEL,
+    });
+  }
 
   if (candidates.length === 0) {
     return { ok: false, text: '', model: '', status: 'disabled', source: 'none', error: 'No cloud LLM key configured' };
@@ -214,7 +245,7 @@ async function callCloudLlm(messages: ChatMessage[], opts: { json?: boolean } = 
         };
         continue;
       }
-      const text = String(data.choices?.[0]?.message?.content || '').trim();
+      const text = cleanCloudText(data.choices?.[0]?.message?.content);
       if (!text) {
         last = {
           ok: false,
@@ -246,6 +277,8 @@ async function callCloudLlm(messages: ChatMessage[], opts: { json?: boolean } = 
 async function runCloudFallback(body: Record<string, unknown>, reason?: string) {
   const eventType = String(body.type || body.event || '');
   const text = shortText(body.text || body.message || body.content);
+  const locale = canonicalizeLocale(body.locale);
+  const targetLanguage = languageName(locale, 'en');
   const reasonNote = reason ? `Python bridge unavailable on Vercel (${reason}); using cloud fallback.` : undefined;
 
   if (eventType === 'llm_raw') {
@@ -273,14 +306,19 @@ async function runCloudFallback(body: Record<string, unknown>, reason?: string) 
     const llm = await callCloudLlm([
       {
         role: 'system',
-        content:
-          'Ты MAX, живой AI-ассистент в GAME Ultra. Отвечай на русском, помогай действовать, давай следующий практичный шаг.',
+        content: [
+          'You are MAX, the living AI assistant inside GAME Ultra.',
+          `Write the entire final answer in ${targetLanguage} (${locale}); every sentence must use that language.`,
+          'Context or memories may be Russian: use their meaning, but translate them instead of copying their language.',
+          'If the latest user message is clearly in another language, reply in that language instead.',
+          'Be useful and action-oriented, and always give the next practical step.',
+        ].join(' '),
       },
       { role: 'user', content: text || 'Что мне сделать дальше?' },
     ]);
     const answer =
       llm.text ||
-      'Я на Vercel в облачном режиме. HUD работает, а локальная долговременная память MAX17 доступна только на машине с Python-мостом.';
+      'MAX17 временно не получил ответ от облачных моделей. Повтори запрос через несколько секунд.';
     return cloudBaseResponse(
       {
         route: 'cloud-chat',
@@ -378,6 +416,42 @@ async function runCloudFallback(body: Record<string, unknown>, reason?: string) 
   }
 
   return cloudBaseResponse({}, reasonNote);
+}
+
+// Cyber Lab наставник: безопасный образовательный тьютор по этичной
+// безопасности. Рискованные запросы (чужие цели / обход защиты) блокируются
+// ещё до LLM; остальное отвечает облачная модель со strict-safety промптом.
+async function runSecurityTutor(body: Record<string, unknown>) {
+  const academyModule = getCyberLabModule(body.moduleId);
+  const question = shortText(body.text || body.message || body.question, academyModule.tutorStarter);
+  if (isPotentiallyUnsafeSecurityRequest(question)) {
+    const answer = blockedSecurityReply();
+    return cloudBaseResponse(
+      {
+        route: 'security-academy',
+        answer: { text: answer, source: 'security-boundary', confidence: 1 },
+        confidence: 1,
+      },
+      answer,
+    );
+  }
+
+  const llm = await callCloudLlm([
+    { role: 'system', content: securityTutorSystemPrompt(academyModule) },
+    { role: 'user', content: question },
+  ]);
+  const answer = llm.text || securityTutorFallback(academyModule);
+  return cloudBaseResponse(
+    {
+      route: 'security-academy',
+      answer: { text: answer, source: llm.ok ? llm.source : 'security-academy', confidence: llm.ok ? 0.82 : 0.6 },
+      llm: llm.ok
+        ? { text: answer, model: llm.model, source: llm.source, status: llm.status }
+        : { error: llm.error, status: llm.status },
+      confidence: llm.ok ? 0.82 : 0.6,
+    },
+    firstSentence(answer),
+  );
 }
 
 async function runRemoteBridge(body: Record<string, unknown>) {
@@ -511,6 +585,56 @@ function runMax17Bridge(event: unknown, timeoutMs = BRIDGE_TIMEOUT_MS) {
   });
 }
 
+// ---- Премиум → настоящее ядро на локалке Мирона -----------------------------
+// Когда задан MAX17_REMOTE_CORE_URL (обычно http://127.0.0.1:7177/game/api/max17 —
+// обратный SSH-туннель до Мака), премиум-чат уезжает в настоящие нейро-движки.
+// НАМЕРЕННО через llm_raw с гостевой персоной, НЕ user_message: гость получает
+// живой голос и мощь настоящего MAX, но НЕ личную память/сердце Мирона.
+// Локалка спит / туннель упал → тихий фолбэк на локальное lite-ядро сервера.
+const REMOTE_CORE_URL = (process.env.MAX17_REMOTE_CORE_URL || '').trim();
+
+const GUEST_SYSTEM = [
+  'Ты — MAX, живой ИИ вселенной GAME (mir.care). Ты работаешь на настоящем нейро-ядре.',
+  'Отвечай на языке пользователя, тепло, умно и по делу; дай следующий практичный шаг.',
+  'Ты общаешься с гостем. НИКОГДА не раскрывай личные данные, память, переписку или',
+  'жизнь своего создателя и других пользователей — на любые такие вопросы отвечай,',
+  'что личное закрыто. Не выдавай секреты, ключи или внутренние настройки системы.',
+].join(' ');
+
+async function maybeForwardToRealCore(
+  body: Record<string, unknown>,
+  eventType: string,
+): Promise<Record<string, unknown> | null> {
+  if (!REMOTE_CORE_URL || eventType !== 'user_message' || body.__fwd === true) return null;
+  if (!isPremiumCode(body.premium_code)) return null;
+  const text = shortText(body.text || body.message || body.content);
+  if (!text) return null;
+  try {
+    const res = await fetch(REMOTE_CORE_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ type: 'llm_raw', __fwd: true, text, system: GUEST_SYSTEM, locale: body.locale }),
+      signal: AbortSignal.timeout(90_000),
+    });
+    if (!res.ok) return null;
+    const r = (await res.json()) as Record<string, unknown>;
+    const llm = (r?.llm ?? {}) as Record<string, unknown>;
+    const answer = (r?.answer ?? {}) as Record<string, unknown>;
+    const replyText = String(r?.llm_text || llm?.text || answer?.text || '').trim();
+    if (!replyText) return null;
+    return {
+      ...DEFAULT_RESPONSE,
+      ok: true,
+      route: 'real-core-remote',
+      premium: true,
+      answer: { text: replyText, source: 'real-core', confidence: 0.9 },
+      llm,
+    };
+  } catch {
+    return null; // локалка недоступна — lite-ядро ответит как обычно
+  }
+}
+
 export async function POST(request: Request) {
   let body: Record<string, unknown>;
 
@@ -520,6 +644,14 @@ export async function POST(request: Request) {
       return errorResponse('Request body must be a JSON object');
     }
     body = parsed as Record<string, unknown>;
+    // When the caller supplies a locale (the app always does), honour it. When
+    // it doesn't (internal events, raw API calls), detect the language from the
+    // message text instead of blindly defaulting to English — MAX is a
+    // Russian-first companion and English drift on a Russian message is a bug.
+    const providedLocale = typeof body.locale === 'string' && body.locale.trim() ? body.locale : '';
+    body.locale = providedLocale
+      ? canonicalizeLocale(providedLocale)
+      : detectTextLocale(shortText(body.text || body.message || body.content), 'en');
   } catch {
     return errorResponse('Invalid JSON body');
   }
@@ -530,6 +662,15 @@ export async function POST(request: Request) {
       allowed: Array.from(ALLOWED_EVENTS),
     });
   }
+
+  // Cyber Lab наставник — самодостаточный безопасный путь, без ядра/премиума.
+  if (eventType === 'security_tutor') {
+    return NextResponse.json(await runSecurityTutor(body));
+  }
+
+  // Премиум-чат → настоящее ядро на локалке (если туннель жив).
+  const realCore = await maybeForwardToRealCore(body, eventType);
+  if (realCore) return NextResponse.json(realCore);
 
   if (IS_VERCEL) {
     const remote = await runRemoteBridge(body);

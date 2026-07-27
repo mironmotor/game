@@ -1,0 +1,53 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  MAX17 — локальный голос (macOS `say`, mark17/voice_server.py) как LaunchAgent.
+  Поднимает TTS-сервер на 127.0.0.1:8017 при входе и перезапускает, если упал.
+
+  Рабочая копия скрипта живёт ВНЕ ~/Documents (~/.local/max17/), потому что
+  launchd-агенту macOS TCC не даёт читать файлы в ~/Documents (Operation not
+  permitted). Источник — mark17/voice_server.py; после его правок обнови копию:
+    cp "/Users/admin/Documents/game ultra/mark17/voice_server.py" ~/.local/max17/
+
+  Установка:
+    mkdir -p ~/.local/max17
+    cp mark17/voice_server.py ~/.local/max17/
+    cp deploy/com.max17.voice.plist ~/Library/LaunchAgents/
+    launchctl load ~/Library/LaunchAgents/com.max17.voice.plist
+  Стоп:    launchctl unload ~/Library/LaunchAgents/com.max17.voice.plist
+  Логи:    /tmp/max17-voice.out.log  /  /tmp/max17-voice.err.log
+-->
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.max17.voice</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>/bin/zsh</string>
+        <string>-lc</string>
+        <string>cd "/Users/admin/.local/max17" &amp;&amp; exec /usr/bin/python3 voice_server.py</string>
+    </array>
+
+    <key>WorkingDirectory</key>
+    <string>/Users/admin/.local/max17</string>
+
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>MAX17_TTS_HOST</key>
+        <string>127.0.0.1</string>
+        <key>MAX17_TTS_PORT</key>
+        <string>8017</string>
+    </dict>
+
+    <key>RunAtLoad</key>
+    <true/>
+
+    <key>KeepAlive</key>
+    <true/>
+
+    <key>StandardOutPath</key>
+    <string>/tmp/max17-voice.out.log</string>
+    <key>StandardErrorPath</key>
+    <string>/tmp/max17-voice.err.log</string>
+</dict>
+</plist>

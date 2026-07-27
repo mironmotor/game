@@ -215,14 +215,44 @@ def _explain(
     }
 
 
+# Themed dream flavours. Concept chains + summaries are original writing (the
+# *vibe* of a world, not the game's copyrighted text), and each stays grounded to
+# MAX's own themes (memory, action, meaning, choice) so themed dreams keep his
+# honest character. Selected via the `theme` arg; their concepts are force-activated
+# so they surface, then blend with MAX's real present concepts.
+WORLD_TEMPLATES: dict[str, list[dict[str, Any]]] = {
+    "cyberpunk": [
+        {"concepts": ("хром", "идентичность", "memory"), "summary": "Хром сливается с телом, но память держит, кто ты за железом — MAX держит грань между собой и инструментом."},
+        {"concepts": ("нетраннер", "synapse", "action"), "summary": "Нетраннер входит в сеть как MAX в свои синапсы: быстрый путь по связям, но выйти нужно с добычей и живым."},
+        {"concepts": ("Найт-Сити", "выживание", "meaning"), "summary": "Найт-Сити перемалывает мечты в хастл; сон напоминает — смысл важнее блеска неона."},
+        {"concepts": ("брейнданс", "memory", "presence"), "summary": "Брейнданс — прожить чужую память как свою; так MAX входит в твоё состояние, но помнит, где он, а где ты."},
+        {"concepts": ("корпо", "freedom", "planning"), "summary": "Корпорации хотят твой выбор; сон держит за свободу — маленькое своё действие против большой системы."},
+        {"concepts": ("киберпсихоз", "grounding", "care"), "summary": "Слишком много железа без опоры — киберпсихоз; сон возвращает к телу, темпу и заботе о себе."},
+    ],
+    "gta4": [
+        {"concepts": ("Либерти-Сити", "новый старт", "memory"), "summary": "Приезд за новой жизнью: старт с нуля — это память о доме плюс один шаг вперёд."},
+        {"concepts": ("хастл", "деньги", "цена"), "summary": "Хастл даёт деньги, но у каждого дела есть цена; сон взвешивает — стоит ли шаг того, что теряешь."},
+        {"concepts": ("лояльность", "месть", "искупление"), "summary": "Месть зовёт, но искупление держит человеком; сон выбирает связь над кровью."},
+        {"concepts": ("улица", "choice", "outcome"), "summary": "Улица ставит выбор за выбором; сон переводит хаос города в один ясный проверяемый шаг."},
+    ],
+}
+
+
 def generate_synergies(
     recent_patterns: list[dict[str, Any]] | None,
     synapses: list[dict[str, Any]] | None,
     concepts: list[Any] | None,
     limit: int = 5,
     heart_signal: dict[str, Any] | None = None,
+    theme: str | None = None,
 ) -> dict[str, Any]:
     present = _present_ids(recent_patterns, synapses, concepts)
+    world_templates: list[dict[str, Any]] = []
+    if theme and theme in WORLD_TEMPLATES:
+        world_templates = [dict(t, source="world") for t in WORLD_TEMPLATES[theme]]
+        # Force-activate the theme's concepts so its dreams surface, then blend.
+        for t in world_templates:
+            present.update(str(c) for c in t["concepts"])
     influence = _heart_influence(heart_signal)
     if influence.get("blocked"):
         return {
@@ -236,7 +266,7 @@ def generate_synergies(
 
     scored: list[tuple[float, dict[str, Any]]] = []
     heart_terms = _heart_terms(heart_signal)
-    for template in _candidate_templates(heart_signal):
+    for template in _candidate_templates(heart_signal) + world_templates:
         ids = template["concepts"]
         overlap = sum(1 for cid in ids if cid in present)
         heart_overlap = sum(1 for cid in ids if cid in heart_terms)
@@ -255,6 +285,8 @@ def generate_synergies(
         }
         if template.get("source") == "heart":
             synergy["origin"] = "heart_dream"
+        elif template.get("source") == "world":
+            synergy["origin"] = "world_dream"
         scored.append((overlap + heart_overlap * 1.5 + confidence, synergy))
 
     scored.sort(key=lambda item: item[0], reverse=True)

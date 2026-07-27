@@ -10,6 +10,7 @@ import { useEffect, useRef, useState } from 'react';
 import {
   Activity,
   BookOpen,
+  Brain,
   Cloud,
   Cpu,
   FolderInput,
@@ -214,6 +215,18 @@ export default function GodMode() {
 
         <div className="space-y-4 p-4">
           <p className="text-xs text-white/50">Ты влетел в Солнце — ядро системы. Здесь внутренние коды MAX: разум, локальные программы, голос и музыка.</p>
+
+          <button
+            type="button"
+            onClick={() => window.dispatchEvent(new CustomEvent('brain:toggle'))}
+            className="flex w-full items-center gap-2 rounded-xl border border-cyan-400/30 bg-gradient-to-r from-cyan-500/15 to-violet-500/15 px-4 py-3 text-left transition hover:from-cyan-500/25 hover:to-violet-500/25"
+          >
+            <Brain className="h-5 w-5 text-cyan-300" />
+            <span className="min-w-0">
+              <span className="block text-sm font-semibold text-white/90">🧠 Мозг MAX — живой граф памяти</span>
+              <span className="block text-[11px] text-white/45">настоящие синапсы, нейроны и импульсы из ядра</span>
+            </span>
+          </button>
 
           <div>
             <div className="mb-1.5 flex items-center gap-2 text-[11px] uppercase tracking-widest text-cyan-300/70">
