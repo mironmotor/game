@@ -39,15 +39,30 @@ class LlmBridge:
         self._checked = False
         self._available = False
 
-        # Provider selection: "ollama" (local, default) or "openrouter" (hosted).
+        # Provider selection: "ollama" (local), "openrouter" or "minimax" (hosted).
         self.provider = os.environ.get("MAX17_LLM_PROVIDER", "ollama").strip().lower()
         self.openrouter_key = os.environ.get("OPENROUTER_API_KEY", "").strip()
         self.openrouter_url = "https://openrouter.ai/api/v1/chat/completions"
+
+        # MiniMax — то, на чём думает Max Ultra (OpenAI-совместимый chatcompletion_v2).
+        # Ключ и URL берём из env, чтобы можно было переключить международный/CN
+        # эндпоинт и модель без правки кода.
+        self.minimax_key = (
+            os.environ.get("MINIMAX_API_KEY", "").strip()
+            or os.environ.get("MAX17_LLM_API_KEY", "").strip()
+        )
+        self.minimax_url = (
+            os.environ.get("MINIMAX_BASE_URL", "").strip()
+            or "https://api.minimax.io/v1/text/chatcompletion_v2"
+        )
+
         env_model = os.environ.get("MAX17_LLM_MODEL", "").strip()
         if env_model:
             self.model = env_model
         elif self.provider == "openrouter":
             self.model = "google/gemini-2.0-flash-exp:free"
+        elif self.provider == "minimax":
+            self.model = os.environ.get("MINIMAX_MODEL", "").strip() or "MiniMax-M2"
 
     def check(self) -> bool:
         if not self.enabled:
@@ -55,6 +70,10 @@ class LlmBridge:
             return False
         if self.provider == "openrouter":
             self._available = bool(self.openrouter_key)
+            self._checked = True
+            return self._available
+        if self.provider == "minimax":
+            self._available = bool(self.minimax_key)
             self._checked = True
             return self._available
         try:
@@ -98,7 +117,13 @@ class LlmBridge:
             )
 
         if self.provider == "openrouter":
-            return self._ask_openrouter(prompt, force=force)
+            return self._ask_openai_compatible(
+                self.openrouter_url, self.openrouter_key, prompt, label="OpenRouter"
+            )
+        if self.provider == "minimax":
+            return self._ask_openai_compatible(
+                self.minimax_url, self.minimax_key, prompt, label="MiniMax"
+            )
 
         if not self.available and not force:
             return LlmResponse(
@@ -148,13 +173,16 @@ class LlmBridge:
                 latency_ms=round((_time.time() - t0) * 1000, 1),
             )
 
-    def _ask_openrouter(self, prompt: str, *, force: bool = False) -> LlmResponse:
+    def _ask_openai_compatible(
+        self, url: str, key: str, prompt: str, *, label: str
+    ) -> LlmResponse:
+        """OpenAI-совместимый chat/completions: OpenRouter и MiniMax (chatcompletion_v2)."""
         import time as _time
 
-        if not self.openrouter_key:
+        if not key:
             return LlmResponse(
                 ok=False,
-                text="Нет OPENROUTER_API_KEY — LLM недоступен, используется детерминированный fallback.",
+                text=f"Нет ключа для {label} — LLM недоступен, идёт детерминированный fallback.",
                 model=self.model,
                 status="offline",
             )
@@ -162,15 +190,15 @@ class LlmBridge:
             "model": self.model,
             "messages": [{"role": "user", "content": prompt}],
             "temperature": 0.3,
-            "max_tokens": 300,
+            "max_tokens": 512,
         }
         data = json.dumps(body).encode("utf-8")
         req = urllib.request.Request(
-            self.openrouter_url,
+            url,
             data=data,
             headers={
                 "Content-Type": "application/json",
-                "Authorization": f"Bearer {self.openrouter_key}",
+                "Authorization": f"Bearer {key}",
             },
             method="POST",
         )
@@ -178,8 +206,19 @@ class LlmBridge:
         try:
             with urllib.request.urlopen(req, timeout=TIMEOUT_SEC) as resp:
                 raw = json.loads(resp.read().decode())
-            text = str(raw.get("choices", [{}])[0].get("message", {}).get("content", "")).strip()
+            text = self._extract_content(raw)
             ms = (_time.time() - t0) * 1000
+            if not text:
+                # MiniMax при ошибке кладёт причину в base_resp.status_msg.
+                base = raw.get("base_resp") if isinstance(raw, dict) else None
+                if isinstance(base, dict) and base.get("status_code"):
+                    return LlmResponse(
+                        ok=False,
+                        text=f"{label}: {base.get('status_msg', 'error')}",
+                        model=self.model,
+                        status="error",
+                        latency_ms=round(ms, 1),
+                    )
             return LlmResponse(
                 ok=bool(text),
                 text=text or "(пустой ответ)",
@@ -190,8 +229,33 @@ class LlmBridge:
         except Exception as e:
             return LlmResponse(
                 ok=False,
-                text=f"OpenRouter error: {e}",
+                text=f"{label} error: {e}",
                 model=self.model,
                 status="error",
                 latency_ms=round((_time.time() - t0) * 1000, 1),
             )
+
+    @staticmethod
+    def _extract_content(raw: Any) -> str:
+        """Достать текст ответа из OpenAI-совместимой структуры (choices[].message.content)."""
+        if not isinstance(raw, dict):
+            return ""
+        choices = raw.get("choices")
+        if isinstance(choices, list) and choices:
+            msg = choices[0].get("message") if isinstance(choices[0], dict) else None
+            if isinstance(msg, dict):
+                content = msg.get("content")
+                if isinstance(content, str):
+                    return content.strip()
+                # Некоторые модели отдают content списком блоков.
+                if isinstance(content, list):
+                    parts = [b.get("text", "") for b in content if isinstance(b, dict)]
+                    return "".join(parts).strip()
+            # старый формat MiniMax: choices[].text
+            txt = choices[0].get("text") if isinstance(choices[0], dict) else None
+            if isinstance(txt, str):
+                return txt.strip()
+        # ещё один вариант MiniMax v2: reply на верхнем уровне
+        if isinstance(raw.get("reply"), str):
+            return raw["reply"].strip()
+        return ""

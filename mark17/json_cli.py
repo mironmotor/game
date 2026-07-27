@@ -31,6 +31,7 @@ from mark17.big_idea import generate as generate_big_idea
 from mark17.dream_sim import generate as generate_dream_sim
 from mark17.ingest import generate as generate_ingest, split_stream
 from mark17.decoder import generate as generate_decode
+from mark17.introspect import generate as generate_introspect
 
 ALLOWED_EVENTS = frozenset(
     {
@@ -48,6 +49,7 @@ ALLOWED_EVENTS = frozenset(
         "simulation",
         "ingest",
         "decode",
+        "introspect",
     }
 )
 
@@ -285,6 +287,9 @@ def normalize(result: dict[str, Any]) -> dict[str, Any]:
     decode = result.get("decode")
     if isinstance(decode, dict):
         normalized["decode"] = decode
+    introspection = result.get("introspection")
+    if isinstance(introspection, dict):
+        normalized["introspection"] = introspection
     return normalized
 
 
@@ -348,6 +353,8 @@ def _handle_event(event: Event, args: argparse.Namespace, state_dir: Path) -> di
         return _handle_simulation(event, brain, synapse_graph)
     if event.type == "decode":
         return _handle_decode(event, brain, synapse_graph)
+    if event.type == "introspect":
+        return _handle_introspect(event, brain, synapse_graph)
     if event.type == "ingest":
         return _handle_ingest(event, brain, synapse_graph)
     if event.type == "synapse_graph":
@@ -462,6 +469,83 @@ def _handle_simulation(event: Event, brain: Mark17Brain, synapse_graph: SynapseG
             Event(type="remember", payload={"note": prompt, "reinforce": "simulation"}, source="simulation"),
             hint=sim.get("thought", ""), action="simulation",
         )
+    brain.plasticity.save()
+    return result
+
+
+def _gather_self_state(brain: Mark17Brain, synapse_graph: SynapseGraph) -> dict[str, Any]:
+    """Собрать РЕАЛЬНОЕ состояние ядра: память, синапсы, недавняя активность."""
+    try:
+        mem_stats = brain.memory.stats()
+    except Exception:
+        mem_stats = {"memories": 0, "top": []}
+
+    recent_actions: list[str] = []
+    recent_hints: list[str] = []
+    try:
+        for hit in brain.memory.recent(limit=12):
+            content = hit.content if isinstance(hit.content, dict) else {}
+            action = str(content.get("action") or hit.event_type or "").strip()
+            hint = str(content.get("hint") or content.get("note") or "").strip()
+            if action:
+                recent_actions.append(action)
+            if hint:
+                recent_hints.append(hint)
+    except Exception:
+        pass
+
+    graph = {}
+    try:
+        graph = synapse_graph.get_graph(limit=40)
+    except Exception:
+        pass
+    edges = graph.get("edges", []) if isinstance(graph, dict) else []
+    top_relations = []
+    for e in edges[:6]:
+        rel = str(e.get("relation", "")).strip()
+        summ = str(e.get("summary", "")).strip()
+        top_relations.append(f"{rel}: {summ}"[:60] if summ else rel)
+
+    return {
+        "memories": mem_stats.get("memories", 0),
+        "top_memory_types": mem_stats.get("top", []),
+        "synapses_total": graph.get("total", len(edges)) if isinstance(graph, dict) else len(edges),
+        "recent_actions": recent_actions,
+        "recent_hints": recent_hints,
+        "top_relations": [r for r in top_relations if r],
+    }
+
+
+def _handle_introspect(event: Event, brain: Mark17Brain, synapse_graph: SynapseGraph) -> dict[str, Any]:
+    """Саморефлексия: Max смотрит своё состояние и решает, что делать (LLM или правила)."""
+    state = _gather_self_state(brain, synapse_graph)
+    introspection = generate_introspect(state, brain.llm)
+    self_eval = {
+        "score": 0.75,
+        "reason": f"introspection via {introspection['source']}",
+        "store_memory": True,
+        "reinforce": "introspect",
+    }
+    result: dict[str, Any] = {
+        "ok": True,
+        "event_type": event.type,
+        "route": "introspect",
+        "introspection": introspection,
+        "memory": {"hint": introspection.get("focus", "")},
+        "plasticity": {"confidence": 0.8 if introspection["source"].startswith("llm") else 0.6,
+                        "action": "introspect", "learned": True},
+        "llm": {"status": "ok" if introspection["source"].startswith("llm") else "skipped",
+                "text": f"source={introspection['source']}", "latency_ms": 0.0},
+        "next_adaptation": (introspection.get("priorities") or [{}])[0].get("action", ""),
+        "self_evaluation": self_eval,
+    }
+    result["synapses"] = synapse_graph.update_from_event(event, result, self_eval)
+    brain.memory.remember(
+        Event(type="remember",
+              payload={"note": introspection.get("assessment", ""), "reinforce": "introspect"},
+              source="introspect"),
+        hint=introspection.get("focus", ""), action="introspect",
+    )
     brain.plasticity.save()
     return result
 
