@@ -19,6 +19,7 @@ const ALLOWED_EVENTS = new Set([
   'big_idea',
   'simulation',
   'ingest',
+  'decode',
 ]);
 
 const DEFAULT_RESPONSE = {
