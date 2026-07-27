@@ -8,6 +8,7 @@ import Link from 'next/link';
 
 const MODES: { href: string; label: string; c: string }[] = [
   { href: '/simulation', label: 'Симуляция Макса', c: '#59ffb2' },
+  { href: '/decoder', label: 'ДЕКОДЕР · взлом хэшей', c: '#39ff88' },
   { href: '/neurodance', label: 'Хаос Нейро Дэнс', c: '#a855f7' },
   { href: '/splats', label: 'Брейнданс · 4D сплаты', c: '#be78ff' },
   { href: '/attractor', label: 'Бездна Хаоса ∞', c: '#d9b8ff' },
