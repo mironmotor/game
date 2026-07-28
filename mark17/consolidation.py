@@ -12,9 +12,13 @@ import re
 from collections import defaultdict
 from typing import Any
 
+from mark17.cognitive_physics import friedmann, pauli_exclusion, quantize
 from mark17.events import Event
 
 TOKEN_RE = re.compile(r"[a-zA-Zа-яА-ЯёЁ0-9_]+")
+
+MEMORY_CAPACITY = 2000
+"""Comoving capacity of memory space — the scale against which it expands."""
 STOPWORDS = {
     "and",
     "the",
@@ -155,6 +159,24 @@ class ConsolidationEngine:
         memories = self.hippocampus.recent(limit=limit)
         synapses = self.synapse_graph.get_top_synapses(limit=min(limit, 50))
 
+        # Standard Model: quantise the raw evidence before counting it. Facts
+        # are fermions and obey exclusion — two indistinguishable observations
+        # are one observation, and pretending otherwise inflates every pattern
+        # built on top of them. Relations are bosons and are meant to pile up,
+        # so they pass through untouched.
+        quanta = [
+            quantize(getattr(memory, "event_type", "unknown"), _memory_text(memory),
+                     float(getattr(memory, "importance", 0.5)))
+            for memory in memories
+        ]
+        quanta += [
+            quantize(str(synapse.get("relation_type") or "related_to"), _synapse_text(synapse),
+                     float(synapse.get("weight", 0.4) or 0.4))
+            for synapse in synapses
+        ]
+        distinct = pauli_exclusion(quanta)
+        excluded = len(quanta) - len(distinct)
+
         buckets: dict[str, list[dict[str, Any]]] = defaultdict(list)
         for memory in memories:
             text = _memory_text(memory)
@@ -183,8 +205,23 @@ class ConsolidationEngine:
             for theme, evidence in buckets.items()
             if len(evidence) >= 2
         ]
-        patterns.sort(key=lambda item: (item["strength"], item["evidence_count"]), reverse=True)
-        selected = patterns[:5]
+
+        # Friedmann: memory space expands as it fills, and expansion dilutes.
+        # While the store is sparse, matter density dominates and everything is
+        # kept. Once Λ takes over, the survival threshold rises with the Hubble
+        # rate — the core starts actively forgetting instead of merely aging.
+        cosmos = friedmann(
+            count=len(distinct),
+            capacity=MEMORY_CAPACITY,
+            mean_importance=(
+                sum(q.mass for q in distinct) / len(distinct) if distinct else 0.0
+            ),
+        )
+        survivors = [p for p in patterns if p["strength"] >= cosmos.prune_below]
+        diluted = len(patterns) - len(survivors)
+
+        survivors.sort(key=lambda item: (item["strength"], item["evidence_count"]), reverse=True)
+        selected = survivors[:5]
 
         for pattern in selected:
             self._store_pattern(pattern)
@@ -192,6 +229,13 @@ class ConsolidationEngine:
         return {
             "patterns_created": len(selected),
             "patterns": selected,
+            "cosmology": {
+                **cosmos.to_dict(),
+                "diluted": diluted,
+                "quanta": len(quanta),
+                "distinct_quanta": len(distinct),
+                "pauli_excluded": excluded,
+            },
         }
 
     def _make_pattern(self, theme: str, evidence: list[dict[str, Any]]) -> dict[str, Any]:

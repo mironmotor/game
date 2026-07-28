@@ -8,14 +8,26 @@ follows the core principle: increase the human's contact with reality.
 from __future__ import annotations
 
 import time
+from itertools import permutations
 from typing import Any
 
+from mark17.cognitive_physics import path_integral
 from mark17.principles import REALITY_CONTACT_PRINCIPLE
 
 # MGR levels mirror the game's framework.
 XP = {"MGR-3": 50, "MGR-2": 30, "MGR-1": 10}
 
 SCHEDULE = ["10:00", "12:00", "14:00", "16:00", "17:30", "18:30", "20:00"]
+
+# Activation energy of each task class — what it costs to get moving on one.
+MGR_ENERGY = {"MGR-1": 1.0, "MGR-2": 2.2, "MGR-3": 3.6}
+
+# Coefficients of the action functional. These are the only place the planner's
+# opinions live: everything else is derived by minimising S.
+W_FRICTION = 1.2   # starting heavy costs the most — the day never begins
+W_FATIGUE = 0.5    # the same task costs more the later it is attempted
+W_SWITCH = 0.25    # jumping between task classes burns context
+W_REPEAT = 0.4     # two identical reality checks in a row is one dead step
 
 # Domain detection → tailors the real-world checks.
 DOMAINS: dict[str, tuple[str, ...]] = {
@@ -46,6 +58,43 @@ def _detect_domain(goal_lower: str) -> str:
 def _short(goal: str, limit: int = 60) -> str:
     g = " ".join(goal.split())
     return g if len(g) <= limit else g[: limit - 1].rstrip() + "…"
+
+
+def action(order: tuple[tuple[str, str, str], ...]) -> float:
+    """The action S[path] of one candidate ordering of the day.
+
+    Four terms, each a real cost of doing the work in this sequence:
+
+    * **friction** — the activation energy of whatever is attempted first. A day
+      that opens with the breakthrough usually does not open at all.
+    * **fatigue** — heavy work costs more the later it lands, so the schedule
+      pays for putting MGR-3 at 20:00.
+    * **switching** — moving between task classes burns context.
+    * **repetition** — two identical reality checks back to back is one wasted
+      contact with the world.
+
+    Friction and fatigue pull in opposite directions, which is what makes this
+    worth minimising rather than sorting: the stationary path is the compromise,
+    not either extreme.
+    """
+    n = len(order)
+    if n == 0:
+        return 0.0
+
+    energies = [MGR_ENERGY.get(mgr, 1.0) for mgr, _, _ in order]
+    checks = [check for _, _, check in order]
+
+    friction = energies[0] * W_FRICTION
+    fatigue = sum(
+        energy * (index / max(n - 1, 1)) * W_FATIGUE
+        for index, energy in enumerate(energies)
+    )
+    switching = sum(
+        abs(energies[i] - energies[i - 1]) * W_SWITCH for i in range(1, n)
+    )
+    repetition = sum(W_REPEAT for i in range(1, n) if checks[i] == checks[i - 1])
+
+    return friction + fatigue + switching + repetition
 
 
 def _iso_deadline(now_ts: float, horizon_days: int) -> str:
@@ -85,8 +134,16 @@ def build_plan(goal: str, *, horizon_days: int = 0, now_ts: float | None = None)
         ("MGR-1", f"Сказать одному человеку о цели", REALITY_CHECKS["people"]),
     ]
 
+    # Feynman: the plan is not asserted, it is the path that survives the sum
+    # over histories. Every ordering of the day is a history; each is weighted
+    # by e^(-S/ħ); the stationary-action ordering is what the core actually
+    # schedules. With six steps that is 720 real paths, all of them evaluated.
+    candidates = list(permutations(blueprint))
+    integral = path_integral(candidates, [action(path) for path in candidates])
+    ordering = integral.classical or blueprint
+
     tasks: list[dict[str, Any]] = []
-    for i, (mgr, desc, check) in enumerate(blueprint):
+    for i, (mgr, desc, check) in enumerate(ordering):
         tasks.append(
             {
                 "id": f"plan_{i + 1}",
@@ -101,8 +158,9 @@ def build_plan(goal: str, *, horizon_days: int = 0, now_ts: float | None = None)
         )
 
     total_xp = sum(t["xp"] for t in tasks)
-    # First move = the earliest, smallest logistics step (lowest friction to start).
-    first_move = next((t for t in tasks if t["mgr"] == "MGR-1"), tasks[0])
+    # The first move is now whatever least action put first, not a hand-picked
+    # rule — the lowest-friction opening is derived rather than declared.
+    first_move = tasks[0]
 
     return {
         "ok": True,
@@ -116,5 +174,10 @@ def build_plan(goal: str, *, horizon_days: int = 0, now_ts: float | None = None)
             f"План на цель «{core}»: 1 прорыв, 2 фокус-блока, 3 шага логистики — {total_xp} XP. "
             f"Начни с малого: {first_move['desc']}."
         ),
+        "path_integral": {
+            "paths_summed": len(candidates),
+            "stationary_action": round(integral.stationary_action, 4),
+            "dominance": round(integral.dominance, 4),
+        },
         "principle": REALITY_CONTACT_PRINCIPLE,
     }

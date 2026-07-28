@@ -18,6 +18,7 @@ _ROOT = Path(__file__).resolve().parent.parent
 if str(_ROOT) not in sys.path:
     sys.path.insert(0, str(_ROOT))
 
+from mark17.cognitive_physics import bind
 from mark17.daemon import Mark17Brain
 from mark17.events import Event
 from mark17.critic import evaluate_event
@@ -290,6 +291,14 @@ def normalize(result: dict[str, Any]) -> dict[str, Any]:
     introspection = result.get("introspection")
     if isinstance(introspection, dict):
         normalized["introspection"] = introspection
+    # Cognitive-physics telemetry: Maxwell coupling across the cores and the
+    # Yang-Mills colour state of the council. Both feed the HUD.
+    induction = result.get("induction")
+    if isinstance(induction, dict):
+        normalized["induction"] = induction
+    council = result.get("council")
+    if isinstance(council, dict):
+        normalized["council"] = council
     return normalized
 
 
@@ -397,11 +406,17 @@ def _handle_event(event: Event, args: argparse.Namespace, state_dir: Path) -> di
 
 def _handle_synapse_graph(event: Event, synapse_graph: SynapseGraph) -> dict[str, Any]:
     """Read-only export of the real Max synapse graph for visualization."""
-    try:
-        limit = int(event.payload.get("limit", 400))
-    except (TypeError, ValueError):
-        limit = 400
-    graph = synapse_graph.get_graph(limit=max(1, min(2000, limit)))
+    # With no explicit limit the export reads the holographic boundary, which
+    # scales as 4√N instead of stopping at a hard-coded slice of the bulk.
+    raw_limit = event.payload.get("limit")
+    if raw_limit is None:
+        graph = synapse_graph.get_graph()
+    else:
+        try:
+            limit = int(raw_limit)
+        except (TypeError, ValueError):
+            limit = 400
+        graph = synapse_graph.get_graph(limit=max(1, min(2000, limit)))
     stats = graph.get("stats", {})
     return {
         "ok": True,
@@ -513,12 +528,43 @@ def _gather_self_state(brain: Mark17Brain, synapse_graph: SynapseGraph) -> dict[
         "recent_actions": recent_actions,
         "recent_hints": recent_hints,
         "top_relations": [r for r in top_relations if r],
+        "council": _council_state(brain, mem_stats, len(edges)),
+    }
+
+
+def _council_state(brain: Mark17Brain, mem_stats: dict[str, Any], edge_count: int) -> dict[str, Any]:
+    """Yang-Mills: is the core's council actually bound, or has a member drifted?
+
+    The three subsystems carry colour charge. Separation is how far each one has
+    drifted from active duty — a plasticity layer with no patterns, a memory
+    with nothing in it, a language bridge that is offline. The Cornell potential
+    does the rest: close together the binding barely registers (asymptotic
+    freedom), far apart the linear term climbs without bound (confinement), and
+    a council that is not a colour singlet is one whose verdict is incomplete.
+    """
+    try:
+        patterns = int(brain.plasticity.stats().get("patterns", 0))
+    except Exception:
+        patterns = 0
+
+    # Separation falls as a subsystem accumulates real activity.
+    separations = {
+        "plasticity": 1.0 / (1.0 + patterns / 8.0),
+        "memory": 1.0 / (1.0 + float(mem_stats.get("memories", 0)) / 20.0),
+        "llm": 0.2 if getattr(brain.llm, "available", False) else 2.5,
+    }
+    binding = bind(["plasticity", "memory", "llm"], separations)
+    return {
+        **binding.to_dict(),
+        "separations": {k: round(v, 3) for k, v in separations.items()},
+        "edges": edge_count,
     }
 
 
 def _handle_introspect(event: Event, brain: Mark17Brain, synapse_graph: SynapseGraph) -> dict[str, Any]:
     """Саморефлексия: Max смотрит своё состояние и решает, что делать (LLM или правила)."""
     state = _gather_self_state(brain, synapse_graph)
+    council = state.get("council")
     introspection = generate_introspect(state, brain.llm)
     self_eval = {
         "score": 0.75,
@@ -539,6 +585,8 @@ def _handle_introspect(event: Event, brain: Mark17Brain, synapse_graph: SynapseG
         "next_adaptation": (introspection.get("priorities") or [{}])[0].get("action", ""),
         "self_evaluation": self_eval,
     }
+    if isinstance(council, dict):
+        result["council"] = council
     result["synapses"] = synapse_graph.update_from_event(event, result, self_eval)
     brain.memory.remember(
         Event(type="remember",
