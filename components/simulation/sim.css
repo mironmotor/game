@@ -1,0 +1,119 @@
+.msim-wrap {
+  position: fixed;
+  inset: 0;
+  background: #04030c;
+  overflow: hidden;
+  touch-action: none;
+}
+
+.msim-canvas {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+
+.msim-head {
+  position: absolute;
+  top: max(14px, env(safe-area-inset-top));
+  left: 16px;
+  right: 16px;
+  z-index: 5;
+  pointer-events: none;
+}
+.msim-head h1 {
+  font-family: var(--font-hud-display), sans-serif;
+  font-size: 17px;
+  letter-spacing: 5px;
+  color: rgba(240, 236, 255, 0.9);
+  text-shadow: 0 0 18px rgba(122, 92, 255, 0.7);
+}
+.msim-meta {
+  display: flex;
+  gap: 10px;
+  margin-top: 5px;
+  font-size: 11px;
+  color: rgba(210, 200, 255, 0.55);
+  text-transform: uppercase;
+  letter-spacing: 1px;
+}
+.msim-meta .src { color: rgba(160, 150, 220, 0.7); }
+.msim-meta .src.llm {
+  color: #59ffb2;
+  text-shadow: 0 0 10px rgba(89, 255, 178, 0.6);
+}
+
+.msim-thought {
+  position: absolute;
+  left: 50%;
+  bottom: calc(max(20px, env(safe-area-inset-bottom)) + 74px);
+  transform: translateX(-50%);
+  z-index: 5;
+  max-width: min(560px, 88vw);
+  text-align: center;
+  font-size: 13.5px;
+  line-height: 1.5;
+  color: rgba(232, 226, 255, 0.85);
+  background: rgba(12, 9, 28, 0.55);
+  border: 1px solid rgba(122, 92, 255, 0.25);
+  border-radius: 14px;
+  padding: 9px 16px;
+  backdrop-filter: blur(8px);
+  animation: msim-fade 0.6s ease;
+  pointer-events: none;
+}
+.msim-thought-label {
+  color: #35d0ff;
+  font-weight: 600;
+}
+@keyframes msim-fade {
+  from { opacity: 0; transform: translateX(-50%) translateY(8px); }
+  to { opacity: 1; transform: translateX(-50%) translateY(0); }
+}
+
+.msim-prompt {
+  position: absolute;
+  left: 50%;
+  bottom: max(18px, env(safe-area-inset-bottom));
+  transform: translateX(-50%);
+  z-index: 6;
+  display: flex;
+  gap: 8px;
+  width: min(560px, 92vw);
+}
+.msim-prompt input {
+  flex: 1;
+  background: rgba(12, 9, 28, 0.72);
+  border: 1px solid rgba(122, 92, 255, 0.35);
+  border-radius: 999px;
+  padding: 13px 18px;
+  color: #eee;
+  font-size: 14px;
+  outline: none;
+  backdrop-filter: blur(10px);
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+.msim-prompt input:focus {
+  border-color: rgba(53, 208, 255, 0.7);
+  box-shadow: 0 0 0 3px rgba(53, 208, 255, 0.14);
+}
+.msim-prompt input::placeholder { color: rgba(210, 200, 255, 0.35); }
+.msim-prompt button {
+  border: none;
+  border-radius: 999px;
+  padding: 0 22px;
+  background: linear-gradient(135deg, #7a5cff, #35d0ff);
+  color: #06121f;
+  font-weight: 700;
+  font-size: 13px;
+  letter-spacing: 1px;
+  cursor: pointer;
+  transition: filter 0.15s;
+}
+.msim-prompt button:hover:not(:disabled) { filter: brightness(1.1); }
+.msim-prompt button:disabled { opacity: 0.6; cursor: wait; }
+
+@media (max-width: 640px) {
+  .msim-head h1 { font-size: 14px; letter-spacing: 4px; }
+  .msim-thought { font-size: 12.5px; }
+}

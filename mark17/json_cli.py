@@ -60,6 +60,10 @@ from mark17.neural_graph import ClusteredNeuralGraph, TARGET_NEURAL_SYNAPSES
 from mark17.curiosity import CuriosityLedger
 from mark17.orchestrator import classify as classify_intent
 from mark17.source_memory import SourceMemory
+from mark17.big_idea import generate as generate_big_idea
+from mark17.dream_sim import generate as generate_dream_sim
+from mark17.ingest import generate as generate_ingest, split_stream
+from mark17.decoder import generate as generate_decode
 from mark17.ultimate_core import MAX_ULTIMATE_TARGET_SYNAPSES, bootstrap_ultimate_core
 from mark17.web_sense import (
     WEB_SYNAPSE_TARGET,
@@ -117,6 +121,11 @@ ALLOWED_EVENTS = frozenset(
         "cluster",
         "health",
         "chrono_day",
+        # Визуальные режимы GAME (Воронка, Симуляция, Инбокс, ДЕКОДЕР).
+        "big_idea",
+        "simulation",
+        "ingest",
+        "decode",
     }
 )
 
@@ -152,6 +161,20 @@ def _as_event(data: dict[str, Any]) -> Event:
     elif event_type == "terminal_error":
         line = data.get("line") or data.get("message") or data.get("text") or ""
         payload["line"] = str(line)
+    elif event_type == "big_idea":
+        for key in ("domain", "audience", "trend", "twist"):
+            payload[key] = str(data.get(key) or "")
+    elif event_type == "simulation":
+        payload["prompt"] = str(data.get("prompt") or data.get("text") or data.get("message") or "")
+    elif event_type == "decode":
+        payload["target"] = str(data.get("target") or data.get("prompt") or data.get("text") or "")
+    elif event_type == "ingest":
+        payload["interest"] = str(data.get("interest") or data.get("prompt") or "")
+        raw_items = data.get("items")
+        if isinstance(raw_items, list):
+            payload["items"] = [str(x) for x in raw_items]
+        else:
+            payload["items"] = split_stream(str(data.get("stream") or data.get("text") or ""))
 
     return Event(
         type=event_type,
@@ -500,6 +523,114 @@ def _handle_missions(event: Event) -> dict[str, Any]:
     else:
         snap = _m.snapshot()
     return {**base, "ok": True, "missions": snap}
+
+
+def _handle_big_idea(event: Event, brain: Mark17Brain, synapse_graph: SynapseGraph) -> dict[str, Any]:
+    """Воронка: Big Idea через ядро (LLM моста или детерминированный фолбэк)."""
+    seed = {k: str(event.payload.get(k) or "") for k in ("domain", "audience", "trend", "twist")}
+    idea = generate_big_idea(seed, brain.llm)
+    llm_ok = idea["source"].startswith("llm")
+    self_eval = {"score": 0.8, "reason": f"big idea via {idea['source']}",
+                 "store_memory": True, "reinforce": "big_idea"}
+    result: dict[str, Any] = {
+        "ok": True, "event_type": event.type, "route": "big_idea", "big_idea": idea,
+        "memory": {"hint": idea["idea"].get("tagline", "")},
+        "plasticity": {"confidence": 0.9 if llm_ok else 0.6, "action": "big_idea", "learned": True},
+        "llm": {"status": "ok" if llm_ok else "skipped", "text": f"source={idea['source']}", "latency_ms": 0.0},
+        "next_adaptation": idea["idea"].get("firstStep", ""),
+        "self_evaluation": self_eval,
+    }
+    result["synapses"] = synapse_graph.update_from_event(event, result, self_eval)
+    brain.memory.remember(
+        Event(type="remember", payload={"note": idea["idea"].get("tagline", ""), "seed": seed,
+                                        "reinforce": "big_idea"}, source="funnel"),
+        hint=idea["idea"].get("tagline", ""), action="big_idea",
+    )
+    brain.plasticity.save()
+    return result
+
+
+def _handle_simulation(event: Event, brain: Mark17Brain, synapse_graph: SynapseGraph) -> dict[str, Any]:
+    """Симуляция Макса: промпт → параметры 3D-мира частиц."""
+    prompt = str(event.payload.get("prompt") or "")
+    sim = generate_dream_sim(prompt, brain.llm)
+    llm_ok = sim["source"].startswith("llm")
+    self_eval = {"score": 0.75, "reason": f"simulation via {sim['source']}",
+                 "store_memory": bool(prompt), "reinforce": "simulation"}
+    result: dict[str, Any] = {
+        "ok": True, "event_type": event.type, "route": "simulation", "sim": sim,
+        "memory": {"hint": sim.get("thought", "")},
+        "plasticity": {"confidence": 0.85 if llm_ok else 0.6, "action": "simulation", "learned": True},
+        "llm": {"status": "ok" if llm_ok else "skipped", "text": f"source={sim['source']}", "latency_ms": 0.0},
+        "next_adaptation": sim.get("thought", ""),
+        "self_evaluation": self_eval,
+    }
+    result["synapses"] = synapse_graph.update_from_event(event, result, self_eval)
+    if prompt:
+        brain.memory.remember(
+            Event(type="remember", payload={"note": prompt, "reinforce": "simulation"}, source="simulation"),
+            hint=sim.get("thought", ""), action="simulation",
+        )
+    brain.plasticity.save()
+    return result
+
+
+def _handle_decode(event: Event, brain: Mark17Brain, synapse_graph: SynapseGraph) -> dict[str, Any]:
+    """ДЕКОДЕР: параметры визуальной сессии взлома хэшей."""
+    target = str(event.payload.get("target") or "")
+    decode = generate_decode(target, brain.llm)
+    llm_ok = decode["source"].startswith("llm")
+    self_eval = {"score": 0.72, "reason": f"decode session via {decode['source']}",
+                 "store_memory": bool(target), "reinforce": "decode"}
+    result: dict[str, Any] = {
+        "ok": True, "event_type": event.type, "route": "decode", "decode": decode,
+        "memory": {"hint": decode.get("thought", "")},
+        "plasticity": {"confidence": 0.8 if llm_ok else 0.6, "action": "decode", "learned": True},
+        "llm": {"status": "ok" if llm_ok else "skipped", "text": f"source={decode['source']}", "latency_ms": 0.0},
+        "next_adaptation": decode.get("thought", ""),
+        "self_evaluation": self_eval,
+    }
+    result["synapses"] = synapse_graph.update_from_event(event, result, self_eval)
+    if target:
+        brain.memory.remember(
+            Event(type="remember", payload={"note": f"decode: {target}", "reinforce": "decode"}, source="decoder"),
+            hint=decode.get("thought", ""), action="decode",
+        )
+    brain.plasticity.save()
+    return result
+
+
+def _handle_ingest(event: Event, brain: Mark17Brain, synapse_graph: SynapseGraph) -> dict[str, Any]:
+    """Инбокс Макса: фильтр потока по промпту; важное → память + синапсы."""
+    interest = str(event.payload.get("interest") or "")
+    items = event.payload.get("items")
+    if not isinstance(items, list):
+        items = []
+    ingest = generate_ingest(interest, [str(x) for x in items], brain.llm)
+    llm_ok = ingest["source"].startswith("llm")
+    for entry in ingest["kept"]:
+        brain.memory.remember(
+            Event(type="remember",
+                  payload={"note": entry["text"], "interest": interest,
+                           "score": entry["score"], "reinforce": "ingest"},
+                  source="inbox"),
+            hint=entry["text"][:80], action="ingest",
+        )
+    self_eval = {"score": 0.7,
+                 "reason": f"ingest kept {ingest['kept_count']}/{ingest['total']} via {ingest['source']}",
+                 "store_memory": ingest["kept_count"] > 0, "reinforce": "ingest"}
+    result: dict[str, Any] = {
+        "ok": True, "event_type": event.type, "route": "ingest", "ingest": ingest,
+        "memory": {"hint": f"важного: {ingest['kept_count']} из {ingest['total']}"},
+        "plasticity": {"confidence": 0.85 if llm_ok else 0.6, "action": "ingest",
+                       "learned": ingest["kept_count"] > 0},
+        "llm": {"status": "ok" if llm_ok else "skipped", "text": f"source={ingest['source']}", "latency_ms": 0.0},
+        "next_adaptation": f"В память ушло {ingest['kept_count']} важных фрагментов.",
+        "self_evaluation": self_eval,
+    }
+    result["synapses"] = synapse_graph.update_from_event(event, result, self_eval)
+    brain.plasticity.save()
+    return result
 
 
 def _handle_cluster(event: Event) -> dict[str, Any]:
@@ -2401,6 +2532,11 @@ def normalize(result: dict[str, Any]) -> dict[str, Any]:
     chrono = result.get("chrono")
     if isinstance(chrono, dict):
         normalized["chrono"] = chrono
+    # Визуальные режимы GAME.
+    for key in ("big_idea", "sim", "decode", "ingest"):
+        value = result.get(key)
+        if isinstance(value, dict):
+            normalized[key] = value
     return normalized
 
 
@@ -2678,6 +2814,15 @@ def _handle_event(event: Event, args: argparse.Namespace, stores: Mark17Stores) 
         return _handle_missions(event)
     if event.type == "cluster":
         return _handle_cluster(event)
+    # Визуальные режимы GAME.
+    if event.type == "big_idea":
+        return _handle_big_idea(event, brain, synapse_graph)
+    if event.type == "simulation":
+        return _handle_simulation(event, brain, synapse_graph)
+    if event.type == "decode":
+        return _handle_decode(event, brain, synapse_graph)
+    if event.type == "ingest":
+        return _handle_ingest(event, brain, synapse_graph)
     if event.type == "graph_stats":
         return _handle_graph_stats(event, state_dir, synapse_graph)
     if event.type == "system_scales":

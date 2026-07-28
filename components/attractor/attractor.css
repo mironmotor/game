@@ -1,0 +1,52 @@
+/* 3D Хаос-аттрактор */
+.at-screen { position: fixed; inset: 0; display: flex; flex-direction: column; background: #08081a; color: #e7dcff; font-family: var(--font-hud-mono, monospace); }
+
+.at-bar {
+  display: flex; align-items: center; gap: 10px; padding: 10px 16px; z-index: 3;
+  border-bottom: 1px solid rgba(200,160,255,0.18); background: rgba(8,8,26,0.85); backdrop-filter: blur(6px);
+}
+.at-logo { display: grid; place-items: center; width: 34px; height: 34px; border-radius: 50%; border: 1px solid rgba(200,160,255,0.5); color: #c9a0ff; box-shadow: 0 0 14px rgba(200,160,255,0.4); }
+.at-title { font-family: var(--font-hud-display, sans-serif); letter-spacing: 0.14em; font-size: 13px; color: #d9b8ff; }
+.at-formula { font-size: 10px; color: rgba(210,180,255,0.6); }
+.at-stats { margin-left: auto; display: flex; gap: 16px; font-size: 12px; color: rgba(215,190,255,0.8); }
+.at-stats b { color: #d9b8ff; }
+
+.at-canvas-wrap { position: relative; flex: 1; min-height: 0; overflow: hidden; }
+.at-canvas-wrap canvas { display: block; width: 100%; height: 100%; cursor: grab; }
+.at-canvas-wrap canvas:active { cursor: grabbing; }
+
+.at-panel {
+  position: absolute; top: 14px; right: 14px; width: 210px; z-index: 4;
+  background: rgba(10,8,26,0.78); backdrop-filter: blur(8px);
+  border: 1px solid rgba(200,160,255,0.22); border-radius: 12px; padding: 12px 14px;
+  box-shadow: 0 8px 30px rgba(0,0,0,0.4); font-size: 11px;
+}
+.at-panel-title { font-family: var(--font-hud-display, sans-serif); letter-spacing: 0.16em; font-size: 10px; color: #c9a0ff; margin-bottom: 8px; }
+.at-tabs { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin-bottom: 10px; }
+.at-tabs button {
+  border: 1px solid rgba(200,160,255,0.25); background: rgba(200,160,255,0.06); color: #d9c7ff;
+  padding: 6px 4px; border-radius: 8px; font-size: 11px; font-family: inherit; cursor: pointer;
+}
+.at-tabs button.on { background: rgba(200,160,255,0.22); border-color: #c9a0ff; color: #fff; }
+
+.at-ctl { margin-top: 10px; }
+.at-ctl-row { display: flex; justify-content: space-between; }
+.at-ctl-row span { color: rgba(210,185,255,0.7); }
+.at-ctl-row b { color: #eadfff; }
+.at-ctl input[type=range] { width: 100%; margin-top: 4px; accent-color: #c9a0ff; }
+
+.at-actions { display: flex; gap: 8px; margin-top: 12px; }
+.at-actions button {
+  flex: 1; border: 1px solid rgba(200,160,255,0.3); background: rgba(200,160,255,0.08); color: #e7dcff;
+  padding: 7px 6px; border-radius: 8px; font-size: 11px; font-family: inherit; cursor: pointer;
+}
+.at-actions button:hover { background: rgba(200,160,255,0.18); }
+
+.at-legend { position: absolute; left: 14px; bottom: 14px; z-index: 4; width: 180px; font-size: 10px; color: rgba(210,185,255,0.7); }
+.at-legend-title { letter-spacing: 0.12em; margin-bottom: 4px; }
+.at-legend-bar { height: 8px; border-radius: 4px; background: linear-gradient(90deg, #ffffff, #c9a0ff, #ff7de0); }
+.at-legend-row { display: flex; justify-content: space-between; margin-top: 2px; }
+
+.at-foot { padding: 8px 16px; font-size: 10px; color: rgba(210,185,255,0.5); text-align: center; border-top: 1px solid rgba(200,160,255,0.15); z-index: 3; }
+
+@media (max-width: 720px) { .at-panel { width: 168px; } }
