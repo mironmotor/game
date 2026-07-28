@@ -38,7 +38,7 @@ from mark17.cognitive_physics import (
 )
 from mark17.critic import evaluate_event
 from mark17.events import Event
-from mark17.fluid_flow import FluidHud
+from mark17.fluid_flow import FluidHud, telemetry_from_result
 from mark17.planner import action, build_plan
 from mark17.vector_memory import VectorMemory
 
@@ -282,6 +282,51 @@ def test_hud_channels_are_independent():
     hud.step({"confidence": 1.0, "route": 1.0})
     # route is the thinner channel, so it must travel further in one frame.
     assert hud.channels["route"].velocity > hud.channels["confidence"].velocity
+
+
+def test_telemetry_extracts_every_channel():
+    telemetry = telemetry_from_result(
+        {
+            "confidence": 0.8,
+            "route": "llm",
+            "self_evaluation": {"score": 0.6},
+            "raw": {"decision": {"superposition": {"llm": 0.9, "plasticity": 0.1},
+                                 "coherence": 0.3}},
+            "synapses": {"updated": 4},
+        }
+    )
+    assert telemetry["confidence"] == 0.8
+    assert telemetry["score"] == 0.6
+    assert telemetry["route"] == 0.9, "the chosen route's own probability"
+    assert telemetry["coherence"] == 0.3
+    assert telemetry["synapses"] == 0.5
+
+
+def test_telemetry_survives_a_malformed_result():
+    # The bridge is reachable from the internet; a HUD must not be the thing
+    # that raises on a half-built result.
+    for broken in ({}, {"confidence": None}, {"raw": "nonsense"},
+                   {"self_evaluation": []}, {"synapses": {"updated": "many"}},
+                   {"confidence": float("nan")}):
+        telemetry = telemetry_from_result(broken)
+        assert all(0.0 <= v <= 1.0 for v in telemetry.values()), broken
+
+
+def test_telemetry_ignores_a_route_absent_from_the_superposition():
+    telemetry = telemetry_from_result(
+        {"route": "memory", "raw": {"decision": {"superposition": {"llm": 1.0}}}}
+    )
+    assert "route" not in telemetry
+
+
+def test_hud_flows_across_consecutive_events():
+    # Continuity is the whole reason the stream lives in the long-running
+    # bridge: each event is the next frame, so a step input is approached
+    # gradually instead of being re-rendered from scratch every time.
+    hud = FluidHud()
+    seen = [hud.step({"confidence": 1.0})["values"]["confidence"] for _ in range(4)]
+    assert seen == sorted(seen)
+    assert seen[0] < seen[-1] < 1.0
 
 
 # --- integration: the physics is actually wired in -------------------------

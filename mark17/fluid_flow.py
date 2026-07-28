@@ -28,21 +28,75 @@ from mark17.cognitive_physics import (
     flow_step,
 )
 
-__all__ = ["ChannelState", "FluidHud", "CHANNEL_VISCOSITY"]
+__all__ = [
+    "ChannelState",
+    "FluidHud",
+    "CHANNEL_VISCOSITY",
+    "telemetry_from_result",
+]
 
 
 CHANNEL_VISCOSITY: dict[str, float] = {
     # Confidence swings hardest and reads worst when it jitters — thickest.
     "confidence": 0.70,
+    # The self-evaluation score is read the same way, and deserves the same.
+    "score": 0.70,
     # Energy and focus are human-facing gauges; they should glide.
     "energy": 0.60,
     "focus": 0.60,
     # Route probability should stay responsive: it is a decision, not a mood.
     "route": 0.25,
+    # Coherence reports how close a call was; latency here would misreport it.
+    "coherence": 0.30,
     # Counters only ever ratchet; light damping is enough to avoid stepping.
     "memories": 0.35,
     "synapses": 0.35,
 }
+
+BUSY_SYNAPSE_TICK = 8.0
+"""Synapse updates in one event that counts as a full-scale reading."""
+
+
+def telemetry_from_result(result: dict[str, Any]) -> dict[str, float]:
+    """Pick the renderable channels out of one normalised event result.
+
+    Kept here rather than in the server because the HUD owns what a HUD shows,
+    and because this way the whole display path stays importable without
+    pulling in the core's numpy dependency.
+    """
+    telemetry: dict[str, float] = {"confidence": _as_float(result.get("confidence"))}
+
+    evaluation = result.get("self_evaluation")
+    if isinstance(evaluation, dict):
+        telemetry["score"] = _as_float(evaluation.get("score"))
+
+    raw = result.get("raw")
+    decision = raw.get("decision") if isinstance(raw, dict) else None
+    if isinstance(decision, dict):
+        superposition = decision.get("superposition")
+        route = str(result.get("route") or "")
+        if isinstance(superposition, dict) and route in superposition:
+            # How strongly the chosen route actually won its own collapse.
+            telemetry["route"] = _as_float(superposition[route])
+        if isinstance(decision.get("coherence"), (int, float)):
+            telemetry["coherence"] = _as_float(decision["coherence"])
+
+    synapses = result.get("synapses")
+    if isinstance(synapses, dict):
+        updated = _as_float(synapses.get("updated"), clamped=False)
+        telemetry["synapses"] = min(1.0, updated / BUSY_SYNAPSE_TICK)
+
+    return telemetry
+
+
+def _as_float(value: Any, *, clamped: bool = True) -> float:
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return 0.0
+    if number != number:  # NaN
+        return 0.0
+    return clamp(number) if clamped else max(0.0, number)
 
 DEFAULT_VISCOSITY = VISCOSITY
 
