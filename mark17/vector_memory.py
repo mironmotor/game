@@ -2,6 +2,25 @@
 
 This is a lightweight local prototype: no external APIs, no transformers,
 just deterministic token hashing with a small domain synonym layer.
+
+Recall is relativistic. Einstein's field equation
+
+    G_uv + Lambda * g_uv = (8 pi G / c^4) * T_uv
+
+says mass-energy curves the metric. Here *importance is mass*: an important
+memory curves the recall metric around itself, so a query that would have
+missed it is bent toward it — gravitational lensing. Two consequences fall
+straight out of the same geometry and both are load-bearing:
+
+  * magnification — a query passing near a massive memory is amplified by the
+    point-mass lens formula, so heavy memories catch queries that only
+    glance at them;
+  * time dilation — proper time runs slower deep in a gravity well, so
+    important memories age more slowly than trivial ones. This is what stops
+    a critical failure from decaying at the same rate as a heartbeat.
+
+Lambda (the cosmological constant) supplies the opposing term: space between
+memories expands, gently pushing everything apart as it gets older.
 """
 
 from __future__ import annotations
@@ -20,6 +39,19 @@ from mark17.events import Event
 
 VECTOR_DIM = 128
 TOKEN_RE = re.compile(r"[a-zA-Zа-яА-ЯёЁ0-9_]+")
+
+# --- Relativistic recall constants -----------------------------------------
+# Coupling between importance (mass) and the curvature of the recall metric.
+GRAVITY_G = 0.18
+# Signal speed through memory space. Kept at 1 so the formulas stay readable.
+LIGHT_C = 1.0
+# Cosmological constant: slow expansion of the space between memories.
+LAMBDA = 0.015
+# Lensing cannot amplify without bound — the weak-field approximation breaks
+# down long before this, and inside the horizon the memory simply captures.
+MAX_MAGNIFICATION = 4.0
+# Half-life of an unimportant memory's relevance, in seconds (one week).
+RECALL_HALF_LIFE = 7 * 86400.0
 
 SYNONYM_GROUPS = {
     "memory": {
@@ -94,6 +126,9 @@ class VectorHit:
     reinforce: str
     importance: float
     score: float
+    magnification: float = 1.0
+    dilation: float = 1.0
+    horizon: bool = False
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -105,6 +140,9 @@ class VectorHit:
             "reinforce": self.reinforce,
             "importance": round(self.importance, 3),
             "score": round(self.score, 4),
+            "magnification": round(self.magnification, 4),
+            "dilation": round(self.dilation, 4),
+            "horizon": self.horizon,
         }
 
 
@@ -146,6 +184,44 @@ def cosine_similarity(left: list[float], right: list[float]) -> float:
     if not left or not right or len(left) != len(right):
         return 0.0
     return sum(a * b for a, b in zip(left, right))
+
+
+def schwarzschild_radius(mass: float) -> float:
+    """r_s = 2GM/c^2 — inside this radius the memory captures the query."""
+    return 2.0 * GRAVITY_G * max(0.0, mass) / (LIGHT_C**2)
+
+
+def einstein_radius(mass: float) -> float:
+    """theta_E = sqrt(4GM/c^2) — the natural angular scale of the lens."""
+    return math.sqrt(4.0 * GRAVITY_G * max(0.0, mass) / (LIGHT_C**2))
+
+
+def magnification(mass: float, impact: float) -> float:
+    """Point-mass lens magnification: mu = (u^2 + 2) / (u * sqrt(u^2 + 4)).
+
+    ``impact`` is the impact parameter — how far the query's geodesic passes
+    from the memory (1 - semantic similarity). As the query moves away the
+    magnification tends to 1 and the lens stops mattering, which is exactly
+    the behaviour we want: light memories never distort recall.
+    """
+    theta_e = einstein_radius(mass)
+    if theta_e <= 0.0:
+        return 1.0
+    u = max(impact / theta_e, 1e-3)
+    mu = (u * u + 2.0) / (u * math.sqrt(u * u + 4.0))
+    return min(mu, MAX_MAGNIFICATION)
+
+
+def time_dilation(mass: float, impact: float) -> float:
+    """Gravitational time dilation: dtau/dt = sqrt(1 - r_s/r).
+
+    Returns the fraction of coordinate time that elapses as *proper* time for
+    a memory this deep in its own gravity well. A heavy memory close to the
+    query ages slowly; a trivial one ages at wall-clock speed.
+    """
+    r_s = schwarzschild_radius(mass)
+    r = max(impact, r_s * 1.0001, 1e-3)
+    return math.sqrt(max(0.0, 1.0 - r_s / r))
 
 
 def importance_for_event(event: Event, evaluation: dict[str, Any] | None = None) -> float:
@@ -281,7 +357,20 @@ class VectorMemory:
             )
             return int(cur.lastrowid)
 
-    def recall(self, query: str, *, limit: int = 3) -> list[VectorHit]:
+    def recall(
+        self,
+        query: str,
+        *,
+        limit: int = 3,
+        relativistic: bool = True,
+        now: float | None = None,
+    ) -> list[VectorHit]:
+        """Recall along curved geodesics.
+
+        With ``relativistic=False`` this is the flat-space baseline: pure
+        semantic similarity weighted by importance, with no lensing and no
+        ageing. That path is kept so the curvature can be measured against it.
+        """
         query = query.strip()
         if not query:
             return []
@@ -290,6 +379,7 @@ class VectorMemory:
         if not any(query_vector):
             return []
         query_concepts = _concepts(query)
+        now = time.time() if now is None else now
 
         with self._conn() as c:
             rows = c.execute(
@@ -318,6 +408,31 @@ class VectorMemory:
                 row_concepts = _concepts(str(row["text"]))
                 overlap = len(query_concepts & row_concepts) / len(query_concepts)
                 score += overlap * importance * 0.25
+
+            mu = 1.0
+            dilation = 1.0
+            horizon = False
+            if relativistic:
+                # Impact parameter: how far the query's geodesic passes from
+                # this memory. A perfect match passes straight through it.
+                impact = max(1e-3, 1.0 - semantic)
+                mu = magnification(importance, impact)
+                dilation = time_dilation(importance, impact)
+                horizon = impact <= schwarzschild_radius(importance)
+
+                age = max(0.0, now - float(row["timestamp"]))
+                # The memory ages by its own proper time, not ours.
+                proper_age = age * dilation
+                recency = math.exp(-proper_age * math.log(2.0) / RECALL_HALF_LIFE)
+                # Lambda term: space between memories expands with age.
+                recency /= 1.0 + LAMBDA * (age / RECALL_HALF_LIFE)
+
+                score *= mu * (0.55 + 0.45 * recency)
+                if horizon:
+                    # Nothing escapes from inside the horizon: this memory
+                    # owns the query outright.
+                    score = max(score, importance)
+
             if score <= 0.05:
                 continue
             hits.append(
@@ -330,6 +445,9 @@ class VectorMemory:
                     reinforce=str(row["reinforce"])[:180],
                     importance=importance,
                     score=score,
+                    magnification=mu,
+                    dilation=dilation,
+                    horizon=horizon,
                 )
             )
 

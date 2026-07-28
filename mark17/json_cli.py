@@ -24,7 +24,7 @@ from mark17.critic import evaluate_event
 from mark17.responder import compose_answer
 from mark17.vector_memory import VectorMemory
 from mark17.synapse_graph import SynapseGraph
-from mark17.consolidation import ConsolidationEngine
+from mark17.consolidation import ConsolidationEngine, SCALE_REFERENCE, friedmann
 from mark17.voice_state import VoiceProfiles, process_voice_event
 from mark17.planner import build_plan
 from mark17.big_idea import generate as generate_big_idea
@@ -32,6 +32,8 @@ from mark17.dream_sim import generate as generate_dream_sim
 from mark17.ingest import generate as generate_ingest, split_stream
 from mark17.decoder import generate as generate_decode
 from mark17.introspect import generate as generate_introspect
+from mark17.cognitive_physics import CoreField, snapshot as physics_snapshot
+from mark17.fluid_flow import solve as solve_flow, state_from_core
 
 ALLOWED_EVENTS = frozenset(
     {
@@ -50,6 +52,7 @@ ALLOWED_EVENTS = frozenset(
         "ingest",
         "decode",
         "introspect",
+        "physics",
     }
 )
 
@@ -218,6 +221,58 @@ def _recent_consolidated_patterns(brain: Mark17Brain, *, limit: int = 5) -> list
     return patterns
 
 
+def _attach_physics(
+    event: Event,
+    result: dict[str, Any],
+    evaluation: dict[str, Any] | None,
+    brain: Mark17Brain,
+    synapse_graph: SynapseGraph,
+    *,
+    previous_field: CoreField | None = None,
+) -> None:
+    """Attach the cognitive-physics reading and the HUD flow to a result.
+
+    Read-only with respect to the core: it measures, it does not change state.
+    """
+    # normalize() computes this too, but the physics needs it before that.
+    result["confidence"] = _confidence(result)
+
+    try:
+        memory_count = int(brain.memory.stats().get("memories") or 0)
+    except Exception:
+        memory_count = 0
+
+    try:
+        horizon = synapse_graph.horizon()
+    except Exception:
+        horizon = {"area": 0, "volume": 0, "edges": 0}
+
+    physics = physics_snapshot(event, result, evaluation, previous_field=previous_field)
+    physics["holography"] = {
+        key: horizon.get(key)
+        for key in (
+            "area",
+            "volume",
+            "edges",
+            "mass",
+            "entropy",
+            "temperature",
+            "information_bits",
+            "compression",
+            "equation",
+        )
+    }
+    result["physics"] = physics
+
+    result["flow"] = solve_flow(
+        state_from_core(
+            result,
+            memory_count=memory_count,
+            synapse_count=int(horizon.get("edges") or 0),
+        )
+    )
+
+
 def _merge_memory(
     result: dict[str, Any],
     *,
@@ -290,6 +345,12 @@ def normalize(result: dict[str, Any]) -> dict[str, Any]:
     introspection = result.get("introspection")
     if isinstance(introspection, dict):
         normalized["introspection"] = introspection
+    physics = result.get("physics")
+    if isinstance(physics, dict):
+        normalized["physics"] = physics
+    flow = result.get("flow")
+    if isinstance(flow, dict):
+        normalized["flow"] = flow
     return normalized
 
 
@@ -355,6 +416,8 @@ def _handle_event(event: Event, args: argparse.Namespace, state_dir: Path) -> di
         return _handle_decode(event, brain, synapse_graph)
     if event.type == "introspect":
         return _handle_introspect(event, brain, synapse_graph)
+    if event.type == "physics":
+        return _handle_physics(event, brain, vector_memory, synapse_graph)
     if event.type == "ingest":
         return _handle_ingest(event, brain, synapse_graph)
     if event.type == "synapse_graph":
@@ -371,6 +434,7 @@ def _handle_event(event: Event, args: argparse.Namespace, state_dir: Path) -> di
     result["self_evaluation"] = evaluation.to_dict()
     result["next_adaptation"] = _next_adaptation(result)
     result["synapses"] = synapse_graph.update_from_event(event, result, result["self_evaluation"])
+    _attach_physics(event, result, result["self_evaluation"], brain, synapse_graph)
     answer = compose_answer(event, result, result["self_evaluation"])
     if answer:
         result["answer"] = answer
@@ -547,6 +611,96 @@ def _handle_introspect(event: Event, brain: Mark17Brain, synapse_graph: SynapseG
         hint=introspection.get("focus", ""), action="introspect",
     )
     brain.plasticity.save()
+    return result
+
+
+def _handle_physics(
+    event: Event,
+    brain: Mark17Brain,
+    vector_memory: VectorMemory,
+    synapse_graph: SynapseGraph,
+) -> dict[str, Any]:
+    """Read-only probe of the core's own physics — all ten equations at once.
+
+    Nothing here mutates the core: no plasticity step, no LLM call, no new
+    memories, no synapse writes. It measures and reports.
+    """
+    query = str(event.payload.get("query") or event.payload.get("text") or "").strip()
+    goal = str(event.payload.get("goal") or "").strip()
+
+    probe = Event(type="system_state", payload=dict(event.payload), source="physics")
+    # meta.decide() is a pure lookup — it does not step the network.
+    decision = brain.meta.decide(probe)
+
+    state = _gather_self_state(brain, synapse_graph)
+    try:
+        horizon = synapse_graph.horizon()
+    except Exception:
+        horizon = {"area": 0, "volume": 0, "edges": 0, "mass": 0.0}
+
+    result: dict[str, Any] = {
+        "ok": True,
+        "event_type": event.type,
+        "route": "physics",
+        "decision": {
+            "reason": decision.reason,
+            "confidence": decision.confidence,
+            "pattern_id": decision.pattern_id,
+            "superposition": decision.superposition,
+        },
+        "plasticity": {
+            "confidence": decision.confidence,
+            "action": "measure",
+            "learned": False,
+        },
+        "memory": {
+            "hint": f"{state['memories']} memories / {horizon.get('volume', 0)} nodes",
+        },
+        "llm": {"status": "skipped"},
+    }
+
+    evaluation = evaluate_event(probe, result)
+    result["self_evaluation"] = evaluation.to_dict()
+
+    _attach_physics(probe, result, result["self_evaluation"], brain, synapse_graph)
+
+    # Einstein: show the curvature by comparing against flat-space recall.
+    if query:
+        curved = vector_memory.recall(query, limit=3)
+        flat = vector_memory.recall(query, limit=3, relativistic=False)
+        result["physics"]["einstein"] = {
+            "query": query,
+            "curved": [hit.to_dict() for hit in curved],
+            "flat": [hit.to_dict() for hit in flat],
+            "reordered": [hit.id for hit in curved] != [hit.id for hit in flat],
+            "equation": "G_uv + Lambda g_uv = (8 pi G / c^4) T_uv",
+        }
+
+    # Friedmann: measure the memory universe without consolidating it.
+    volume = max(1, int(horizon.get("volume") or 0))
+    edges = int(horizon.get("edges") or 0)
+    mass = float(horizon.get("mass") or 0.0)
+    boundary = horizon.get("boundary") or []
+    total_degree = max(1, 2 * edges)
+    concentration = sum(int(n.get("degree") or 0) for n in boundary[:3]) / total_degree
+    result["physics"]["friedmann"] = friedmann(
+        0.5 + 0.5 * min(1.0, int(state.get("memories") or 0) / SCALE_REFERENCE),
+        min(1.5, mass / volume),
+        (concentration - 0.5) * 0.5,
+    )
+
+    # Feynman: if a goal came in, expose the full sum over histories for it.
+    if goal:
+        plan = build_plan(goal)
+        result["physics"]["feynman"] = {
+            "goal": goal,
+            "classical_path": plan.get("path"),
+            "action": plan.get("action"),
+            "paths": plan.get("paths", []),
+            "equation": "<x_f|x_i> = Integral D[x] exp(i S[x] / hbar)",
+        }
+
+    result["next_adaptation"] = result["physics"]["yang_mills"]["note"]
     return result
 
 

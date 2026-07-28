@@ -21,6 +21,7 @@ const ALLOWED_EVENTS = new Set([
   'ingest',
   'decode',
   'introspect',
+  'physics',
 ]);
 
 const DEFAULT_RESPONSE = {
