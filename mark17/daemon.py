@@ -21,6 +21,7 @@ if str(_ROOT) not in sys.path:
     sys.path.insert(0, str(_ROOT))
 
 from mark17.cli_format import emit
+from mark17.cognitive_physics import couple_fields
 from mark17.events import Event, parse_event_line, parse_shorthand
 from mark17.hippocampus import Hippocampus
 from mark17.llm_bridge import LlmBridge
@@ -48,6 +49,11 @@ class Mark17Brain:
             self.plasticity,
             plasticity_threshold=plasticity_threshold,
         )
+        # Maxwell: the three cores are coupled fields. Each one's change induces
+        # EMF in the others, so they co-evolve instead of taking turns. This is
+        # the previous tick's field strengths — the only state the coupling needs.
+        self._fields: dict[str, float] = {"plasticity": 0.0, "memory": 0.0, "llm": 0.0}
+        self._last_tick: float = time.time()
 
     def ready_payload(self) -> dict:
         return {
@@ -60,6 +66,56 @@ class Mark17Brain:
         }
 
     def handle(self, event: Event) -> dict:
+        """Route the event, then let the three cores induce on each other."""
+        out = self._route_event(event)
+        out["induction"] = self._induce(out)
+        return out
+
+    def _field_strengths(self, out: dict) -> dict[str, float]:
+        """Read the instantaneous strength of each core field from one run."""
+        plasticity = out.get("plasticity")
+        plasticity_field = 0.0
+        if isinstance(plasticity, dict):
+            plasticity_field = float(plasticity.get("confidence") or 0.0)
+
+        memory = out.get("memory")
+        memory_field = 0.0
+        if isinstance(memory, dict):
+            hits = memory.get("hits")
+            if isinstance(hits, list) and hits:
+                memory_field = max(float(h.get("score") or 0.0) for h in hits)
+
+        llm = out.get("llm")
+        llm_field = 0.0
+        if isinstance(llm, dict):
+            llm_field = 1.0 if llm.get("status") == "ok" else 0.15
+
+        return {
+            "plasticity": plasticity_field,
+            "memory": memory_field,
+            "llm": llm_field,
+        }
+
+    def _induce(self, out: dict) -> dict:
+        """Faraday coupling across the cores for this tick.
+
+        Every field's change induces EMF in the *others* — never in itself, and
+        all in one synchronous step, so no core ever reads another's
+        post-update value. That is what makes this non-blocking: there is no
+        ordering between the three, and nothing waits its turn.
+        """
+        now = time.time()
+        current = self._field_strengths(out)
+        induction = couple_fields(
+            current,
+            self._fields,
+            dt=max(now - self._last_tick, 1e-3),
+        )
+        self._fields = current
+        self._last_tick = now
+        return induction.to_dict()
+
+    def _route_event(self, event: Event) -> dict:
         decision = self.meta.decide(event)
         out: dict = {
             "ok": True,
@@ -70,6 +126,10 @@ class Mark17Brain:
                 "reason": decision.reason,
                 "confidence": decision.confidence,
                 "pattern_id": decision.pattern_id,
+                "superposition": {
+                    k: round(v, 4) for k, v in decision.superposition.items()
+                },
+                "coherence": round(decision.coherence, 4),
             },
         }
 

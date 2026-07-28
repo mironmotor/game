@@ -48,6 +48,7 @@ if str(_ROOT) not in sys.path:
     sys.path.insert(0, str(_ROOT))
 
 from mark17 import json_cli  # reuse the exact event handlers
+from mark17.fluid_flow import FluidHud, telemetry_from_result
 from mark17.ratelimit import Guard, client_ip
 
 STATE_DIR = Path(os.environ.get("MAX17_STATE_DIR", str(_ROOT / "mark17" / "state")))
@@ -89,12 +90,25 @@ def _build_args() -> SimpleNamespace:
     )
 
 
+# Navier-Stokes: the viscous layer between the core and the HUD. This lives in
+# the server rather than in json_cli because smoothing needs continuity — the
+# CLI is one-shot and has no consecutive frames to integrate across, while the
+# bridge is a long-running process where every event is the next frame.
+# ThreadingHTTPServer handles requests concurrently, so the flow is serialised:
+# integrating a stream from two threads at once would corrupt the velocity.
+_HUD = FluidHud()
+_HUD_LOCK = threading.Lock()
+
+
 def handle_event(payload: dict) -> dict:
     event = json_cli._as_event(payload)
     args = _build_args()
     args.state_dir.mkdir(parents=True, exist_ok=True)
     result = json_cli._handle_event(event, args, args.state_dir)
-    return json_cli.normalize(result)
+    normalized = json_cli.normalize(result)
+    with _HUD_LOCK:
+        normalized["hud"] = _HUD.step(telemetry_from_result(normalized))
+    return normalized
 
 
 class Handler(BaseHTTPRequestHandler):

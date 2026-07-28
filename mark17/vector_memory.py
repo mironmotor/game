@@ -16,6 +16,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from mark17.cognitive_physics import lens, time_dilation
 from mark17.events import Event
 
 VECTOR_DIM = 128
@@ -94,6 +95,7 @@ class VectorHit:
     reinforce: str
     importance: float
     score: float
+    curvature: float = 0.0
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -105,6 +107,7 @@ class VectorHit:
             "reinforce": self.reinforce,
             "importance": round(self.importance, 3),
             "score": round(self.score, 4),
+            "curvature": round(self.curvature, 4),
         }
 
 
@@ -300,6 +303,7 @@ class VectorMemory:
                 """
             ).fetchall()
 
+        now = time.time()
         hits: list[VectorHit] = []
         for row in rows:
             try:
@@ -313,7 +317,23 @@ class VectorMemory:
             if semantic <= 0:
                 continue
             importance = float(row["importance"])
-            score = semantic * importance
+
+            # Einstein: importance is mass, and mass curves the semantic metric.
+            # The query does not travel the straight cosine line to a heavy
+            # memory — it follows the geodesic, which is shorter. A memory with
+            # zero similarity stays at zero however heavy it is, so mass can
+            # only amplify a real relationship, never invent one.
+            relevance = lens(semantic, importance)
+            curvature = relevance - semantic
+
+            # Gravitational time dilation: clocks run slow deep in the well, so
+            # a heavy memory accumulates less proper age and decays more slowly
+            # than a trivial one recorded at the same moment.
+            age_days = max(0.0, (now - float(row["timestamp"])) / 86400.0)
+            proper_age = age_days * time_dilation(importance)
+            recency = 1.0 / (1.0 + proper_age)
+
+            score = relevance * (0.75 + 0.25 * recency)
             if query_concepts:
                 row_concepts = _concepts(str(row["text"]))
                 overlap = len(query_concepts & row_concepts) / len(query_concepts)
@@ -330,6 +350,7 @@ class VectorMemory:
                     reinforce=str(row["reinforce"])[:180],
                     importance=importance,
                     score=score,
+                    curvature=curvature,
                 )
             )
 

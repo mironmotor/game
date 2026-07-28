@@ -13,6 +13,11 @@ import time
 from pathlib import Path
 from typing import Any
 
+from mark17.cognitive_physics import (
+    bekenstein_entropy,
+    hawking_temperature,
+    horizon_area,
+)
 from mark17.events import Event
 
 RELATION_TYPES = frozenset(
@@ -228,6 +233,53 @@ class SynapseGraph:
             metadata=metadata,
         )
 
+    def count(self) -> int:
+        """Total synapses held in the bulk."""
+        with self._conn() as c:
+            return int(c.execute("SELECT COUNT(*) AS n FROM synapses").fetchone()["n"])
+
+    def horizon(self) -> dict[str, Any]:
+        """The graph's holographic boundary — the O(A) scan budget.
+
+        The Bekenstein bound says the information inside a region is fixed by
+        the area of its boundary, not by its volume. A graph of N synapses
+        therefore does not need an N-wide scan: reading the A = 4√N highest-
+        weight surface recovers what the bulk encodes. For 400 synapses that is
+        an 80-row read; for 40,000 it is 800. Sublinear, and — unlike the fixed
+        LIMIT it replaces — it still widens as the graph grows, so recall does
+        not quietly degrade as Max accumulates history.
+        """
+        total = self.count()
+        area = horizon_area(total)
+        return {
+            "bulk": total,
+            "area": area,
+            "entropy": round(bekenstein_entropy(area), 4),
+            "compression": round(area / total, 4) if total else 1.0,
+        }
+
+    def holographic_scan(self, limit: int | None = None) -> list[dict[str, Any]]:
+        """Read the boundary instead of the bulk."""
+        area = limit if limit is not None else horizon_area(self.count())
+        return self.get_top_synapses(limit=max(int(area), 0))
+
+    def evaporating(self, *, threshold: float = 0.25) -> list[dict[str, Any]]:
+        """Synapses hot enough to radiate themselves away.
+
+        Hawking temperature goes as 1/M: a light black hole is hot and
+        evaporates fast, a heavy one is cold and effectively eternal. A weak
+        synapse is the same — it does not need to be deleted on a schedule, it
+        simply does not survive its own temperature.
+        """
+        boundary = self.holographic_scan()
+        hot = [
+            {**synapse, "temperature": round(hawking_temperature(synapse["weight"]), 4)}
+            for synapse in boundary
+            if hawking_temperature(synapse["weight"]) > threshold
+        ]
+        hot.sort(key=lambda s: s["temperature"], reverse=True)
+        return hot
+
     def get_top_synapses(self, limit: int = 5) -> list[dict[str, Any]]:
         with self._conn() as c:
             rows = c.execute(
@@ -241,8 +293,15 @@ class SynapseGraph:
             ).fetchall()
         return [self._row_to_dict(row) for row in rows]
 
-    def get_graph(self, limit: int = 400) -> dict[str, Any]:
-        """Export the real synapse graph as nodes + edges for visualization."""
+    def get_graph(self, limit: int | None = None) -> dict[str, Any]:
+        """Export the real synapse graph as nodes + edges for visualization.
+
+        With no explicit limit the export reads the holographic boundary rather
+        than a fixed slice of the bulk, so the exported graph scales with the
+        real one instead of stopping at a hard-coded 400.
+        """
+        if limit is None:
+            limit = horizon_area(self.count())
         with self._conn() as c:
             rows = c.execute(
                 """
@@ -289,6 +348,8 @@ class SynapseGraph:
                 "total_synapses": int(total),
                 "shown_synapses": len(edges),
                 "nodes": len(nodes),
+                "horizon_area": horizon_area(int(total)),
+                "entropy": round(bekenstein_entropy(horizon_area(int(total))), 4),
             },
         }
 

@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
+from mark17.cognitive_physics import DiracPair, annihilate, conjugate
 from mark17.events import Event
 
 STORE_EVENT_TYPES = frozenset(
@@ -25,14 +26,19 @@ class SelfEvaluation:
     reason: str
     store_memory: bool
     reinforce: str
+    dirac: DiracPair | None = None
 
     def to_dict(self) -> dict[str, Any]:
-        return {
+        payload: dict[str, Any] = {
             "score": round(max(0.0, min(1.0, self.score)), 4),
             "reason": self.reason,
             "store_memory": self.store_memory,
             "reinforce": self.reinforce,
         }
+        if self.dirac is not None:
+            payload["dirac"] = self.dirac.to_dict()
+            payload["uncertain"] = self.dirac.uncertain
+        return payload
 
 
 def _confidence(result: dict[str, Any]) -> float:
@@ -77,6 +83,55 @@ def _reinforce(event: Event, result: dict[str, Any]) -> str:
     return f"observe:{event.type}:{route}"
 
 
+def _antiparticle(event: Event, result: dict[str, Any], score: float) -> float:
+    """Evidence that the same handling was actually a *failure*.
+
+    The Dirac equation's negative-energy solutions are not an artefact to be
+    discarded — they are antimatter, and they are real. So every evaluation gets
+    its conjugate reading built from the same run: the route that fired without
+    learning anything, the LLM that was reached but did not answer, the memory
+    lookup that returned nothing, the confidence asserted with no pattern behind
+    it.
+
+    The baseline is the naive conjugate ``1 - score``. Note what that implies:
+    when nothing below fires, ``annihilate`` returns exactly the original score,
+    so this layer is a no-op unless there is genuine counter-evidence. It can
+    only ever move a score that was overstated.
+    """
+    anti = conjugate(score)
+    route = str(result.get("route", "unknown"))
+
+    if route == "plasticity":
+        plasticity = result.get("plasticity")
+        if isinstance(plasticity, dict) and not plasticity.get("learned"):
+            # The reflex fired, but nothing was actually reinforced.
+            anti += 0.18
+
+    elif route == "llm":
+        llm = result.get("llm")
+        status = llm.get("status") if isinstance(llm, dict) else None
+        if status != "ok":
+            anti += 0.3
+
+    elif route == "memory":
+        memory = result.get("memory")
+        hits = (memory or {}).get("hits") if isinstance(memory, dict) else None
+        recalled = (memory or {}).get("recalled") if isinstance(memory, dict) else None
+        if not hits and not recalled:
+            # Routed to memory and memory had nothing to say.
+            anti += 0.25
+
+    if _confidence(result) < 0.2 and route != "ignore":
+        anti += 0.1
+
+    if event.type in {"deadline_failed", "terminal_error"}:
+        # The event itself carries negative charge: something in the world broke,
+        # and a smooth internal handling does not undo that.
+        anti += 0.12
+
+    return max(0.0, min(1.0, anti))
+
+
 def evaluate_event(event: Event, result: dict[str, Any]) -> SelfEvaluation:
     route = str(result.get("route", "unknown"))
     confidence = _confidence(result)
@@ -119,9 +174,18 @@ def evaluate_event(event: Event, result: dict[str, Any]) -> SelfEvaluation:
         score = max(score, 0.55)
         reason = "system state snapshot captured for context"
 
+    score = max(0.0, min(1.0, score))
+
+    # Dirac: pair-produce the conjugate reading and let the two annihilate.
+    # What survives is the net charge — the score the run actually earned.
+    pair = annihilate(score, _antiparticle(event, result, score))
+    if pair.uncertain:
+        reason = f"{reason} (uncertain: evidence annihilates)"
+
     return SelfEvaluation(
-        score=max(0.0, min(1.0, score)),
+        score=pair.net,
         reason=reason,
         store_memory=store_memory,
         reinforce=_reinforce(event, result),
+        dirac=pair,
     )
