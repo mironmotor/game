@@ -23,6 +23,17 @@ type AdminData = {
   server?: { uptime_sec?: number; node?: string; mem_mb?: number };
 };
 
+type IssuedCode = {
+  code: string;
+  note: string;
+  createdAt: string;
+  expiresAt: string | null;
+  revoked: boolean;
+  usedBy: string[];
+  uses: number;
+  active: boolean;
+};
+
 function readToken(): string {
   try {
     return (localStorage.getItem(TOKEN_KEY) || '').trim();
@@ -47,6 +58,11 @@ export default function AdminPanel() {
   const [mcUsers, setMcUsers] = useState<{ email: string; name: string | null; balance: number }[] | null>(null);
   const [mcTo, setMcTo] = useState('');
   const [mcAmt, setMcAmt] = useState('');
+  // Выписанные premium-коды: продажа доступа без правки env и редеплоя.
+  const [issued, setIssued] = useState<IssuedCode[] | null>(null);
+  const [codeNote, setCodeNote] = useState('');
+  const [codeDays, setCodeDays] = useState('30');
+  const [lastCode, setLastCode] = useState('');
 
   const load = useCallback(async () => {
     setBusy(true);
@@ -88,6 +104,62 @@ export default function AdminPanel() {
       }
     },
     [load],
+  );
+
+  const loadCodes = useCallback(async () => {
+    try {
+      const res = await fetch(`${appBasePath}/api/premium/codes`, {
+        headers: readToken() ? { 'x-admin-token': readToken() } : {},
+      });
+      if (!res.ok) return;
+      const j = (await res.json()) as { codes?: IssuedCode[] };
+      setIssued(j.codes ?? []);
+    } catch {
+      /* тихо: панель не должна падать из-за одной секции */
+    }
+  }, []);
+
+  const issueCode = useCallback(async () => {
+    setBusy(true);
+    setNote('');
+    try {
+      const res = await fetch(`${appBasePath}/api/premium/codes`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...(readToken() ? { 'x-admin-token': readToken() } : {}) },
+        body: JSON.stringify({ note: codeNote, days: codeDays.trim() === '' ? null : Number(codeDays) }),
+      });
+      const j = (await res.json()) as { ok?: boolean; code?: IssuedCode };
+      if (j.ok && j.code) {
+        setLastCode(j.code.code);
+        setCodeNote('');
+        setNote(`код выписан: ${j.code.code}`);
+      } else {
+        setNote('не удалось выписать код');
+      }
+    } catch (e) {
+      setNote(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+      void loadCodes();
+    }
+  }, [codeNote, codeDays, loadCodes]);
+
+  const revoke = useCallback(
+    async (code: string) => {
+      setBusy(true);
+      try {
+        await fetch(`${appBasePath}/api/premium/codes`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', ...(readToken() ? { 'x-admin-token': readToken() } : {}) },
+          body: JSON.stringify({ action: 'revoke', code }),
+        });
+        setNote(`код ${code} отозван`);
+      } finally {
+        setBusy(false);
+        void loadCodes();
+      }
+    },
+    [loadCodes],
   );
 
   const loadMircoin = useCallback(async () => {
@@ -150,8 +222,9 @@ export default function AdminPanel() {
     if (open) {
       void load();
       void loadMircoin();
+      void loadCodes();
     }
-  }, [open, load, loadMircoin]);
+  }, [open, load, loadMircoin, loadCodes]);
 
   if (!open) return null;
 
@@ -266,6 +339,73 @@ export default function AdminPanel() {
                     ))}
                   </div>
                 </div>
+              </div>
+            </div>
+
+            {/* Продажа доступа: код выписывается кнопкой, без правки env и редеплоя. */}
+            <div className="mt-2 rounded-xl border border-emerald-400/25 bg-emerald-400/[0.05] p-3">
+              <div className="flex items-center gap-1.5 text-[10px] uppercase tracking-widest text-emerald-200/70">
+                <Zap className="h-3 w-3" /> Продажа доступа · выписать код
+              </div>
+
+              <div className="mt-2 flex flex-wrap gap-1.5">
+                <input
+                  value={codeNote}
+                  onChange={(e) => setCodeNote(e.target.value)}
+                  placeholder="кому (имя, @телеграм, за сколько)"
+                  className="min-w-0 flex-1 rounded-lg border border-white/10 bg-black/40 px-2 py-1.5 text-[12px] text-white/85 outline-none placeholder:text-white/25"
+                />
+                <input
+                  value={codeDays}
+                  onChange={(e) => setCodeDays(e.target.value)}
+                  placeholder="дней"
+                  title="Срок в днях. Пусто — бессрочно."
+                  className="w-16 rounded-lg border border-white/10 bg-black/40 px-2 py-1.5 text-[12px] text-white/85 outline-none placeholder:text-white/25"
+                />
+                <button
+                  onClick={() => void issueCode()}
+                  disabled={busy}
+                  className="rounded-lg bg-emerald-400/90 px-3 py-1.5 text-[12px] font-semibold text-emerald-950 transition hover:bg-emerald-300 disabled:opacity-50"
+                >
+                  Выписать
+                </button>
+              </div>
+
+              {lastCode && (
+                <div className="mt-2 flex items-center gap-2 rounded-lg border border-emerald-300/30 bg-black/40 px-2 py-1.5">
+                  <code className="flex-1 text-[15px] font-bold tracking-widest text-emerald-200">{lastCode}</code>
+                  <button
+                    onClick={() => void navigator.clipboard?.writeText(lastCode)}
+                    className="rounded bg-white/10 px-2 py-1 text-[11px] text-white/70 transition hover:bg-white/20"
+                  >
+                    копировать
+                  </button>
+                </div>
+              )}
+
+              <div className="mt-2 max-h-36 space-y-1 overflow-y-auto">
+                {(issued ?? []).length === 0 && (
+                  <div className="text-[11px] text-white/35">кодов пока нет — выпиши первый и продай доступ</div>
+                )}
+                {(issued ?? []).map((c) => (
+                  <div key={c.code} className="flex items-center gap-2 text-[11px]">
+                    <code className={c.active ? 'text-emerald-200' : 'text-white/30 line-through'}>{c.code}</code>
+                    <span className="min-w-0 flex-1 truncate text-white/45">{c.note || '—'}</span>
+                    {c.uses > 0 && <span className="text-white/35">×{c.uses}</span>}
+                    <span className="text-white/30">
+                      {c.expiresAt ? c.expiresAt.slice(0, 10) : '∞'}
+                    </span>
+                    {c.active && (
+                      <button
+                        onClick={() => void revoke(c.code)}
+                        className="text-rose-300/70 transition hover:text-rose-200"
+                        title="Отозвать"
+                      >
+                        ✕
+                      </button>
+                    )}
+                  </div>
+                ))}
               </div>
             </div>
 
