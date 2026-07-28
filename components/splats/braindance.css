@@ -1,0 +1,32 @@
+/* Брейнданс · 4D сплаты */
+.bd-screen { position: fixed; inset: 0; display: flex; flex-direction: column; background: #07031a; color: #e9dcff; font-family: var(--font-hud-mono, monospace); }
+
+.bd-bar {
+  display: flex; align-items: center; gap: 10px; padding: 10px 16px; z-index: 3;
+  border-bottom: 1px solid rgba(190,120,255,0.2); background: rgba(9,4,26,0.85); backdrop-filter: blur(6px);
+}
+.bd-logo { display: grid; place-items: center; width: 34px; height: 34px; border-radius: 50%; border: 1px solid rgba(190,120,255,0.5); color: #be78ff; box-shadow: 0 0 14px rgba(190,120,255,0.4); }
+.bd-title { font-family: var(--font-hud-display, sans-serif); letter-spacing: 0.14em; font-size: 13px; color: #d9b0ff; }
+.bd-sub { font-size: 10px; color: rgba(220,190,255,0.55); }
+.bd-stats { margin-left: auto; display: flex; gap: 16px; font-size: 12px; color: rgba(225,200,255,0.8); }
+.bd-stats b { color: #d9b0ff; }
+
+.bd-stage { position: relative; flex: 1; min-height: 0; }
+.bd-stage canvas { display: block; width: 100%; height: 100%; cursor: grab; }
+.bd-stage canvas:active { cursor: grabbing; }
+
+/* плеер как у брейнданса */
+.bd-player {
+  display: flex; align-items: center; gap: 12px; padding: 10px 16px; z-index: 3;
+  border-top: 1px solid rgba(190,120,255,0.2); background: rgba(9,4,26,0.9); backdrop-filter: blur(6px);
+}
+.bd-play, .bd-speed {
+  border: 1px solid rgba(190,120,255,0.4); background: rgba(190,120,255,0.1); color: #e9dcff;
+  border-radius: 10px; padding: 8px 14px; font-size: 14px; font-family: inherit; cursor: pointer;
+  transition: background 0.15s ease;
+}
+.bd-play:hover, .bd-speed:hover { background: rgba(190,120,255,0.22); }
+.bd-scrub { flex: 1; accent-color: #be78ff; }
+.bd-time { font-size: 11px; color: rgba(225,200,255,0.75); min-width: 84px; text-align: right; }
+
+.bd-foot { padding: 8px 16px; font-size: 10px; color: rgba(220,190,255,0.5); text-align: center; border-top: 1px solid rgba(190,120,255,0.15); z-index: 3; }

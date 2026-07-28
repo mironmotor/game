@@ -1,0 +1,80 @@
+/* EdgeAI нейро-мозг — визуализатор */
+.brain-screen {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  background: #060616;
+  color: #d7faf0;
+  font-family: var(--font-hud-mono, monospace);
+}
+
+.brain-bar {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  flex-wrap: wrap;
+  padding: 10px 16px;
+  border-bottom: 1px solid rgba(0, 255, 200, 0.15);
+  background: rgba(6, 6, 22, 0.85);
+  backdrop-filter: blur(6px);
+  z-index: 2;
+}
+
+.brain-brand { display: flex; align-items: center; gap: 10px; }
+.brain-logo {
+  display: grid;
+  place-items: center;
+  width: 34px; height: 34px;
+  border: 1px solid rgba(0, 255, 200, 0.5);
+  border-radius: 50%;
+  color: #00ffc8;
+  font-size: 13px;
+  box-shadow: 0 0 14px rgba(0, 255, 200, 0.35);
+}
+.brain-title {
+  font-family: var(--font-hud-display, sans-serif);
+  letter-spacing: 0.14em;
+  font-size: 13px;
+  color: #00ffc8;
+}
+.brain-sub { font-size: 10px; color: rgba(150, 200, 190, 0.6); }
+
+.brain-stats {
+  display: flex;
+  gap: 16px;
+  margin-left: auto;
+  font-size: 11px;
+  color: rgba(170, 210, 200, 0.75);
+}
+.brain-stats b { color: #00ffc8; font-size: 13px; }
+
+.brain-actions { display: flex; gap: 8px; }
+.brain-actions button {
+  border: 1px solid rgba(0, 255, 200, 0.3);
+  background: rgba(0, 255, 200, 0.06);
+  color: #aef5e6;
+  padding: 6px 12px;
+  border-radius: 8px;
+  font-size: 11px;
+  font-family: inherit;
+  cursor: pointer;
+  transition: background 0.15s ease, border-color 0.15s ease;
+}
+.brain-actions button:hover { background: rgba(0, 255, 200, 0.16); }
+.brain-actions button.on {
+  background: rgba(0, 255, 200, 0.22);
+  border-color: #00ffc8;
+  color: #fff;
+}
+
+.brain-canvas-wrap { position: relative; flex: 1; min-height: 0; }
+.brain-canvas-wrap canvas { display: block; width: 100%; height: 100%; cursor: crosshair; }
+
+.brain-hint {
+  padding: 8px 16px;
+  font-size: 10px;
+  color: rgba(150, 200, 190, 0.5);
+  border-top: 1px solid rgba(0, 255, 200, 0.12);
+  text-align: center;
+}

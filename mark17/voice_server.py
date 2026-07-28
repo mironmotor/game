@@ -20,13 +20,41 @@ import json
 import os
 import re
 import subprocess
+import sys
 import tempfile
+import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
+
+_ROOT = Path(__file__).resolve().parent.parent
+if str(_ROOT) not in sys.path:
+    sys.path.insert(0, str(_ROOT))
+
+from mark17.ratelimit import Guard, client_ip
 
 HOST = os.environ.get("MAX17_TTS_HOST", "127.0.0.1")
 PORT = int(os.environ.get("MAX17_TTS_PORT", "8017"))
 SAMPLE_RATE = 22050
 MAX_CHARS = 1200  # защита от гигантских запросов
+
+
+def _int_env(name: str, default: int) -> int:
+    try:
+        return max(1, int(os.environ.get(name, "") or default))
+    except ValueError:
+        return default
+
+
+# Каждый /synthesize порождает подпроцесс `say`. Без потолка зациклившийся
+# клиент (или открытый наружу MAX17_TTS_HOST) исчерпает процессы на Маке —
+# поэтому лимитируем частоту и число одновременных синтезов.
+MAX_BODY = _int_env("MAX17_TTS_MAX_BODY_KB", 64) * 1024
+MAX_CONCURRENT = _int_env("MAX17_TTS_MAX_CONCURRENT", 3)
+GUARD = Guard(
+    per_ip_limit=_int_env("MAX17_TTS_RATE_PER_IP", 60),
+    global_limit=_int_env("MAX17_TTS_RATE_GLOBAL", 120),
+)
+_SLOTS = threading.BoundedSemaphore(MAX_CONCURRENT)
 
 # Курируемый набор голосов (что реально стоит в macOS на этой машине).
 RU_VOICE = "Milena (Enhanced)"
@@ -103,7 +131,24 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
+    def _throttled(self) -> bool:
+        """Лимиты до любой работы. True — запрос уже отклонён."""
+        ip = client_ip(self.headers, self.client_address[0] if self.client_address else "?")
+        ok, retry, why = GUARD.check(ip)
+        if ok:
+            return False
+        body = json.dumps({"error": "rate_limited", "detail": why, "retry_after": retry}).encode()
+        self.send_response(429)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(body)))
+        self.send_header("Retry-After", str(retry))
+        self.end_headers()
+        self.wfile.write(body)
+        return True
+
     def do_GET(self) -> None:
+        if self._throttled():
+            return
         if self.path.rstrip("/") == "/health":
             self._json(200, {"ok": True, "model": "macos-say", "device": "cpu",
                              "voices": len(VOICES)})
@@ -113,11 +158,17 @@ class Handler(BaseHTTPRequestHandler):
             self._json(404, {"error": "not_found"})
 
     def do_POST(self) -> None:
+        if self._throttled():
+            return
         if self.path.rstrip("/") != "/synthesize":
             self._json(404, {"error": "not_found"})
             return
         try:
             length = int(self.headers.get("Content-Length") or 0)
+            if length > MAX_BODY:
+                # Отвергаем ДО чтения, иначе гигантское тело съест память.
+                self._json(413, {"error": "body_too_large", "max_kb": MAX_BODY // 1024})
+                return
             data = json.loads(self.rfile.read(length).decode("utf-8")) if length else {}
         except Exception:
             self._json(400, {"error": "bad_json"})
@@ -131,6 +182,12 @@ class Handler(BaseHTTPRequestHandler):
             speed = float(data.get("speed") or 1.0)
         except (TypeError, ValueError):
             speed = 1.0
+        # Один синтез = один подпроцесс `say`. Держим их число под потолком:
+        # лучше честный 503, чем сотня форков и Мак в свопе.
+        if not _SLOTS.acquire(timeout=10):
+            self._json(503, {"error": "busy", "detail": "too many concurrent synthesis jobs",
+                             "retry_after": 2})
+            return
         try:
             audio = synth_wav(text, voice, speed)
         except subprocess.CalledProcessError as exc:
@@ -139,6 +196,8 @@ class Handler(BaseHTTPRequestHandler):
         except Exception as exc:  # noqa: BLE001
             self._json(500, {"error": "synth_error", "detail": str(exc)[:200]})
             return
+        finally:
+            _SLOTS.release()
         self.send_response(200)
         self.send_header("Content-Type", "audio/wav")
         self.send_header("Content-Length", str(len(audio)))
@@ -150,6 +209,10 @@ class Handler(BaseHTTPRequestHandler):
 def main() -> None:
     srv = ThreadingHTTPServer((HOST, PORT), Handler)
     print(f"MAX voice (macOS say) → http://{HOST}:{PORT}  voices={sorted(_VOICE_NAMES)}")
+    print(f"  лимиты: {GUARD.per_ip.limit}/ip/мин, {GUARD.global_.limit}/мин всего, "
+          f"{MAX_CONCURRENT} одновременно, тело ≤{MAX_BODY // 1024}KB")
+    if HOST not in ("127.0.0.1", "localhost", "::1"):
+        print(f"  ВНИМАНИЕ: слушаю {HOST} — не только localhost, а авторизации здесь нет.")
     try:
         srv.serve_forever()
     except KeyboardInterrupt:

@@ -28,6 +28,7 @@ import MissionAutopilot from '@/components/MissionAutopilot';
 import AgentRunner from '@/components/AgentRunner';
 import CyberLab from '@/components/CyberLab';
 import CoreFlow3D from '@/components/CoreFlow3D';
+import ModeMenu from '@/components/ModeMenu';
 
 export const dynamic = 'force-dynamic';
 
@@ -64,6 +65,7 @@ export default function Home() {
       <CyberLab />
       <CoreFlow3D />
       <HudApp />
+      <ModeMenu />
     </main>
   );
 }

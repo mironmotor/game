@@ -62,6 +62,11 @@ const ALLOWED_EVENTS = new Set([
   'health',
   'chrono_day',
   'security_tutor',
+  // Визуальные режимы GAME (Воронка, Симуляция, ДЕКОДЕР, Инбокс).
+  'big_idea',
+  'simulation',
+  'decode',
+  'ingest',
 ]);
 
 const DEFAULT_RESPONSE = {
