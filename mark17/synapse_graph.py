@@ -2,18 +2,46 @@
 
 This is the first "synapse" layer: deterministic SQLite associations between
 events, memories, routes, evaluations, tasks, states, and adaptations.
+
+Поиск по графу голографический. Формула Бекенштейна-Хокинга
+
+    S = k * A / (4 * l_p^2)
+
+утверждает, что энтропия чёрной дыры пропорциональна **площади** горизонта, а
+не объёму. Отсюда голографический принцип: всё, что происходит внутри
+области, полностью закодировано на её границе.
+
+Для графа связей это буквально практический выигрыш. Граф растёт как объём —
+число рёбер, — но информация о нём живёт на границе: на узлах-хабах, через
+которые проходят все пути между кластерами. Спроецировав граф на этот экран
+один раз (O(E)), каждый последующий обход стоит O(A), где A — площадь
+горизонта, а не O(V) по всему объёму. Чем плотнее граф, тем сильнее выигрыш:
+объём растёт кубически, площадь — квадратично.
+
+Заодно формула даёт температуру Хокинга T = 1/(8 pi M): маленький, лёгкий
+граф «горячий» и быстро испаряется, тяжёлый граф холоден и стабилен.
 """
 
 from __future__ import annotations
 
 import hashlib
 import json
+import math
 import sqlite3
 import time
 from pathlib import Path
 from typing import Any
 
 from mark17.events import Event
+
+# --- Bekenstein-Hawking constants ------------------------------------------
+# Planck length of the graph: the smallest link that can still be resolved.
+PLANCK_LENGTH = 1.0
+# Fraction of nodes, ranked by degree, that make up the horizon. The hubs are
+# the screen everything else is projected onto.
+BOUNDARY_FRACTION = 0.25
+# A horizon needs a minimum area before projection means anything.
+MIN_BOUNDARY = 4
 
 RELATION_TYPES = frozenset(
     {
@@ -290,6 +318,154 @@ class SynapseGraph:
                 "shown_synapses": len(edges),
                 "nodes": len(nodes),
             },
+        }
+
+    # -- Holography ---------------------------------------------------------
+
+    def horizon(self, *, limit: int = 2000) -> dict[str, Any]:
+        """Project the graph onto its boundary and measure the horizon.
+
+        One O(E) aggregation builds the screen; every search afterwards is
+        bounded by the area of that screen rather than the volume of the graph.
+        """
+        with self._conn() as c:
+            rows = c.execute(
+                """
+                SELECT node, COUNT(*) AS degree, SUM(w) AS mass
+                FROM (
+                    SELECT source_type || ':' || source_id AS node, weight AS w
+                    FROM synapses
+                    UNION ALL
+                    SELECT target_type || ':' || target_id AS node, weight AS w
+                    FROM synapses
+                )
+                GROUP BY node
+                ORDER BY degree DESC, mass DESC
+                LIMIT ?
+                """,
+                (limit,),
+            ).fetchall()
+            edges = c.execute("SELECT COUNT(*) AS n FROM synapses").fetchone()["n"]
+
+        nodes = [
+            {
+                "node": str(row["node"]),
+                "degree": int(row["degree"]),
+                "mass": round(float(row["mass"] or 0.0), 4),
+            }
+            for row in rows
+        ]
+
+        volume = len(nodes)
+        if volume == 0:
+            return {
+                "boundary": [],
+                "area": 0,
+                "volume": 0,
+                "edges": int(edges),
+                "mass": 0.0,
+                "entropy": 0.0,
+                "temperature": 0.0,
+                "information_bits": 0.0,
+                "compression": 1.0,
+                "equation": "S = k A / (4 l_p^2)",
+            }
+
+        area = max(MIN_BOUNDARY, int(volume * BOUNDARY_FRACTION))
+        boundary = nodes[:area]
+        area = len(boundary)
+
+        # M — total mass-energy bound in the graph.
+        mass = sum(node["mass"] for node in nodes)
+
+        # S = A / 4 in natural units (k = l_p = 1).
+        entropy = area / (4.0 * PLANCK_LENGTH**2)
+        # Hawking temperature T = 1/(8 pi M): a light graph runs hot.
+        temperature = 1.0 / (8.0 * math.pi * mass) if mass > 0 else 0.0
+
+        return {
+            "boundary": boundary,
+            "area": area,
+            "volume": volume,
+            "edges": int(edges),
+            "mass": round(mass, 4),
+            "entropy": round(entropy, 4),
+            "temperature": round(temperature, 6),
+            # Bekenstein bound: the most information the interior can hold.
+            "information_bits": round(entropy / math.log(2.0), 4),
+            # How much of the volume the screen spares us from scanning.
+            "compression": round(volume / area, 4) if area else 1.0,
+            "equation": "S = k A / (4 l_p^2)",
+        }
+
+    def holographic_search(
+        self,
+        seed: str,
+        *,
+        limit: int = 8,
+        screen: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Walk the graph across its boundary only — O(A), not O(V).
+
+        ``seed`` is a ``"type:id"`` node key. Results are the strongest links
+        from the seed that land on the horizon; interior nodes are skipped,
+        because whatever they encode is already projected onto the screen.
+        """
+        screen = screen or self.horizon()
+        boundary = {node["node"] for node in screen.get("boundary") or []}
+        if not boundary:
+            return {"seed": seed, "neighbours": [], "area": 0, "scanned": 0}
+
+        with self._conn() as c:
+            rows = c.execute(
+                """
+                SELECT
+                    source_type || ':' || source_id AS src,
+                    target_type || ':' || target_id AS dst,
+                    relation_type,
+                    weight,
+                    evidence_count,
+                    metadata_json
+                FROM synapses
+                WHERE source_type || ':' || source_id = ?
+                   OR target_type || ':' || target_id = ?
+                ORDER BY weight DESC, evidence_count DESC
+                LIMIT ?
+                """,
+                (seed, seed, limit * 4),
+            ).fetchall()
+
+        neighbours: list[dict[str, Any]] = []
+        scanned = 0
+        for row in rows:
+            scanned += 1
+            other = str(row["dst"]) if str(row["src"]) == seed else str(row["src"])
+            if other not in boundary:
+                # Interior node: its information is already on the screen.
+                continue
+            try:
+                metadata = json.loads(row["metadata_json"])
+            except json.JSONDecodeError:
+                metadata = {}
+            neighbours.append(
+                {
+                    "node": other,
+                    "relation": str(row["relation_type"]),
+                    "weight": round(float(row["weight"]), 4),
+                    "evidence": int(row["evidence_count"]),
+                    "summary": _compact(metadata.get("summary")),
+                }
+            )
+            if len(neighbours) >= limit:
+                break
+
+        return {
+            "seed": seed,
+            "neighbours": neighbours,
+            "area": screen.get("area", 0),
+            "volume": screen.get("volume", 0),
+            "scanned": scanned,
+            "on_horizon": seed in boundary,
         }
 
     def update_from_event(

@@ -5,6 +5,7 @@ import { GameHud, type HudNavId } from './GameHud';
 import VoiceSignature from './VoiceSignature';
 import { useGameState } from '@/hooks/use-game-state';
 import { sendMax17Event, type Max17Response } from '@/lib/max17-client';
+import { FlowStreamlines } from '@/components/hud/FlowStreamlines';
 import './hud.css';
 
 const AGI_INTRO =
@@ -126,7 +127,10 @@ function HudContent() {
   const [isLoading, setIsLoading] = useState(false);
   const [activeNav, setActiveNav] = useState<HudNavId>('codex');
   const [sessionId, setSessionId] = useState<string | null>(null);
-  const [max17State, setMax17State] = useState<Pick<Max17Response, 'route' | 'confidence' | 'next_adaptation'> | null>(null);
+  const [max17State, setMax17State] = useState<Pick<
+    Max17Response,
+    'route' | 'confidence' | 'next_adaptation' | 'flow'
+  > | null>(null);
   const [voiceOpen, setVoiceOpen] = useState(false);
   const [conversationContext, setConversationContext] = useState('');
   const recognitionRef = useRef<SpeechRecognition | null>(null);
@@ -235,6 +239,7 @@ function HudContent() {
             route: max17.route,
             confidence: max17.confidence,
             next_adaptation: max17.next_adaptation,
+            flow: max17.flow,
           });
         }
         if (process.env.NODE_ENV === 'development') {
@@ -471,6 +476,12 @@ function HudContent() {
           <span>{max17State.route}</span>
           <span className="px-1 text-white/25">·</span>
           <span>{max17Confidence}%</span>
+          {max17State.flow?.stream?.length ? (
+            <>
+              <span className="px-1 text-white/25">·</span>
+              <FlowStreamlines flow={max17State.flow} />
+            </>
+          ) : null}
           {max17State.next_adaptation && (
             <>
               <span className="px-1 text-white/25">·</span>
