@@ -2,6 +2,7 @@ import type {Metadata} from 'next';
 import { Orbitron, Roboto_Mono } from 'next/font/google';
 import './globals.css';
 import RegisterSW from '@/components/RegisterSW';
+import UniverseSign from '@/components/universe/UniverseSign';
 import { AuthProvider } from '@/lib/auth';
 
 const orbitron = Orbitron({
@@ -65,7 +66,10 @@ export default function RootLayout({children}: {children: React.ReactNode}) {
       </head>
       <body className="font-mono bg-[#0a0818] text-white antialiased" suppressHydrationWarning>
         <RegisterSW />
-        <AuthProvider>{children}</AuthProvider>
+        <AuthProvider>
+          {children}
+          <UniverseSign autoEveryMs={120000} position="top-right" source="Max17" />
+        </AuthProvider>
       </body>
     </html>
   );
