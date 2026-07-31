@@ -10,6 +10,7 @@ const MODES: { href: string; label: string; c: string }[] = [
   { href: '/mind', label: 'САМОСОЗНАНИЕ Макса', c: '#9d8bff' },
   { href: '/simulation', label: 'Симуляция Макса', c: '#59ffb2' },
   { href: '/decoder', label: 'ДЕКОДЕР · взлом хэшей', c: '#39ff88' },
+  { href: '/quantum', label: 'Квантовый сон · G=MIRON', c: '#ff4d8d' },
   { href: '/neurodance', label: 'Хаос Нейро Дэнс', c: '#a855f7' },
   { href: '/splats', label: 'Брейнданс · 4D сплаты', c: '#be78ff' },
   { href: '/attractor', label: 'Бездна Хаоса ∞', c: '#d9b8ff' },
