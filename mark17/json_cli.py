@@ -64,6 +64,7 @@ from mark17.big_idea import generate as generate_big_idea
 from mark17.dream_sim import generate as generate_dream_sim
 from mark17.ingest import generate as generate_ingest, split_stream
 from mark17.decoder import generate as generate_decode
+from mark17 import reality as reality_ledger
 from mark17.ultimate_core import MAX_ULTIMATE_TARGET_SYNAPSES, bootstrap_ultimate_core
 from mark17.web_sense import (
     WEB_SYNAPSE_TARGET,
@@ -121,6 +122,7 @@ ALLOWED_EVENTS = frozenset(
         "cluster",
         "health",
         "chrono_day",
+        "reality",
         # Визуальные режимы GAME (Воронка, Симуляция, Инбокс, ДЕКОДЕР).
         "big_idea",
         "simulation",
@@ -161,6 +163,13 @@ def _as_event(data: dict[str, Any]) -> Event:
     elif event_type == "terminal_error":
         line = data.get("line") or data.get("message") or data.get("text") or ""
         payload["line"] = str(line)
+    elif event_type == "reality":
+        payload["kind"] = str(data.get("kind") or "")
+        payload["note"] = str(data.get("note") or data.get("text") or "")
+        try:
+            payload["amount"] = float(data.get("amount") or 0)
+        except (TypeError, ValueError):
+            payload["amount"] = 0.0
     elif event_type == "big_idea":
         for key in ("domain", "audience", "trend", "twist"):
             payload[key] = str(data.get(key) or "")
@@ -523,6 +532,57 @@ def _handle_missions(event: Event) -> dict[str, Any]:
     else:
         snap = _m.snapshot()
     return {**base, "ok": True, "missions": snap}
+
+
+def _handle_reality(event: Event, brain: Mark17Brain, synapse_graph: SynapseGraph) -> dict[str, Any]:
+    """Реальность-гейт: записать событие и вернуть честное соотношение блоков к перебору.
+
+    Без `kind` — просто читаем сводку, ничего не записывая.
+    """
+    kind = str(event.payload.get("kind") or "")
+    recorded = None
+    if kind:
+        recorded = reality_ledger.record(
+            kind,
+            note=str(event.payload.get("note") or ""),
+            amount=float(event.payload.get("amount") or 0),
+            source=str(event.source or "game"),
+        )
+
+    stats = reality_ledger.stats()
+    verdict = reality_ledger.verdict(stats)
+    is_block = bool(recorded and recorded.get("block"))
+
+    self_eval = {
+        # Подкрепляем ТОЛЬКО блоки. Перебор веса не даёт — в этом весь смысл:
+        # иначе граф снова начнёт награждать стройку ради стройки.
+        "score": 0.95 if is_block else 0.15,
+        "reason": verdict,
+        "store_memory": is_block,
+        "reinforce": f"reality:{kind}" if is_block else "",
+    }
+    result: dict[str, Any] = {
+        "ok": True,
+        "event_type": event.type,
+        "route": "reality",
+        "reality": {"ok": True, "recorded": recorded, "verdict": verdict, **stats},
+        "memory": {"hint": verdict},
+        "plasticity": {"confidence": 0.9 if is_block else 0.3,
+                       "action": "reality", "learned": is_block},
+        "llm": {"status": "skipped", "text": "reality gate is deterministic", "latency_ms": 0.0},
+        "next_adaptation": verdict,
+        "self_evaluation": self_eval,
+    }
+    result["synapses"] = synapse_graph.update_from_event(event, result, self_eval)
+    if is_block:
+        brain.memory.remember(
+            Event(type="remember",
+                  payload={"note": f"{kind}: {recorded.get('note', '')}", "reinforce": "reality"},
+                  source="reality"),
+            hint=verdict, action="reality",
+        )
+    brain.plasticity.save()
+    return result
 
 
 def _handle_big_idea(event: Event, brain: Mark17Brain, synapse_graph: SynapseGraph) -> dict[str, Any]:
@@ -2533,7 +2593,7 @@ def normalize(result: dict[str, Any]) -> dict[str, Any]:
     if isinstance(chrono, dict):
         normalized["chrono"] = chrono
     # Визуальные режимы GAME.
-    for key in ("big_idea", "sim", "decode", "ingest"):
+    for key in ("big_idea", "sim", "decode", "ingest", "reality"):
         value = result.get(key)
         if isinstance(value, dict):
             normalized[key] = value
@@ -2814,6 +2874,8 @@ def _handle_event(event: Event, args: argparse.Namespace, stores: Mark17Stores) 
         return _handle_missions(event)
     if event.type == "cluster":
         return _handle_cluster(event)
+    if event.type == "reality":
+        return _handle_reality(event, brain, synapse_graph)
     # Визуальные режимы GAME.
     if event.type == "big_idea":
         return _handle_big_idea(event, brain, synapse_graph)
