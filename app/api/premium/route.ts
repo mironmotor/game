@@ -1,5 +1,7 @@
 import { NextResponse } from 'next/server';
 import { validatePremiumCode } from '@/lib/premium';
+import { isIssuedCode } from '@/lib/premium-store';
+import { recordReality } from '@/lib/reality';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -17,5 +19,17 @@ export async function POST(request: Request) {
   } catch {
     /* fall through to invalid */
   }
-  return NextResponse.json({ ok: await validatePremiumCode(code, { email, redeem: true }) });
+  const ok = await validatePremiumCode(code, { email, redeem: true });
+
+  // Активация ВЫПИСАННОГО кода — единственный сигнал, который приложение
+  // получает из реального мира: человек заплатил и пришёл. Отправляем его в
+  // реальность-гейт как блок. Env-коды (свои, служебные) не считаем.
+  if (ok && (await isIssuedCode(code))) {
+    await recordReality('payment', {
+      note: email ? `код активирован: ${email}` : 'код активирован',
+      source: 'premium-code',
+    });
+  }
+
+  return NextResponse.json({ ok });
 }

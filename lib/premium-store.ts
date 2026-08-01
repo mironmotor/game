@@ -143,6 +143,14 @@ export async function redeemCode(code: string, email?: string): Promise<boolean>
   });
 }
 
+/** Выписан ли такой код (в отличие от служебного env-кода). */
+export async function isIssuedCode(code: string): Promise<boolean> {
+  const k = key(code);
+  if (!k) return false;
+  const store = await read();
+  return Boolean(store.codes[k]);
+}
+
 /** Только проверка, без записи (для горячего пути запросов). */
 export async function checkCode(code: string): Promise<boolean> {
   const k = key(code);
