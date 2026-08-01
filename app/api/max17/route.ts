@@ -2,7 +2,7 @@ import { spawn } from 'node:child_process';
 import path from 'node:path';
 import { NextResponse } from 'next/server';
 import { canonicalizeLocale, detectTextLocale, languageName } from '@/lib/i18n/config';
-import { isPremiumCode } from '@/lib/premium';
+import { validatePremiumCode } from '@/lib/premium';
 import {
   blockedSecurityReply,
   getCyberLabModule,
@@ -611,7 +611,7 @@ async function maybeForwardToRealCore(
   eventType: string,
 ): Promise<Record<string, unknown> | null> {
   if (!REMOTE_CORE_URL || eventType !== 'user_message' || body.__fwd === true) return null;
-  if (!isPremiumCode(body.premium_code)) return null;
+  if (!(await validatePremiumCode(body.premium_code))) return null;
   const text = shortText(body.text || body.message || body.content);
   if (!text) return null;
   try {
