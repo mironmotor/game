@@ -28,6 +28,45 @@ if ! python3 -c 'import numpy' >/dev/null 2>&1; then
   fail "нет numpy — выполни: python3 -m pip install -r mark17/requirements.txt"
 fi
 
+# ── порт ──────────────────────────────────────────────────────────────────────
+# На порту может уже кто-то сидеть. Тогда мост не сядет, а туннель уедет на
+# чужой сервис — и наружу поедет не ядро. Проверяем ДО запуска.
+port_busy() {
+  if command -v lsof >/dev/null 2>&1; then
+    lsof -i ":$1" -sTCP:LISTEN >/dev/null 2>&1
+  else
+    # Без lsof — пробуем занять порт сами: не вышло, значит занят.
+    ! python3 - "$1" <<'PY' >/dev/null 2>&1
+import socket, sys
+s = socket.socket()
+try:
+    s.bind(("127.0.0.1", int(sys.argv[1])))
+except OSError:
+    sys.exit(1)
+finally:
+    s.close()
+PY
+  fi
+}
+
+port_owner() {
+  command -v lsof >/dev/null 2>&1 || { printf 'неизвестно'; return; }
+  local who
+  who="$(lsof -i ":$1" -sTCP:LISTEN -Fc 2>/dev/null | grep '^c' | head -1 | cut -c2-)"
+  printf '%s' "${who:-неизвестно}"
+}
+
+if port_busy "$PORT"; then
+  warn "порт $PORT занят процессом '$(port_owner "$PORT")' — это не наш мост"
+  ORIG_PORT="$PORT"
+  for candidate in $(seq $((ORIG_PORT + 1)) $((ORIG_PORT + 20))); do
+    if ! port_busy "$candidate"; then PORT="$candidate"; break; fi
+  done
+  [ "$PORT" = "$ORIG_PORT" ] && \
+    fail "свободного порта нет в диапазоне $((ORIG_PORT + 1))–$((ORIG_PORT + 20)) — освободи $ORIG_PORT"
+  say "перехожу на свободный порт $PORT"
+fi
+
 # Провайдер мозга Макса:
 #   MINIMAX_API_KEY задан → MiniMax (то, на чём думает Max Ultra)
 #   иначе если жива Ollama → Qwen/Gemma локально
@@ -98,7 +137,10 @@ SERVER_PID=$!
 
 ok=""
 for _ in $(seq 1 20); do
-  if curl -s --max-time 1 "http://127.0.0.1:$PORT/health" | grep -q '"ok": true'; then ok=1; break; fi
+  # Проверяем ИМЕННО service, а не просто "ok": true. Чужой сервис на этом
+  # порту тоже может ответить {"ok": true} — так однажды наружу уехал
+  # синтезатор речи вместо ядра, и полчаса ушло на поиски.
+  if curl -s --max-time 1 "http://127.0.0.1:$PORT/health" | grep -q '"service": "max17-bridge"'; then ok=1; break; fi
   sleep 0.5
 done
 [ -n "$ok" ] || { cat "$SERVER_LOG"; fail "мост не поднялся — лог выше"; }

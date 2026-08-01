@@ -319,6 +319,38 @@ export interface Max17Flow {
   equation?: string;
 }
 
+/**
+ * Динамика внимания: отображение fractal eye
+ *   x' = sin(x² − y² + a),  y' = cos(2xy + b)
+ * с параметрами, снятыми с настоящего состояния ядра.
+ */
+export interface Max17Attention {
+  a?: number;
+  b?: number;
+  /** Текущая точка орбиты. */
+  x?: number;
+  y?: number;
+  /** Показатель Ляпунова в точке. null — орбита схлопнулась в точку. */
+  lyapunov?: number | null;
+  /** Средний показатель по окрестности 3×3 в пространстве (a, b). */
+  basin?: number;
+  /** Доля соседей с другим режимом: риск, что сдвиг параметров его переключит. */
+  fragility?: number;
+  regime?: 'locked' | 'cyclic' | 'marginal' | 'scattered';
+  /** Период цикла, если орбита в него села. */
+  period?: number | null;
+  /** Доля обойденных клеток плоскости состояний, 0..1. */
+  coverage?: number;
+  radius?: number;
+  dispersion?: number;
+  /** Устойчивый отпечаток узора внимания. */
+  signature?: string;
+  note?: string;
+  /** Было ли моргание — скачок в новую точку параметров. */
+  blinked?: boolean;
+  equation?: string;
+}
+
 export interface Max17Response {
   ok?: boolean;
   route: string;
@@ -336,6 +368,7 @@ export interface Max17Response {
   graph?: Max17Graph;
   physics?: Max17Physics;
   flow?: Max17Flow;
+  attention?: Max17Attention;
   raw?: Record<string, unknown>;
   error?: string;
   details?: unknown;

@@ -34,6 +34,7 @@ from mark17.decoder import generate as generate_decode
 from mark17.introspect import generate as generate_introspect
 from mark17.cognitive_physics import CoreField, snapshot as physics_snapshot
 from mark17.fluid_flow import solve as solve_flow, state_from_core
+from mark17.attractor_core import snapshot as attention_snapshot
 
 ALLOWED_EVENTS = frozenset(
     {
@@ -272,6 +273,11 @@ def _attach_physics(
         )
     )
 
+    # Динамика внимания: fractal-eye отображение, чьи (a, b) сняты с состояния
+    # ядра. Короткая орбита — этого хватает для показателя Ляпунова, а latency
+    # запроса не страдает.
+    result["attention"] = attention_snapshot(result, steps=800)
+
 
 def _merge_memory(
     result: dict[str, Any],
@@ -351,6 +357,9 @@ def normalize(result: dict[str, Any]) -> dict[str, Any]:
     flow = result.get("flow")
     if isinstance(flow, dict):
         normalized["flow"] = flow
+    attention = result.get("attention")
+    if isinstance(attention, dict):
+        normalized["attention"] = attention
     return normalized
 
 
