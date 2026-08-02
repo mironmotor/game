@@ -170,8 +170,35 @@ say "BRIDGE URL : ${PUBLIC_URL:-http://127.0.0.1:$PORT}"
 say "TOKEN      : $TOKEN"
 say "LLM        : $([ "$LLM_ENABLED" = true ] && echo "ollama / $MODEL" || echo "выключен (детерминированный)")"
 echo
-# Автопрописывание в Vercel: работает, если `vercel login` сделан и проект слинкован
-if [ -n "$PUBLIC_URL" ] && command -v vercel >/dev/null 2>&1 && [ -d "$ROOT/.vercel" ]; then
+
+# Координаты моста — в файл с постоянным путём.
+#
+# Под launchd вывод скрипта уходит в лог, который никто не открывает, а
+# trycloudflare выдаёт новое случайное имя при каждом перезапуске. Без такого
+# файла узнать текущий адрес попросту негде.
+STATE_FILE="$HOME/.max17-bridge.env"
+{
+  printf 'MAX17_BRIDGE_URL=%s\n' "${PUBLIC_URL:-http://127.0.0.1:$PORT}"
+  printf 'MAX17_BRIDGE_TOKEN=%s\n' "$TOKEN"
+  printf 'MAX17_BRIDGE_PORT=%s\n' "$PORT"
+  printf 'MAX17_BRIDGE_UPDATED=%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+} > "$STATE_FILE"
+chmod 600 "$STATE_FILE"   # внутри токен
+say "координаты моста: $STATE_FILE"
+
+# Автопрописывание в Vercel: работает, если `vercel login` сделан и проект
+# слинкован. Раньше при невыполненном условии блок молча пропускался — под
+# launchd это значило, что прод неделями смотрит на мёртвый туннель, и никто
+# об этом не узнаёт. Теперь причина называется вслух.
+if [ -z "$PUBLIC_URL" ]; then
+  :
+elif ! command -v vercel >/dev/null 2>&1; then
+  warn "Vercel CLI не установлен — ПРОД НЕ УЗНАЕТ про этот туннель."
+  warn "исправить один раз:  npm i -g vercel && vercel login && cd $ROOT && vercel link"
+elif [ ! -d "$ROOT/.vercel" ]; then
+  warn "проект не слинкован (нет $ROOT/.vercel) — ПРОД НЕ УЗНАЕТ про этот туннель."
+  warn "исправить один раз:  cd $ROOT && vercel link"
+else
   say "обновляю MAX17_BRIDGE_URL в Vercel автоматически…"
   (cd "$ROOT" \
     && vercel env rm MAX17_BRIDGE_URL production --yes >/dev/null 2>&1 || true \

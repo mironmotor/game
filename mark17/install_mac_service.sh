@@ -24,6 +24,22 @@ fi
 
 mkdir -p "$HOME/Library/LaunchAgents" "$(dirname "$LOG")"
 
+# Предполётная проверка. Служба живёт молча: её вывод уходит в лог, а имя
+# trycloudflare-туннеля меняется при каждом перезапуске. Если Vercel нельзя
+# обновить автоматически, прод будет смотреть на мёртвый адрес, и заметить
+# это станет неоткуда. Сказать об этом надо сейчас, пока человек у терминала.
+if ! command -v vercel >/dev/null 2>&1; then
+  echo "[max17] ВНИМАНИЕ: Vercel CLI не установлен."
+  echo "[max17] Туннель будет подниматься, но прод о нём не узнает."
+  echo "[max17] Один раз:  npm i -g vercel && vercel login && cd $ROOT && vercel link"
+  echo
+elif [ ! -d "$ROOT/.vercel" ]; then
+  echo "[max17] ВНИМАНИЕ: проект не слинкован — нет $ROOT/.vercel"
+  echo "[max17] Туннель будет подниматься, но прод о нём не узнает."
+  echo "[max17] Один раз:  cd $ROOT && vercel link"
+  echo
+fi
+
 cat > "$PLIST" <<PLISTEOF
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
