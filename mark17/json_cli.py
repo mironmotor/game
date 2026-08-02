@@ -35,6 +35,7 @@ from mark17.introspect import generate as generate_introspect
 from mark17.cognitive_physics import CoreField, snapshot as physics_snapshot
 from mark17.fluid_flow import solve as solve_flow, state_from_core
 from mark17.attractor_core import snapshot as attention_snapshot
+from mark17.genesis import genesis
 
 ALLOWED_EVENTS = frozenset(
     {
@@ -278,6 +279,21 @@ def _attach_physics(
     # запроса не страдает.
     result["attention"] = attention_snapshot(result, steps=800)
 
+    # Космология ядра от T = 0. Барионная асимметрия берётся из слоя Дирака:
+    # пара «оценка / анти-оценка» либо аннигилировала, либо оставила вещество.
+    # Это вклад текущего события, а не накопленная за всё время статистика —
+    # для неё нужен счётчик в состоянии, которого пока нет.
+    anti = (evaluation or {}).get("anti") if isinstance(evaluation, dict) else None
+    annihilated = 1 if isinstance(anti, dict) and anti.get("annihilates") else 0
+    flow_state = result["flow"].get("state") or {}
+    result["genesis"] = genesis(
+        quanta=memory_count,
+        pairs=1,
+        annihilated=annihilated,
+        load=float(flow_state.get("density") or 0.0),
+        uncertainty=1.0 - float(result.get("confidence") or 0.0),
+    )
+
 
 def _merge_memory(
     result: dict[str, Any],
@@ -360,6 +376,9 @@ def normalize(result: dict[str, Any]) -> dict[str, Any]:
     attention = result.get("attention")
     if isinstance(attention, dict):
         normalized["attention"] = attention
+    origin = result.get("genesis")
+    if isinstance(origin, dict):
+        normalized["genesis"] = origin
     return normalized
 
 

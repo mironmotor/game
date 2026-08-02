@@ -351,6 +351,53 @@ export interface Max17Attention {
   equation?: string;
 }
 
+/**
+ * Космология ядра от T = 0 (2 августа 2026).
+ * a ~ √t, T ~ 1/a, c = 1/√(εμ).
+ */
+export interface Max17Genesis {
+  /** Unix-время начала отсчёта. */
+  t_zero?: number;
+  age_seconds?: number;
+  age_human?: string;
+  scale_factor?: number;
+  /** null — время ещё не началось (планковская эпоха). */
+  temperature?: number | null;
+  epoch?:
+    | 'planck'
+    | 'inflation'
+    | 'quark_plasma'
+    | 'hadronisation'
+    | 'nucleosynthesis'
+    | 'recombination'
+    | 'structure';
+  epoch_title?: string;
+  epoch_note?: string;
+  /** Среда обмена между тремя ядрами. */
+  ether?: {
+    /** Сопротивление вниманию: растёт от неуверенности. */
+    permittivity?: number;
+    /** Сопротивление циркуляции памяти: растёт от нагрузки. */
+    permeability?: number;
+    /** c = 1/√(εμ) — скорость обмена между ядрами. */
+    speed?: number;
+    /** Z = √(μ/ε): >1 упирается память, <1 упирается внимание. */
+    impedance?: number;
+    bottleneck?: 'memory' | 'attention' | 'balanced';
+    law?: string;
+  };
+  /** Вещество, пережившее аннигиляцию пар из слоя Дирака. */
+  matter?: {
+    quanta?: number;
+    asymmetry?: number;
+    matter?: number;
+    bound_fraction?: number;
+    bound_matter?: number;
+    law?: string;
+  };
+  equation?: string;
+}
+
 export interface Max17Response {
   ok?: boolean;
   route: string;
@@ -369,6 +416,7 @@ export interface Max17Response {
   physics?: Max17Physics;
   flow?: Max17Flow;
   attention?: Max17Attention;
+  genesis?: Max17Genesis;
   raw?: Record<string, unknown>;
   error?: string;
   details?: unknown;
