@@ -103,6 +103,14 @@ function friendlyError(e: unknown): string {
       return 'Этот способ входа выключен в Firebase (включи его в консоли → Authentication).';
     case 'auth/configuration-not-found':
       return 'Firebase Auth ещё не включён в консоли проекта.';
+    case 'auth/unauthorized-domain':
+      // Самая частая причина «не пускает» на превью Vercel: домен не в белом
+      // списке. Сырой текст Firebase ничего не подсказывает — пишем, что делать.
+      return (
+        `Домен ${typeof window !== 'undefined' ? window.location.hostname : 'этот'} ` +
+        'не разрешён в Firebase → Authentication → Settings → Authorized domains. ' +
+        'Вход тут не сработает, но приложение работает и без него.'
+      );
     default:
       return (e as { message?: string })?.message || 'Не удалось войти.';
   }
