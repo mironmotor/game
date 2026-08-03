@@ -22,11 +22,27 @@ warn() { printf '\033[1;33m[max17]\033[0m %s\n' "$*"; }
 fail() { printf '\033[1;31m[max17]\033[0m %s\n' "$*"; exit 1; }
 
 # ── проверки ──────────────────────────────────────────────────────────────────
-command -v python3 >/dev/null 2>&1 || fail "нет python3 — установи Xcode CLT: xcode-select --install"
-
-if ! python3 -c 'import numpy' >/dev/null 2>&1; then
-  fail "нет numpy — выполни: python3 -m pip install -r mark17/requirements.txt"
+# Интерпретатор берём из PYTHON_BIN, если он задан. Под launchd PATH другой,
+# чем в интерактивной оболочке, и «просто python3» там оказывается совсем не
+# тем питоном, у которого стоит numpy. Установщик это выясняет один раз и
+# прописывает найденный путь в plist.
+PY_BIN="${PYTHON_BIN:-}"
+if [ -z "$PY_BIN" ]; then
+  for cand in python3 /usr/bin/python3 /opt/homebrew/bin/python3 /usr/local/bin/python3; do
+    if command -v "$cand" >/dev/null 2>&1 && "$cand" -c 'import numpy' >/dev/null 2>&1; then
+      PY_BIN="$(command -v "$cand")"
+      break
+    fi
+  done
 fi
+[ -n "$PY_BIN" ] || PY_BIN="$(command -v python3 || true)"
+
+[ -n "$PY_BIN" ] || fail "нет python3 — установи Xcode CLT: xcode-select --install"
+
+if ! "$PY_BIN" -c 'import numpy' >/dev/null 2>&1; then
+  fail "у $PY_BIN нет numpy — выполни: $PY_BIN -m pip install --user -r mark17/requirements.txt"
+fi
+say "python: $PY_BIN"
 
 # ── порт ──────────────────────────────────────────────────────────────────────
 # На порту может уже кто-то сидеть. Тогда мост не сядет, а туннель уедет на
@@ -36,7 +52,7 @@ port_busy() {
     lsof -i ":$1" -sTCP:LISTEN >/dev/null 2>&1
   else
     # Без lsof — пробуем занять порт сами: не вышло, значит занят.
-    ! python3 - "$1" <<'PY' >/dev/null 2>&1
+    ! "$PY_BIN" - "$1" <<'PY' >/dev/null 2>&1
 import socket, sys
 s = socket.socket()
 try:
@@ -86,7 +102,7 @@ elif curl -s --max-time 2 "$OLLAMA_HOST/api/tags" >/dev/null 2>&1; then
   PROVIDER="ollama"
   if [ -z "$MODEL" ]; then
     MODEL="$(curl -s --max-time 3 "$OLLAMA_HOST/api/tags" \
-      | python3 -c 'import sys,json;m=json.load(sys.stdin).get("models",[]);print(m[0]["name"] if m else "")' 2>/dev/null)"
+      | "$PY_BIN" -c 'import sys,json;m=json.load(sys.stdin).get("models",[]);print(m[0]["name"] if m else "")' 2>/dev/null)"
   fi
   [ -n "$MODEL" ] && say "Ollama жива → LLM включён, модель: $MODEL" \
                   || { warn "Ollama жива, но моделей нет (ollama pull qwen2.5:3b) — LLM выключаю"; LLM_ENABLED=false; }
@@ -101,7 +117,7 @@ if [ -z "$TOKEN" ]; then
   if command -v openssl >/dev/null 2>&1; then
     TOKEN="$(openssl rand -hex 16)"
   else
-    TOKEN="$(python3 -c 'import secrets;print(secrets.token_hex(16))')"
+    TOKEN="$("$PY_BIN" -c 'import secrets;print(secrets.token_hex(16))')"
   fi
 fi
 
@@ -132,7 +148,7 @@ MAX17_LLM_MODEL="$MODEL" \
 MINIMAX_API_KEY="${MINIMAX_API_KEY:-}" \
 MINIMAX_MODEL="${MINIMAX_MODEL:-}" \
 MINIMAX_BASE_URL="${MINIMAX_BASE_URL:-}" \
-python3 -m mark17.server >"$SERVER_LOG" 2>&1 &
+"$PY_BIN" -m mark17.server >"$SERVER_LOG" 2>&1 &
 SERVER_PID=$!
 
 ok=""

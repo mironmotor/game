@@ -24,6 +24,30 @@ fi
 
 mkdir -p "$HOME/Library/LaunchAgents" "$(dirname "$LOG")"
 
+# Интерпретатор выясняем ЗДЕСЬ, а не в службе.
+#
+# launchd запускается с собственным PATH, и «просто python3» под ним — совсем
+# не тот питон, что в интерактивной оболочке. Numpy стоит у одного, служба
+# берёт другой, падает, KeepAlive поднимает её снова — и лог забивается одной
+# и той же строкой до бесконечности. Поэтому находим питон с numpy сейчас и
+# прописываем его полный путь в plist.
+PY_BIN=""
+for cand in python3 /usr/bin/python3 /opt/homebrew/bin/python3 /usr/local/bin/python3; do
+  if command -v "$cand" >/dev/null 2>&1 && "$cand" -c 'import numpy' >/dev/null 2>&1; then
+    PY_BIN="$(command -v "$cand")"
+    break
+  fi
+done
+
+if [ -z "$PY_BIN" ]; then
+  FALLBACK="$(command -v python3 || echo python3)"
+  echo "[max17] СТОП: ни у одного python3 нет numpy — служба будет падать в цикле."
+  echo "[max17] Поставь и запусти установку заново:"
+  echo "[max17]   $FALLBACK -m pip install --user -r $MARK17/requirements.txt"
+  exit 1
+fi
+echo "[max17] python: $PY_BIN"
+
 # Предполётная проверка. Служба живёт молча: её вывод уходит в лог, а имя
 # trycloudflare-туннеля меняется при каждом перезапуске. Если Vercel нельзя
 # обновить автоматически, прод будет смотреть на мёртвый адрес, и заметить
@@ -54,11 +78,16 @@ cat > "$PLIST" <<PLISTEOF
   <key>WorkingDirectory</key><string>$ROOT</string>
   <key>RunAtLoad</key><true/>
   <key>KeepAlive</key><true/>
+  <!-- Пауза между перезапусками: постоянная ошибка конфигурации не должна
+       крутиться в горячем цикле и забивать лог одной строкой. -->
+  <key>ThrottleInterval</key><integer>60</integer>
   <key>StandardOutPath</key><string>$LOG</string>
   <key>StandardErrorPath</key><string>$LOG</string>
   <key>EnvironmentVariables</key>
   <dict>
     <key>PATH</key><string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>
+    <!-- Полный путь к найденному питону: PATH под launchd ему не указ. -->
+    <key>PYTHON_BIN</key><string>$PY_BIN</string>
   </dict>
 </dict>
 </plist>
