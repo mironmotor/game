@@ -1,6 +1,4 @@
 import QuantumDream from '@/components/quantum/QuantumDream';
-import AuthGate from '@/components/auth/AuthGate';
-import AccountChip from '@/components/auth/AccountChip';
 
 export const metadata = {
   title: 'КВАНТОВЫЙ СОН ∴ G = MIRON',
@@ -9,9 +7,6 @@ export const metadata = {
 
 export default function QuantumPage() {
   return (
-    <AuthGate>
-      <AccountChip />
-      <QuantumDream />
-    </AuthGate>
+    <QuantumDream />
   );
 }

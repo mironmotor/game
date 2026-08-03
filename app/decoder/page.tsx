@@ -1,6 +1,4 @@
 import Decoder from '@/components/decoder/Decoder';
-import AuthGate from '@/components/auth/AuthGate';
-import AccountChip from '@/components/auth/AccountChip';
 
 export const metadata = {
   title: 'ДЕКОДЕР — Макс взламывает хэши',
@@ -9,9 +7,6 @@ export const metadata = {
 
 export default function DecoderPage() {
   return (
-    <AuthGate>
-      <AccountChip />
-      <Decoder />
-    </AuthGate>
+    <Decoder />
   );
 }
