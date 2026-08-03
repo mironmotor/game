@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { probePhysics } from '@/lib/physics-client';
 import type { Max17Response } from '@/lib/max17-client';
+import EtherField from './EtherField';
 import './physics.css';
 
 // ФИЗИКА — все десять уравнений, посчитанные на настоящем состоянии ядра.
@@ -124,6 +125,8 @@ export default function PhysicsPanel() {
           <code>{`cd ~/game\nbash mark17/install_mac_service.sh\ntail -20 ~/Library/Logs/max17bridge.log`}</code>
         </div>
       )}
+
+      {res && <EtherField data={res} />}
 
       {res && (
         <div className="phys-grid">
