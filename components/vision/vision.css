@@ -1,0 +1,58 @@
+/* Ядро MAX VISION — визуализация звука через эфир */
+.mv-screen {
+  position: fixed; inset: 0; display: flex; flex-direction: column;
+  background: #02030c; color: #dce8ff; overflow: hidden;
+  font-family: var(--font-hud-mono, monospace);
+}
+
+.mv-bar {
+  display: flex; align-items: center; gap: 12px; padding: 10px 16px; z-index: 3;
+  border-bottom: 1px solid rgba(90,140,255,0.2);
+  background: rgba(4,6,20,0.82); backdrop-filter: blur(8px);
+}
+.mv-logo {
+  display: grid; place-items: center; width: 34px; height: 34px; border-radius: 50%;
+  border: 1px solid rgba(120,160,255,0.5); color: #9ab8ff;
+  box-shadow: 0 0 16px rgba(120,160,255,0.45); font-size: 15px;
+}
+.mv-title { font-family: var(--font-hud-display, sans-serif); letter-spacing: 0.22em; font-size: 15px; color: #cfe0ff; text-shadow: 0 0 14px rgba(120,160,255,0.5); }
+.mv-sub { font-size: 10px; color: rgba(160,190,255,0.55); margin-top: 2px; }
+
+.mv-mic {
+  margin-left: auto; border: 1px solid rgba(120,160,255,0.4); background: rgba(120,160,255,0.1); color: #cfe0ff;
+  padding: 8px 15px; border-radius: 999px; font-size: 12px; font-weight: 700; font-family: inherit;
+  cursor: pointer; transition: all 0.15s; white-space: nowrap;
+}
+.mv-mic:hover { background: rgba(120,160,255,0.2); }
+.mv-mic.on { background: #6a8bff; color: #05081a; border-color: #6a8bff; box-shadow: 0 0 18px rgba(120,160,255,0.55); }
+
+.mv-canvas { flex: 1; min-height: 0; display: block; width: 100%; height: 100%; cursor: crosshair; touch-action: none; }
+
+.mv-spectrum { position: absolute; left: 0; right: 0; bottom: 30px; height: 60px; z-index: 2; pointer-events: none; opacity: 0.7; }
+.mv-spectrum-cv { width: 100%; height: 100%; display: block; }
+
+.mv-panel {
+  position: absolute; top: 66px; right: 14px; width: 210px; z-index: 4;
+  background: rgba(6,8,22,0.78); backdrop-filter: blur(9px);
+  border: 1px solid rgba(120,160,255,0.24); border-radius: 14px; padding: 13px 15px;
+  box-shadow: 0 10px 34px rgba(0,0,0,0.45); font-size: 11px;
+  display: flex; flex-direction: column; gap: 9px;
+}
+.mv-meter-head { display: flex; justify-content: space-between; font-size: 9px; letter-spacing: 0.08em; color: rgba(160,190,255,0.6); margin-bottom: 3px; text-transform: uppercase; }
+.mv-meter-track { height: 6px; border-radius: 4px; background: rgba(255,255,255,0.07); overflow: hidden; }
+.mv-meter-fill { height: 100%; border-radius: 4px; transition: width 0.12s; }
+.mv-row { display: flex; justify-content: space-between; padding-top: 4px; border-top: 1px solid rgba(120,160,255,0.12); }
+.mv-row span { color: rgba(160,190,255,0.7); }
+.mv-row b { color: #dce8ff; }
+.mv-accent { color: #7ba6ff !important; text-shadow: 0 0 10px rgba(120,160,255,0.6); }
+
+.mv-foot {
+  padding: 8px 16px; font-size: 10px; color: rgba(160,190,255,0.5); text-align: center;
+  border-top: 1px solid rgba(120,160,255,0.15); z-index: 3; background: rgba(4,6,20,0.7);
+}
+
+@media (max-width: 720px) {
+  .mv-panel { width: 150px; top: auto; bottom: 100px; padding: 10px 12px; }
+  .mv-sub { display: none; }
+  .mv-spectrum { height: 44px; bottom: 28px; }
+}

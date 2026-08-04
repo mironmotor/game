@@ -10,6 +10,11 @@ import { IDLE_SIGNAL, type QuantumSignal } from '@/components/hud/QuantumEyes';
 
 const clamp = (v: number, lo = 0, hi = 1) => Math.max(lo, Math.min(hi, v));
 
+// Число лог-разнесённых полос спектра для визуализаторов (MAX VISION).
+export const VISION_BANDS = 96;
+const F_MIN = 40;
+const F_MAX = 16000;
+
 /** Автокорреляционный детектор основного тона (как в звуковой сигнатуре). */
 function detectPitch(buf: Float32Array, sr: number): number {
   const N = buf.length;
@@ -49,6 +54,8 @@ export interface EfirSignalApi {
   status: string;
   start: () => Promise<void>;
   stop: () => void;
+  /** Лог-разнесённый спектр 0..1 (VISION_BANDS полос), сглажен по кадрам. */
+  spectrumRef: React.MutableRefObject<Float32Array>;
 }
 
 export function useEfirSignal(signalRef: React.MutableRefObject<QuantumSignal>): EfirSignalApi {
@@ -62,6 +69,8 @@ export function useEfirSignal(signalRef: React.MutableRefObject<QuantumSignal>):
   const binHzRef = useRef(0);
   const f0SmoothRef = useRef(0);
   const lastF0Ref = useRef(0);
+  const spectrumRef = useRef<Float32Array>(new Float32Array(VISION_BANDS));
+  const bandBinsRef = useRef<Array<{ lo: number; hi: number }>>([]);
 
   const [listening, setListening] = useState(false);
   const [status, setStatus] = useState('Впусти голос — эфир начнёт рождать материю');
@@ -76,6 +85,7 @@ export function useEfirSignal(signalRef: React.MutableRefObject<QuantumSignal>):
     freqAnalyserRef.current = null;
     pitchAnalyserRef.current = null;
     signalRef.current = { ...IDLE_SIGNAL };
+    spectrumRef.current.fill(0);
     setListening(false);
     setStatus('Эфир закрыт. Материя испаряется…');
   }, [signalRef]);
@@ -108,6 +118,20 @@ export function useEfirSignal(signalRef: React.MutableRefObject<QuantumSignal>):
       pitchBufRef.current = new Float32Array(new ArrayBuffer(pitchA.fftSize * 4));
       binHzRef.current = audioCtx.sampleRate / 4096;
       f0SmoothRef.current = 0;
+
+      // Границы лог-разнесённых полос спектра (частота растёт как в слухе — по ln).
+      const binHz0 = binHzRef.current;
+      const nBins = freqA.frequencyBinCount;
+      const edges: Array<{ lo: number; hi: number }> = [];
+      for (let b = 0; b < VISION_BANDS; b++) {
+        const fLo = F_MIN * Math.pow(F_MAX / F_MIN, b / VISION_BANDS);
+        const fHi = F_MIN * Math.pow(F_MAX / F_MIN, (b + 1) / VISION_BANDS);
+        const lo = Math.min(nBins - 1, Math.max(1, Math.floor(fLo / binHz0)));
+        const hi = Math.min(nBins - 1, Math.max(lo + 1, Math.ceil(fHi / binHz0)));
+        edges.push({ lo, hi });
+      }
+      bandBinsRef.current = edges;
+      spectrumRef.current.fill(0);
 
       const loop = () => {
         const fa = freqAnalyserRef.current;
@@ -149,6 +173,17 @@ export function useEfirSignal(signalRef: React.MutableRefObject<QuantumSignal>):
         const valence = clamp(0.5 + 0.25 * (brightness - 0.5) - 0.4 * jitter - 0.25 * (tension - 0.5));
 
         signalRef.current = { f0: F0, register, brightness, jitter, energy, voiced, arousal, valence, tension };
+
+        // лог-спектр для визуализаторов: усредняем бины полосы, сглаживаем по кадрам
+        const spec = spectrumRef.current;
+        const edges = bandBinsRef.current;
+        for (let b = 0; b < edges.length; b++) {
+          const { lo, hi } = edges[b];
+          let sum = 0;
+          for (let i = lo; i < hi; i++) sum += freq[i];
+          const val = clamp(sum / (hi - lo) / 255);
+          spec[b] = spec[b] * 0.6 + val * 0.4;
+        }
         rafRef.current = requestAnimationFrame(loop);
       };
 
@@ -162,5 +197,5 @@ export function useEfirSignal(signalRef: React.MutableRefObject<QuantumSignal>):
 
   useEffect(() => () => stop(), [stop]);
 
-  return { listening, status, start, stop };
+  return { listening, status, start, stop, spectrumRef };
 }
