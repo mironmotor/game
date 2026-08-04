@@ -5,6 +5,7 @@ import { GameHud, type HudNavId } from './GameHud';
 import VoiceSignature from './VoiceSignature';
 import { useGameState } from '@/hooks/use-game-state';
 import { sendMax17Event, type Max17Response } from '@/lib/max17-client';
+import { FlowStreamlines } from '@/components/hud/FlowStreamlines';
 import './hud.css';
 
 const AGI_INTRO =
@@ -123,10 +124,15 @@ function HudContent() {
   const [input, setInput] = useState('');
   const [agiMessage, setAgiMessage] = useState(AGI_INTRO);
   const [isListening, setIsListening] = useState(false);
+  // Прикреплённый файл: содержимое уходит Максу вместе с сообщением.
+  const [attached, setAttached] = useState<{ name: string; text: string } | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [activeNav, setActiveNav] = useState<HudNavId>('codex');
   const [sessionId, setSessionId] = useState<string | null>(null);
-  const [max17State, setMax17State] = useState<Pick<Max17Response, 'route' | 'confidence' | 'next_adaptation'> | null>(null);
+  const [max17State, setMax17State] = useState<Pick<
+    Max17Response,
+    'route' | 'confidence' | 'next_adaptation' | 'flow'
+  > | null>(null);
   const [voiceOpen, setVoiceOpen] = useState(false);
   const [conversationContext, setConversationContext] = useState('');
   const recognitionRef = useRef<SpeechRecognition | null>(null);
@@ -235,6 +241,7 @@ function HudContent() {
             route: max17.route,
             confidence: max17.confidence,
             next_adaptation: max17.next_adaptation,
+            flow: max17.flow,
           });
         }
         if (process.env.NODE_ENV === 'development') {
@@ -282,10 +289,14 @@ function HudContent() {
       const sid = activeSessionId ?? undefined;
       await saveMessage('user', userMsg, sid);
 
+      const textForCore = attached
+        ? `${userMsg}\n\n[ФАЙЛ: ${attached.name}]\n${attached.text}`
+        : userMsg;
+
       const max17 = await emitMax17HudEvent(
         {
           type: 'user_message',
-          text: userMsg,
+          text: textForCore,
           source: 'hud',
           timestamp: new Date().toISOString(),
         },
@@ -297,6 +308,7 @@ function HudContent() {
         : 'Локальный Max17-мост сейчас недоступен. Сообщение принято, основной HUD продолжает работать.';
 
       setAgiMessage(`Вы: ${userMsg} MAX17: ${fullResponse}`);
+      setAttached(null);
       await saveMessage('model', fullResponse, sid);
     } catch (e) {
       console.error(e);
@@ -409,6 +421,26 @@ function HudContent() {
       : 'Я слушаю. Что нужно сделать?';
   const max17Confidence = max17State ? Math.round(max17State.confidence * 100) : 0;
 
+  // Файл читаем прямо в браузере: наружу уходит уже текст, сам файл никуда не
+  // загружается. Ограничения — чтобы длинный файл не вытеснил из ответа всё.
+  const handleFilePick = useCallback(async (file: File) => {
+    const MAX_BYTES = 1_000_000;
+    if (file.size > MAX_BYTES) {
+      setAgiMessage(`MAX17: файл «${file.name}» больше 1 МБ — пришли кусок поменьше.`);
+      return;
+    }
+    try {
+      const text = await file.text();
+      const trimmed = text.slice(0, 20_000);
+      setAttached({ name: file.name, text: trimmed });
+      setAgiMessage(
+        `MAX17: файл «${file.name}» прочитан (${trimmed.length.toLocaleString('ru-RU')} символов). Напиши, что с ним сделать.`,
+      );
+    } catch {
+      setAgiMessage(`MAX17: не смог прочитать «${file.name}» — нужен текстовый файл.`);
+    }
+  }, []);
+
   if (!isLoaded) {
     return <div className="hud-loading">Загрузка HUD...</div>;
   }
@@ -431,6 +463,9 @@ function HudContent() {
         agiMessage={agiMessage}
         promptText={promptText}
         input={input}
+        attachedName={attached?.name}
+        onAttachClear={() => setAttached(null)}
+        onFilePick={handleFilePick}
         isListening={isListening}
         isLoading={isLoading}
         activeNav={activeNav}
@@ -471,6 +506,12 @@ function HudContent() {
           <span>{max17State.route}</span>
           <span className="px-1 text-white/25">·</span>
           <span>{max17Confidence}%</span>
+          {max17State.flow?.stream?.length ? (
+            <>
+              <span className="px-1 text-white/25">·</span>
+              <FlowStreamlines flow={max17State.flow} />
+            </>
+          ) : null}
           {max17State.next_adaptation && (
             <>
               <span className="px-1 text-white/25">·</span>

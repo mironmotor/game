@@ -9,16 +9,21 @@ import Link from 'next/link';
 const MODES: { href: string; label: string; c: string }[] = [
   { href: '/vision', label: 'MAX VISION · визуализация звука', c: '#6a8bff' },
   { href: '/efir', label: 'Эфир · реальность из голоса', c: '#ff2fd0' },
+  { href: '/mind', label: 'САМОСОЗНАНИЕ Макса', c: '#9d8bff' },
   { href: '/simulation', label: 'Симуляция Макса', c: '#59ffb2' },
+  { href: '/decoder', label: 'ДЕКОДЕР · взлом хэшей', c: '#39ff88' },
+  { href: '/quantum', label: 'Квантовый сон · G=MIRON', c: '#ff4d8d' },
   { href: '/neurodance', label: 'Хаос Нейро Дэнс', c: '#a855f7' },
   { href: '/splats', label: 'Брейнданс · 4D сплаты', c: '#be78ff' },
-  { href: '/attractor', label: 'Хаос-аттрактор · 3D', c: '#d9b8ff' },
+  { href: '/attractor', label: 'Бездна Хаоса ∞', c: '#d9b8ff' },
   { href: '/handbrain', label: 'Нейро-рука · камера', c: '#ff6ae0' },
   { href: '/maxgraph', label: 'Синапс-граф Max', c: '#4ea8ff' },
   { href: '/autoplan', label: 'Автоплан · ядро Max', c: '#ffb14e' },
   { href: '/evolution', label: 'Эволюция · 1 трлн', c: '#c9a0ff' },
   { href: '/brain', label: 'EdgeAI · Нейро-мозг', c: '#00ffc8' },
   { href: '/funnel', label: 'Воронка → Big Idea', c: '#00ff88' },
+  { href: '/tg', label: 'Big Idea · Telegram', c: '#35d0ff' },
+  { href: '/inbox', label: 'Инбокс Макса · фильтр', c: '#5ad1ff' },
 ];
 
 export default function ModeMenu() {

@@ -18,6 +18,12 @@ const ALLOWED_EVENTS = new Set([
   'synapse_graph',
   'big_idea',
   'simulation',
+  'ingest',
+  'decode',
+  'introspect',
+  'physics',
+  'web',
+  'compress_similar',
 ]);
 
 const DEFAULT_RESPONSE = {

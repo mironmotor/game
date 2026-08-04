@@ -521,3 +521,30 @@
     padding-bottom: env(safe-area-inset-bottom, 0px);
   }
 }
+
+/* Чип прикреплённого файла над строкой ввода. */
+.hud-attach-chip {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  max-width: min(420px, 90vw);
+  margin: 0 auto 6px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  border: 1px solid rgba(0, 242, 255, 0.28);
+  background: rgba(0, 242, 255, 0.07);
+  font-size: 11px;
+  color: rgba(220, 245, 255, 0.9);
+}
+.hud-attach-chip button {
+  border: none;
+  background: transparent;
+  color: rgba(220, 245, 255, 0.55);
+  font-size: 15px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0 2px;
+}
+.hud-attach-chip button:hover { color: #fff; }
+/* Кнопка-скрепка — это <label>, выравниваем как остальные иконки. */
+label.hud-icon-btn { display: inline-flex; align-items: center; justify-content: center; cursor: pointer; }

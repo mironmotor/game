@@ -11,7 +11,11 @@ MARK17="$(cd "$(dirname "$0")" && pwd)"
 ROOT="$(dirname "$MARK17")"
 cd "$ROOT" || exit 1
 
-PORT="${PORT:-8017}"
+# 8790, а не 8017: 8017 — это порт голосового сервера (MAX17_TTS_PORT), и когда
+# оба запущены, мост и синтез речи дерутся за него. Однажды туннель в итоге
+# смотрел на голос вместо ядра, а прод отвечал «Ядро Max недоступно».
+PORT="${PORT:-8790}"
+TTS_PORT="${MAX17_TTS_PORT:-8017}"
 LOG_DIR="${TMPDIR:-/tmp}/max17-bridge"
 mkdir -p "$LOG_DIR"
 SERVER_LOG="$LOG_DIR/server.log"
@@ -28,12 +32,67 @@ if ! python3 -c 'import numpy' >/dev/null 2>&1; then
   fail "нет numpy — выполни: python3 -m pip install -r mark17/requirements.txt"
 fi
 
-# Ollama: если жива — включаем LLM-роутинг через неё
+# ── порт ──────────────────────────────────────────────────────────────────────
+# На порту может уже кто-то сидеть. Тогда мост не сядет, а туннель уедет на
+# чужой сервис — и наружу поедет не ядро. Проверяем ДО запуска.
+port_busy() {
+  if command -v lsof >/dev/null 2>&1; then
+    lsof -i ":$1" -sTCP:LISTEN >/dev/null 2>&1
+  else
+    # Без lsof — пробуем занять порт сами: не вышло, значит занят.
+    ! python3 - "$1" <<'PY' >/dev/null 2>&1
+import socket, sys
+s = socket.socket()
+try:
+    s.bind(("127.0.0.1", int(sys.argv[1])))
+except OSError:
+    sys.exit(1)
+finally:
+    s.close()
+PY
+  fi
+}
+
+port_owner() {
+  command -v lsof >/dev/null 2>&1 || { printf 'неизвестно'; return; }
+  local who
+  who="$(lsof -i ":$1" -sTCP:LISTEN -Fc 2>/dev/null | grep '^c' | head -1 | cut -c2-)"
+  printf '%s' "${who:-неизвестно}"
+}
+
+if [ "$PORT" = "$TTS_PORT" ]; then
+  warn "PORT=$PORT совпадает с портом голосового сервера — мост и синтез речи столкнутся."
+  warn "Задай другой: PORT=8790 bash mark17/run_bridge_mac.sh"
+fi
+
+if port_busy "$PORT"; then
+  warn "порт $PORT занят процессом '$(port_owner "$PORT")' — это не наш мост"
+  ORIG_PORT="$PORT"
+  for candidate in $(seq $((ORIG_PORT + 1)) $((ORIG_PORT + 20))); do
+    if ! port_busy "$candidate"; then PORT="$candidate"; break; fi
+  done
+  [ "$PORT" = "$ORIG_PORT" ] && \
+    fail "свободного порта нет в диапазоне $((ORIG_PORT + 1))–$((ORIG_PORT + 20)) — освободи $ORIG_PORT"
+  say "перехожу на свободный порт $PORT"
+fi
+
+# Провайдер мозга Макса:
+#   MINIMAX_API_KEY задан → MiniMax (то, на чём думает Max Ultra)
+#   иначе если жива Ollama → Qwen/Gemma локально
+#   иначе → детерминированный режим
 OLLAMA_HOST="${MAX17_OLLAMA_HOST:-http://127.0.0.1:11434}"
 LLM_ENABLED=false
+PROVIDER="ollama"
 MODEL="${MAX17_LLM_MODEL:-}"
-if curl -s --max-time 2 "$OLLAMA_HOST/api/tags" >/dev/null 2>&1; then
+
+if [ -n "${MINIMAX_API_KEY:-}" ]; then
   LLM_ENABLED=true
+  PROVIDER="minimax"
+  MODEL="${MINIMAX_MODEL:-${MAX17_LLM_MODEL:-MiniMax-M2}}"
+  say "MiniMax-ключ найден → мозг Макса = MiniMax, модель: $MODEL"
+elif curl -s --max-time 2 "$OLLAMA_HOST/api/tags" >/dev/null 2>&1; then
+  LLM_ENABLED=true
+  PROVIDER="ollama"
   if [ -z "$MODEL" ]; then
     MODEL="$(curl -s --max-time 3 "$OLLAMA_HOST/api/tags" \
       | python3 -c 'import sys,json;m=json.load(sys.stdin).get("models",[]);print(m[0]["name"] if m else "")' 2>/dev/null)"
@@ -41,8 +100,8 @@ if curl -s --max-time 2 "$OLLAMA_HOST/api/tags" >/dev/null 2>&1; then
   [ -n "$MODEL" ] && say "Ollama жива → LLM включён, модель: $MODEL" \
                   || { warn "Ollama жива, но моделей нет (ollama pull qwen2.5:3b) — LLM выключаю"; LLM_ENABLED=false; }
 else
-  warn "Ollama не отвечает на $OLLAMA_HOST — мост пойдёт в детерминированном режиме (без LLM)."
-  warn "Чтобы включить Qwen: запусти Ollama и перезапусти скрипт."
+  warn "Ни MiniMax-ключа, ни Ollama — мост пойдёт в детерминированном режиме (без LLM)."
+  warn "MiniMax:  export MINIMAX_API_KEY=... и перезапусти.  Qwen: запусти Ollama."
 fi
 
 # Токен: из env или генерим
@@ -76,15 +135,21 @@ say "стартую мост Max17 на :$PORT (лог: $SERVER_LOG)"
 PORT="$PORT" \
 MAX17_BRIDGE_TOKEN="$TOKEN" \
 MAX17_LLM_ENABLED="$LLM_ENABLED" \
-MAX17_LLM_PROVIDER="ollama" \
+MAX17_LLM_PROVIDER="$PROVIDER" \
 MAX17_OLLAMA_HOST="$OLLAMA_HOST" \
 MAX17_LLM_MODEL="$MODEL" \
+MINIMAX_API_KEY="${MINIMAX_API_KEY:-}" \
+MINIMAX_MODEL="${MINIMAX_MODEL:-}" \
+MINIMAX_BASE_URL="${MINIMAX_BASE_URL:-}" \
 python3 -m mark17.server >"$SERVER_LOG" 2>&1 &
 SERVER_PID=$!
 
 ok=""
 for _ in $(seq 1 20); do
-  if curl -s --max-time 1 "http://127.0.0.1:$PORT/health" | grep -q '"ok": true'; then ok=1; break; fi
+  # Проверяем ИМЕННО service, а не просто "ok": true. Чужой сервис на этом
+  # порту тоже может ответить {"ok": true} — так однажды наружу уехал
+  # синтезатор речи вместо ядра, и полчаса ушло на поиски.
+  if curl -s --max-time 1 "http://127.0.0.1:$PORT/health" | grep -q '"service": "max17-bridge"'; then ok=1; break; fi
   sleep 0.5
 done
 [ -n "$ok" ] || { cat "$SERVER_LOG"; fail "мост не поднялся — лог выше"; }

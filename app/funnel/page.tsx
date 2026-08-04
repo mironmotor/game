@@ -1,6 +1,4 @@
 import FunnelApp from '@/components/funnel/FunnelApp';
-import AuthGate from '@/components/auth/AuthGate';
-import AccountChip from '@/components/auth/AccountChip';
 
 export const metadata = {
   title: 'Воронка — Big Idea Generator',
@@ -9,11 +7,8 @@ export const metadata = {
 
 export default function FunnelPage() {
   return (
-    <AuthGate>
-      <AccountChip />
-      <main className="min-h-screen">
+    <main className="min-h-screen">
         <FunnelApp />
       </main>
-    </AuthGate>
   );
 }

@@ -8,6 +8,7 @@ import {
   MapPin,
   Menu,
   Mic,
+  Paperclip,
   Play,
   Plus,
   Star,
@@ -47,6 +48,10 @@ export interface GameHudProps {
   onNavChange: (id: HudNavId) => void;
   onMissionToggle: (taskId: string) => void;
   onKeyDown?: (e: KeyboardEvent) => void;
+  /** Прикреплённый файл: Макс прочитает его вместе с сообщением. */
+  onFilePick?: (file: File) => void;
+  attachedName?: string;
+  onAttachClear?: () => void;
 }
 
 const NAV_ITEMS: { id: HudNavId; label: string; icon: ReactNode }[] = [
@@ -141,6 +146,9 @@ export function GameHud({
   onToggleListen,
   onNavChange,
   onMissionToggle,
+  onFilePick,
+  attachedName,
+  onAttachClear,
   onKeyDown,
 }: GameHudProps) {
   const displayMissions =
@@ -324,7 +332,31 @@ export function GameHud({
             )}
           </button>
           <p className="hud-prompt">{promptText}</p>
+          {attachedName && (
+            <div className="hud-attach-chip">
+              <Paperclip size={12} />
+              <span className="truncate">{attachedName}</span>
+              <button type="button" onClick={onAttachClear} aria-label="Убрать файл">×</button>
+            </div>
+          )}
           <div className="hud-input-bar">
+            <label
+              className="hud-icon-btn"
+              title="Прикрепить файл — Макс его прочитает"
+              aria-label="Прикрепить файл"
+            >
+              <Paperclip size={18} />
+              <input
+                type="file"
+                hidden
+                accept=".txt,.md,.csv,.json,.log,.py,.ts,.tsx,.js,.html,.xml,.yml,.yaml,text/*"
+                onChange={(e) => {
+                  const f = e.target.files?.[0];
+                  if (f && onFilePick) onFilePick(f);
+                  e.target.value = '';
+                }}
+              />
+            </label>
             <button
               type="button"
               className={`hud-icon-btn ${isListening ? 'active' : ''}`}

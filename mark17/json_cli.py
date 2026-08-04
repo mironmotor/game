@@ -24,11 +24,20 @@ from mark17.critic import evaluate_event
 from mark17.responder import compose_answer
 from mark17.vector_memory import VectorMemory
 from mark17.synapse_graph import SynapseGraph
-from mark17.consolidation import ConsolidationEngine
+from mark17.consolidation import ConsolidationEngine, SCALE_REFERENCE, friedmann
 from mark17.voice_state import VoiceProfiles, process_voice_event
 from mark17.planner import build_plan
 from mark17.big_idea import generate as generate_big_idea
 from mark17.dream_sim import generate as generate_dream_sim
+from mark17.ingest import generate as generate_ingest, split_stream
+from mark17.decoder import generate as generate_decode
+from mark17.introspect import generate as generate_introspect
+from mark17.cognitive_physics import CoreField, snapshot as physics_snapshot
+from mark17.fluid_flow import solve as solve_flow, state_from_core
+from mark17.attractor_core import snapshot as attention_snapshot
+from mark17.genesis import genesis
+from mark17 import web_sense
+from mark17.compression import compress as compress_similar
 
 ALLOWED_EVENTS = frozenset(
     {
@@ -44,6 +53,12 @@ ALLOWED_EVENTS = frozenset(
         "synapse_graph",
         "big_idea",
         "simulation",
+        "ingest",
+        "decode",
+        "introspect",
+        "physics",
+        "web",
+        "compress_similar",
     }
 )
 
@@ -88,6 +103,26 @@ def _as_event(data: dict[str, Any]) -> Event:
     elif event_type == "simulation":
         prompt = data.get("prompt") or data.get("text") or data.get("message") or ""
         payload["prompt"] = str(prompt)
+    elif event_type == "decode":
+        payload["target"] = str(data.get("target") or data.get("prompt") or data.get("text") or "")
+    elif event_type == "web":
+        payload["action"] = str(data.get("action") or ("read" if data.get("url") else "search"))
+        payload["url"] = str(data.get("url") or "")
+        payload["query"] = str(data.get("query") or data.get("text") or "")
+    elif event_type == "compress_similar":
+        raw = data.get("items")
+        payload["items"] = [str(x) for x in raw] if isinstance(raw, list) else []
+        try:
+            payload["threshold"] = float(data.get("threshold") or 0) or None
+        except (TypeError, ValueError):
+            payload["threshold"] = None
+    elif event_type == "ingest":
+        payload["interest"] = str(data.get("interest") or data.get("prompt") or "")
+        raw_items = data.get("items")
+        if isinstance(raw_items, list):
+            payload["items"] = [str(x) for x in raw_items]
+        else:
+            payload["items"] = split_stream(str(data.get("stream") or data.get("text") or ""))
 
     return Event(
         type=event_type,
@@ -203,6 +238,78 @@ def _recent_consolidated_patterns(brain: Mark17Brain, *, limit: int = 5) -> list
     return patterns
 
 
+def _attach_physics(
+    event: Event,
+    result: dict[str, Any],
+    evaluation: dict[str, Any] | None,
+    brain: Mark17Brain,
+    synapse_graph: SynapseGraph,
+    *,
+    previous_field: CoreField | None = None,
+) -> None:
+    """Attach the cognitive-physics reading and the HUD flow to a result.
+
+    Read-only with respect to the core: it measures, it does not change state.
+    """
+    # normalize() computes this too, but the physics needs it before that.
+    result["confidence"] = _confidence(result)
+
+    try:
+        memory_count = int(brain.memory.stats().get("memories") or 0)
+    except Exception:
+        memory_count = 0
+
+    try:
+        horizon = synapse_graph.horizon()
+    except Exception:
+        horizon = {"area": 0, "volume": 0, "edges": 0}
+
+    physics = physics_snapshot(event, result, evaluation, previous_field=previous_field)
+    physics["holography"] = {
+        key: horizon.get(key)
+        for key in (
+            "area",
+            "volume",
+            "edges",
+            "mass",
+            "entropy",
+            "temperature",
+            "information_bits",
+            "compression",
+            "equation",
+        )
+    }
+    result["physics"] = physics
+
+    result["flow"] = solve_flow(
+        state_from_core(
+            result,
+            memory_count=memory_count,
+            synapse_count=int(horizon.get("edges") or 0),
+        )
+    )
+
+    # Динамика внимания: fractal-eye отображение, чьи (a, b) сняты с состояния
+    # ядра. Короткая орбита — этого хватает для показателя Ляпунова, а latency
+    # запроса не страдает.
+    result["attention"] = attention_snapshot(result, steps=800)
+
+    # Космология ядра от T = 0. Барионная асимметрия берётся из слоя Дирака:
+    # пара «оценка / анти-оценка» либо аннигилировала, либо оставила вещество.
+    # Это вклад текущего события, а не накопленная за всё время статистика —
+    # для неё нужен счётчик в состоянии, которого пока нет.
+    anti = (evaluation or {}).get("anti") if isinstance(evaluation, dict) else None
+    annihilated = 1 if isinstance(anti, dict) and anti.get("annihilates") else 0
+    flow_state = result["flow"].get("state") or {}
+    result["genesis"] = genesis(
+        quanta=memory_count,
+        pairs=1,
+        annihilated=annihilated,
+        load=float(flow_state.get("density") or 0.0),
+        uncertainty=1.0 - float(result.get("confidence") or 0.0),
+    )
+
+
 def _merge_memory(
     result: dict[str, Any],
     *,
@@ -266,6 +373,31 @@ def normalize(result: dict[str, Any]) -> dict[str, Any]:
     sim = result.get("sim")
     if isinstance(sim, dict):
         normalized["sim"] = sim
+    ingest = result.get("ingest")
+    if isinstance(ingest, dict):
+        normalized["ingest"] = ingest
+    decode = result.get("decode")
+    if isinstance(decode, dict):
+        normalized["decode"] = decode
+    introspection = result.get("introspection")
+    if isinstance(introspection, dict):
+        normalized["introspection"] = introspection
+    physics = result.get("physics")
+    if isinstance(physics, dict):
+        normalized["physics"] = physics
+    flow = result.get("flow")
+    if isinstance(flow, dict):
+        normalized["flow"] = flow
+    attention = result.get("attention")
+    if isinstance(attention, dict):
+        normalized["attention"] = attention
+    origin = result.get("genesis")
+    if isinstance(origin, dict):
+        normalized["genesis"] = origin
+    for key in ("web", "compression", "links"):
+        value = result.get(key)
+        if isinstance(value, dict):
+            normalized[key] = value
     return normalized
 
 
@@ -305,6 +437,27 @@ def main() -> int:
         return 1
 
 
+def _attach_links(event: Event) -> None:
+    """Прочитать ссылки из сообщения и подложить их содержимое в payload.
+
+    Молча: если сети нет или ссылка не открылась, событие обрабатывается как
+    обычно — разбор ссылок не должен ронять переписку.
+    """
+    text = str(event.payload.get("text") or "")
+    urls = web_sense.extract_urls(text)
+    if not urls:
+        return
+    pages = [web_sense.fetch_url(u) for u in urls]
+    event.payload["links"] = [
+        {k: v for k, v in p.items() if k != "text"} for p in pages
+    ]
+    context = web_sense.as_context(pages)
+    if context:
+        # Подкладываем содержимое к тексту: так его увидят и LLM, и память.
+        event.payload["text"] = f"{text}\n\n[СОДЕРЖИМОЕ ССЫЛОК]\n{context}"
+        event.payload["link_context"] = context
+
+
 def _handle_event(event: Event, args: argparse.Namespace, state_dir: Path) -> dict[str, Any]:
     brain = Mark17Brain(
         state_dir,
@@ -317,6 +470,10 @@ def _handle_event(event: Event, args: argparse.Namespace, state_dir: Path) -> di
     synapse_graph = SynapseGraph(state_dir)
     if args.warmup:
         _run_warmup(args.warmup, brain, vector_memory, synapse_graph)
+    # Ссылка, кинутая в чат, должна читаться сама — иначе Макс отвечает про
+    # текст сообщения, не заглянув туда, куда его послали.
+    if event.type == "user_message":
+        _attach_links(event)
     if event.type == "sleep_consolidation":
         return _handle_sleep_consolidation(event, brain, vector_memory, synapse_graph)
     if event.type == "voice_state":
@@ -327,10 +484,27 @@ def _handle_event(event: Event, args: argparse.Namespace, state_dir: Path) -> di
         return _handle_big_idea(event, brain, synapse_graph)
     if event.type == "simulation":
         return _handle_simulation(event, brain, synapse_graph)
+    if event.type == "decode":
+        return _handle_decode(event, brain, synapse_graph)
+    if event.type == "web":
+        return _handle_web(event, brain, synapse_graph)
+    if event.type == "compress_similar":
+        return _handle_compress_similar(event, brain, synapse_graph)
+    if event.type == "introspect":
+        return _handle_introspect(event, brain, synapse_graph)
+    if event.type == "physics":
+        return _handle_physics(event, brain, vector_memory, synapse_graph)
+    if event.type == "ingest":
+        return _handle_ingest(event, brain, synapse_graph)
     if event.type == "synapse_graph":
         return _handle_synapse_graph(event, synapse_graph)
 
     result = brain.handle(event)
+    # Что удалось вычитать по ссылкам — в ответ, чтобы в интерфейсе было видно,
+    # читал Макс страницу или не смог до неё достучаться.
+    links = event.payload.get("links")
+    if isinstance(links, list) and links:
+        result["links"] = {"ok": any(l.get("ok") for l in links), "pages": links}
     _merge_memory(
         result,
         recalled=_recalled_memories(event, brain),
@@ -341,6 +515,7 @@ def _handle_event(event: Event, args: argparse.Namespace, state_dir: Path) -> di
     result["self_evaluation"] = evaluation.to_dict()
     result["next_adaptation"] = _next_adaptation(result)
     result["synapses"] = synapse_graph.update_from_event(event, result, result["self_evaluation"])
+    _attach_physics(event, result, result["self_evaluation"], brain, synapse_graph)
     answer = compose_answer(event, result, result["self_evaluation"])
     if answer:
         result["answer"] = answer
@@ -439,6 +614,329 @@ def _handle_simulation(event: Event, brain: Mark17Brain, synapse_graph: SynapseG
             Event(type="remember", payload={"note": prompt, "reinforce": "simulation"}, source="simulation"),
             hint=sim.get("thought", ""), action="simulation",
         )
+    brain.plasticity.save()
+    return result
+
+
+def _gather_self_state(brain: Mark17Brain, synapse_graph: SynapseGraph) -> dict[str, Any]:
+    """Собрать РЕАЛЬНОЕ состояние ядра: память, синапсы, недавняя активность."""
+    try:
+        mem_stats = brain.memory.stats()
+    except Exception:
+        mem_stats = {"memories": 0, "top": []}
+
+    recent_actions: list[str] = []
+    recent_hints: list[str] = []
+    try:
+        for hit in brain.memory.recent(limit=12):
+            content = hit.content if isinstance(hit.content, dict) else {}
+            action = str(content.get("action") or hit.event_type or "").strip()
+            hint = str(content.get("hint") or content.get("note") or "").strip()
+            if action:
+                recent_actions.append(action)
+            if hint:
+                recent_hints.append(hint)
+    except Exception:
+        pass
+
+    graph = {}
+    try:
+        graph = synapse_graph.get_graph(limit=40)
+    except Exception:
+        pass
+    edges = graph.get("edges", []) if isinstance(graph, dict) else []
+    top_relations = []
+    for e in edges[:6]:
+        rel = str(e.get("relation", "")).strip()
+        summ = str(e.get("summary", "")).strip()
+        top_relations.append(f"{rel}: {summ}"[:60] if summ else rel)
+
+    return {
+        "memories": mem_stats.get("memories", 0),
+        "top_memory_types": mem_stats.get("top", []),
+        "synapses_total": graph.get("total", len(edges)) if isinstance(graph, dict) else len(edges),
+        "recent_actions": recent_actions,
+        "recent_hints": recent_hints,
+        "top_relations": [r for r in top_relations if r],
+    }
+
+
+def _handle_web(event: Event, brain: Mark17Brain, synapse_graph: SynapseGraph) -> dict[str, Any]:
+    """Веб-чувство: прочитать ссылку или поискать в сети."""
+    action = str(event.payload.get("action") or "search")
+    url = str(event.payload.get("url") or "")
+    query = str(event.payload.get("query") or "")
+
+    if action == "read" or url:
+        page = web_sense.fetch_url(url)
+        web = {"ok": bool(page.get("ok")), "action": "read", "page": page}
+        hint = page.get("title", "") if page.get("ok") else f"ссылка не открылась: {page.get('error')}"
+    else:
+        found = web_sense.search(query, limit=6)
+        web = {"ok": bool(found.get("ok")), "action": "search", **found}
+        hint = (f"нашёл {len(found.get('results', []))} источников по «{query}»"
+                if found.get("ok") else f"поиск не дал результата: {found.get('error')}")
+
+    self_eval = {"score": 0.8 if web["ok"] else 0.2, "reason": hint,
+                 "store_memory": web["ok"], "reinforce": "web" if web["ok"] else ""}
+    result: dict[str, Any] = {
+        "ok": True, "event_type": event.type, "route": "web", "web": web,
+        "memory": {"hint": hint},
+        "plasticity": {"confidence": 0.85 if web["ok"] else 0.3, "action": "web",
+                       "learned": web["ok"]},
+        "llm": {"status": "skipped", "text": "web sense is deterministic", "latency_ms": 0.0},
+        "next_adaptation": hint,
+        "self_evaluation": self_eval,
+    }
+    result["synapses"] = synapse_graph.update_from_event(event, result, self_eval)
+    if web["ok"]:
+        brain.memory.remember(
+            Event(type="remember", payload={"note": hint, "reinforce": "web"}, source="web"),
+            hint=hint, action="web",
+        )
+    brain.plasticity.save()
+    return result
+
+
+def _handle_compress_similar(event: Event, brain: Mark17Brain, synapse_graph: SynapseGraph) -> dict[str, Any]:
+    """Свернуть похожие записи в одну с весом.
+
+    Без переданных items берём то, что накопила память — это основной режим:
+    Макс чистит собственные почти-дубли.
+    """
+    items = event.payload.get("items")
+    items = [str(x) for x in items] if isinstance(items, list) else []
+    source = "переданные записи"
+    if not items:
+        source = "память ядра"
+        try:
+            for hit in brain.memory.recent(limit=200):
+                content = hit.content if isinstance(hit.content, dict) else {}
+                text = str(content.get("hint") or content.get("note") or hit.signature or "")
+                if text:
+                    items.append(text)
+        except Exception:
+            pass
+
+    threshold = event.payload.get("threshold")
+    kwargs = {"threshold": float(threshold)} if threshold else {}
+    report = compress_similar([{"text": t} for t in items], **kwargs)
+    report["source"] = source
+
+    self_eval = {"score": 0.75, "reason": report["verdict"],
+                 "store_memory": report["merged_groups"] > 0, "reinforce": "compress"}
+    result: dict[str, Any] = {
+        "ok": True, "event_type": event.type, "route": "compress_similar",
+        "compression": report,
+        "memory": {"hint": report["verdict"]},
+        "plasticity": {"confidence": 0.8, "action": "compress",
+                       "learned": report["merged_groups"] > 0},
+        "llm": {"status": "skipped", "text": "compression is deterministic", "latency_ms": 0.0},
+        "next_adaptation": report["verdict"],
+        "self_evaluation": self_eval,
+    }
+    result["synapses"] = synapse_graph.update_from_event(event, result, self_eval)
+    brain.plasticity.save()
+    return result
+
+
+def _handle_introspect(event: Event, brain: Mark17Brain, synapse_graph: SynapseGraph) -> dict[str, Any]:
+    """Саморефлексия: Max смотрит своё состояние и решает, что делать (LLM или правила)."""
+    state = _gather_self_state(brain, synapse_graph)
+    introspection = generate_introspect(state, brain.llm)
+    self_eval = {
+        "score": 0.75,
+        "reason": f"introspection via {introspection['source']}",
+        "store_memory": True,
+        "reinforce": "introspect",
+    }
+    result: dict[str, Any] = {
+        "ok": True,
+        "event_type": event.type,
+        "route": "introspect",
+        "introspection": introspection,
+        "memory": {"hint": introspection.get("focus", "")},
+        "plasticity": {"confidence": 0.8 if introspection["source"].startswith("llm") else 0.6,
+                        "action": "introspect", "learned": True},
+        "llm": {"status": "ok" if introspection["source"].startswith("llm") else "skipped",
+                "text": f"source={introspection['source']}", "latency_ms": 0.0},
+        "next_adaptation": (introspection.get("priorities") or [{}])[0].get("action", ""),
+        "self_evaluation": self_eval,
+    }
+    result["synapses"] = synapse_graph.update_from_event(event, result, self_eval)
+    brain.memory.remember(
+        Event(type="remember",
+              payload={"note": introspection.get("assessment", ""), "reinforce": "introspect"},
+              source="introspect"),
+        hint=introspection.get("focus", ""), action="introspect",
+    )
+    brain.plasticity.save()
+    return result
+
+
+def _handle_physics(
+    event: Event,
+    brain: Mark17Brain,
+    vector_memory: VectorMemory,
+    synapse_graph: SynapseGraph,
+) -> dict[str, Any]:
+    """Read-only probe of the core's own physics — all ten equations at once.
+
+    Nothing here mutates the core: no plasticity step, no LLM call, no new
+    memories, no synapse writes. It measures and reports.
+    """
+    query = str(event.payload.get("query") or event.payload.get("text") or "").strip()
+    goal = str(event.payload.get("goal") or "").strip()
+
+    probe = Event(type="system_state", payload=dict(event.payload), source="physics")
+    # meta.decide() is a pure lookup — it does not step the network.
+    decision = brain.meta.decide(probe)
+
+    state = _gather_self_state(brain, synapse_graph)
+    try:
+        horizon = synapse_graph.horizon()
+    except Exception:
+        horizon = {"area": 0, "volume": 0, "edges": 0, "mass": 0.0}
+
+    result: dict[str, Any] = {
+        "ok": True,
+        "event_type": event.type,
+        "route": "physics",
+        "decision": {
+            "reason": decision.reason,
+            "confidence": decision.confidence,
+            "pattern_id": decision.pattern_id,
+            "superposition": decision.superposition,
+        },
+        "plasticity": {
+            "confidence": decision.confidence,
+            "action": "measure",
+            "learned": False,
+        },
+        "memory": {
+            "hint": f"{state['memories']} memories / {horizon.get('volume', 0)} nodes",
+        },
+        "llm": {"status": "skipped"},
+    }
+
+    evaluation = evaluate_event(probe, result)
+    result["self_evaluation"] = evaluation.to_dict()
+
+    _attach_physics(probe, result, result["self_evaluation"], brain, synapse_graph)
+
+    # Einstein: show the curvature by comparing against flat-space recall.
+    if query:
+        curved = vector_memory.recall(query, limit=3)
+        flat = vector_memory.recall(query, limit=3, relativistic=False)
+        result["physics"]["einstein"] = {
+            "query": query,
+            "curved": [hit.to_dict() for hit in curved],
+            "flat": [hit.to_dict() for hit in flat],
+            "reordered": [hit.id for hit in curved] != [hit.id for hit in flat],
+            "equation": "G_uv + Lambda g_uv = (8 pi G / c^4) T_uv",
+        }
+
+    # Friedmann: measure the memory universe without consolidating it.
+    volume = max(1, int(horizon.get("volume") or 0))
+    edges = int(horizon.get("edges") or 0)
+    mass = float(horizon.get("mass") or 0.0)
+    boundary = horizon.get("boundary") or []
+    total_degree = max(1, 2 * edges)
+    concentration = sum(int(n.get("degree") or 0) for n in boundary[:3]) / total_degree
+    result["physics"]["friedmann"] = friedmann(
+        0.5 + 0.5 * min(1.0, int(state.get("memories") or 0) / SCALE_REFERENCE),
+        min(1.5, mass / volume),
+        (concentration - 0.5) * 0.5,
+    )
+
+    # Feynman: if a goal came in, expose the full sum over histories for it.
+    if goal:
+        plan = build_plan(goal)
+        result["physics"]["feynman"] = {
+            "goal": goal,
+            "classical_path": plan.get("path"),
+            "action": plan.get("action"),
+            "paths": plan.get("paths", []),
+            "equation": "<x_f|x_i> = Integral D[x] exp(i S[x] / hbar)",
+        }
+
+    result["next_adaptation"] = result["physics"]["yang_mills"]["note"]
+    return result
+
+
+def _handle_decode(event: Event, brain: Mark17Brain, synapse_graph: SynapseGraph) -> dict[str, Any]:
+    """Режим ДЕКОДЕР: параметры визуальной сессии взлома хэшей (LLM или детерминированно)."""
+    target = str(event.payload.get("target") or "")
+    decode = generate_decode(target, brain.llm)
+    self_eval = {
+        "score": 0.72,
+        "reason": f"decode session via {decode['source']}",
+        "store_memory": bool(target),
+        "reinforce": "decode",
+    }
+    result: dict[str, Any] = {
+        "ok": True,
+        "event_type": event.type,
+        "route": "decode",
+        "decode": decode,
+        "memory": {"hint": decode.get("thought", "")},
+        "plasticity": {"confidence": 0.8 if decode["source"].startswith("llm") else 0.6,
+                        "action": "decode", "learned": True},
+        "llm": {"status": "ok" if decode["source"].startswith("llm") else "skipped",
+                "text": f"source={decode['source']}", "latency_ms": 0.0},
+        "next_adaptation": decode.get("thought", ""),
+        "self_evaluation": self_eval,
+    }
+    result["synapses"] = synapse_graph.update_from_event(event, result, self_eval)
+    if target:
+        brain.memory.remember(
+            Event(type="remember", payload={"note": f"decode: {target}", "reinforce": "decode"}, source="decoder"),
+            hint=decode.get("thought", ""), action="decode",
+        )
+    brain.plasticity.save()
+    return result
+
+
+def _handle_ingest(event: Event, brain: Mark17Brain, synapse_graph: SynapseGraph) -> dict[str, Any]:
+    """Инбокс Макса: фильтр потока по промпту; важное → память + синапсы."""
+    interest = str(event.payload.get("interest") or "")
+    items = event.payload.get("items")
+    if not isinstance(items, list):
+        items = []
+    ingest = generate_ingest(interest, [str(x) for x in items], brain.llm)
+
+    # Важное закрепляем в памяти и растим граф.
+    for entry in ingest["kept"]:
+        brain.memory.remember(
+            Event(
+                type="remember",
+                payload={"note": entry["text"], "interest": interest,
+                         "score": entry["score"], "reinforce": "ingest"},
+                source="inbox",
+            ),
+            hint=entry["text"][:80], action="ingest",
+        )
+
+    self_eval = {
+        "score": 0.7,
+        "reason": f"ingest kept {ingest['kept_count']}/{ingest['total']} via {ingest['source']}",
+        "store_memory": ingest["kept_count"] > 0,
+        "reinforce": "ingest",
+    }
+    result: dict[str, Any] = {
+        "ok": True,
+        "event_type": event.type,
+        "route": "ingest",
+        "ingest": ingest,
+        "memory": {"hint": f"важного: {ingest['kept_count']} из {ingest['total']}"},
+        "plasticity": {"confidence": 0.85 if ingest["source"].startswith("llm") else 0.6,
+                        "action": "ingest", "learned": ingest["kept_count"] > 0},
+        "llm": {"status": "ok" if ingest["source"].startswith("llm") else "skipped",
+                "text": f"source={ingest['source']}", "latency_ms": 0.0},
+        "next_adaptation": f"В память ушло {ingest['kept_count']} важных фрагментов.",
+        "self_evaluation": self_eval,
+    }
+    result["synapses"] = synapse_graph.update_from_event(event, result, self_eval)
     brain.plasticity.save()
     return result
 

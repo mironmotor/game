@@ -1,6 +1,4 @@
 import MaxSim from '@/components/simulation/MaxSim';
-import AuthGate from '@/components/auth/AuthGate';
-import AccountChip from '@/components/auth/AccountChip';
 
 export const metadata = {
   title: 'Симуляция Макса — управляемый хаос',
@@ -9,9 +7,6 @@ export const metadata = {
 
 export default function SimulationPage() {
   return (
-    <AuthGate>
-      <AccountChip />
-      <MaxSim />
-    </AuthGate>
+    <MaxSim />
   );
 }

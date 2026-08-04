@@ -70,6 +70,8 @@ class Mark17Brain:
                 "reason": decision.reason,
                 "confidence": decision.confidence,
                 "pattern_id": decision.pattern_id,
+                # The routing state vector before it collapsed onto this route.
+                "superposition": decision.superposition,
             },
         }
 

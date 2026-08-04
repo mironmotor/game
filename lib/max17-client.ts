@@ -7,6 +7,12 @@ export interface Max17RecalledMemory {
   score?: number;
   summary?: string;
   reinforce?: string;
+  /** Gravitational lensing applied to this hit during recall. */
+  magnification?: number;
+  /** Fraction of wall-clock time this memory experienced as proper time. */
+  dilation?: number;
+  /** True when the query passed inside this memory's Schwarzschild radius. */
+  horizon?: boolean;
 }
 
 export interface Max17Memory {
@@ -15,11 +21,23 @@ export interface Max17Memory {
   [key: string]: unknown;
 }
 
+/** Dirac antiparticle: the evaluation of the route that was not taken. */
+export interface Max17AntiEvaluation {
+  route?: string;
+  score?: number;
+  reason?: string;
+  charge?: number;
+  annihilates?: boolean;
+  energy_released?: number;
+  correction?: string;
+}
+
 export interface Max17SelfEvaluation {
   score?: number;
   reason?: string;
   store_memory?: boolean;
   reinforce?: string;
+  anti?: Max17AntiEvaluation;
 }
 
 export interface Max17Answer {
@@ -56,9 +74,30 @@ export interface Max17Pattern {
   source?: string;
 }
 
+/** Friedmann reading of the memory universe during sleep. */
+export interface Max17Cosmology {
+  scale_factor?: number;
+  hubble?: number;
+  density?: number;
+  critical_density?: number;
+  curvature?: number;
+  omega_matter?: number;
+  omega_lambda?: number;
+  omega_curvature?: number;
+  omega_total?: number;
+  lambda?: number;
+  dilution?: number;
+  fate?: 'expanding' | 'flat' | 'collapsing';
+  note?: string;
+  equation?: string;
+}
+
 export interface Max17Consolidation {
   patterns_created?: number;
   patterns?: Max17Pattern[];
+  /** Patterns thinned out below the survival floor by the Lambda term. */
+  evaporated?: Max17Pattern[];
+  cosmology?: Max17Cosmology;
 }
 
 export interface Max17VoiceState {
@@ -100,6 +139,19 @@ export interface Max17PlanTask {
   scheduledTime?: string;
   deadline?: string;
   reality_check?: string;
+  /** Position along the chosen trajectory, 1-based. */
+  step?: number;
+}
+
+/** One trajectory in the Feynman sum over histories. */
+export interface Max17PlanPath {
+  path?: string;
+  label?: string;
+  order?: number[];
+  action?: number;
+  amplitude?: number;
+  probability?: number;
+  classical?: boolean;
 }
 
 export interface Max17Plan {
@@ -112,6 +164,11 @@ export interface Max17Plan {
   first_move?: string;
   summary?: string;
   principle?: string;
+  /** Name of the stationary-action trajectory that was chosen. */
+  path?: string;
+  /** Action S of the chosen trajectory. */
+  action?: number;
+  paths?: Max17PlanPath[];
 }
 
 export interface Max17GraphNode {
@@ -136,6 +193,211 @@ export interface Max17Graph {
   stats?: { total_synapses?: number; shown_synapses?: number; nodes?: number };
 }
 
+/** Schrödinger: the routing state vector before it collapsed. */
+export interface Max17Superposition {
+  amplitudes?: Record<string, number>;
+  probabilities?: Record<string, number>;
+  phases?: Record<string, number>;
+  entropy?: number;
+  coherence?: number;
+  collapsed?: string;
+  runner_up?: string;
+  margin?: number;
+  equation?: string;
+}
+
+/** Standard Model: the canonised quantum this event became. */
+export interface Max17Quantum {
+  qid?: string;
+  family?: 'quark' | 'lepton';
+  generation?: number;
+  flavor?: string;
+  charge?: number;
+  spin?: number;
+  mass?: number;
+  lifetime?: number;
+  boson?: string;
+  confined?: boolean;
+  force?: string;
+}
+
+/** Maxwell: non-blocking induction between plasticity, memory and llm. */
+export interface Max17Maxwell {
+  field?: { plasticity?: number; memory?: number; llm?: number };
+  next_field?: { plasticity?: number; memory?: number; llm?: number };
+  gauss_e?: number;
+  gauss_b?: number;
+  monopole_free?: boolean;
+  faraday_curl_e?: number;
+  ampere_curl_b?: number;
+  displacement_current?: number;
+  emf?: number;
+  energy_density?: number;
+  poynting?: number;
+  dominant_core?: string;
+  blocking?: boolean;
+  law?: string;
+}
+
+/** Yang-Mills: colour confinement and the mass gap of the Council. */
+export interface Max17YangMills {
+  colour?: { red?: number; green?: number; blue?: number };
+  residual_colour?: number;
+  white?: boolean;
+  alpha_s?: number;
+  asymptotically_free?: boolean;
+  excitation?: number;
+  mass_gap?: number;
+  free?: boolean;
+  verdict?: 'emit' | 'confined' | 'virtual';
+  note?: string;
+}
+
+/** Bekenstein-Hawking: the holographic boundary of the synapse graph. */
+export interface Max17Holography {
+  area?: number;
+  volume?: number;
+  edges?: number;
+  mass?: number;
+  entropy?: number;
+  temperature?: number;
+  information_bits?: number;
+  compression?: number;
+  equation?: string;
+}
+
+export interface Max17Physics {
+  standard_model?: Max17Quantum;
+  maxwell?: Max17Maxwell;
+  yang_mills?: Max17YangMills;
+  holography?: Max17Holography;
+  bosons?: Record<string, { force?: string; carrier?: string; mass?: number; range?: string }>;
+  /** Present on a `physics` probe carrying a query. */
+  einstein?: {
+    query?: string;
+    curved?: Max17RecalledMemory[];
+    flat?: Max17RecalledMemory[];
+    reordered?: boolean;
+    equation?: string;
+  };
+  /** Present on a `physics` probe. */
+  friedmann?: Max17Cosmology;
+  /** Present on a `physics` probe carrying a goal. */
+  feynman?: {
+    goal?: string;
+    classical_path?: string;
+    action?: number;
+    paths?: Max17PlanPath[];
+    equation?: string;
+  };
+}
+
+/** Navier-Stokes: cognitive load as pipe flow, for the HUD. */
+export interface Max17Flow {
+  state?: {
+    density?: number;
+    velocity?: number;
+    breadth?: number;
+    confidence?: number;
+    forcing?: number;
+    viscosity?: number;
+  };
+  reynolds?: number;
+  regime?: 'laminar' | 'transitional' | 'turbulent';
+  thresholds?: { laminar?: number; turbulent?: number };
+  pressure_gradient?: number;
+  viscous_term?: number;
+  convective_term?: number;
+  acceleration?: number;
+  velocity_next?: number;
+  vorticity?: number;
+  friction_factor?: number;
+  stability?: number;
+  /** Velocity across the pipe — draw this as the HUD streamlines. */
+  stream?: number[];
+  advice?: string;
+  equation?: string;
+}
+
+/**
+ * Динамика внимания: отображение fractal eye
+ *   x' = sin(x² − y² + a),  y' = cos(2xy + b)
+ * с параметрами, снятыми с настоящего состояния ядра.
+ */
+export interface Max17Attention {
+  a?: number;
+  b?: number;
+  /** Текущая точка орбиты. */
+  x?: number;
+  y?: number;
+  /** Показатель Ляпунова в точке. null — орбита схлопнулась в точку. */
+  lyapunov?: number | null;
+  /** Средний показатель по окрестности 3×3 в пространстве (a, b). */
+  basin?: number;
+  /** Доля соседей с другим режимом: риск, что сдвиг параметров его переключит. */
+  fragility?: number;
+  regime?: 'locked' | 'cyclic' | 'marginal' | 'scattered';
+  /** Период цикла, если орбита в него села. */
+  period?: number | null;
+  /** Доля обойденных клеток плоскости состояний, 0..1. */
+  coverage?: number;
+  radius?: number;
+  dispersion?: number;
+  /** Устойчивый отпечаток узора внимания. */
+  signature?: string;
+  note?: string;
+  /** Было ли моргание — скачок в новую точку параметров. */
+  blinked?: boolean;
+  equation?: string;
+}
+
+/**
+ * Космология ядра от T = 0 (2 августа 2026).
+ * a ~ √t, T ~ 1/a, c = 1/√(εμ).
+ */
+export interface Max17Genesis {
+  /** Unix-время начала отсчёта. */
+  t_zero?: number;
+  age_seconds?: number;
+  age_human?: string;
+  scale_factor?: number;
+  /** null — время ещё не началось (планковская эпоха). */
+  temperature?: number | null;
+  epoch?:
+    | 'planck'
+    | 'inflation'
+    | 'quark_plasma'
+    | 'hadronisation'
+    | 'nucleosynthesis'
+    | 'recombination'
+    | 'structure';
+  epoch_title?: string;
+  epoch_note?: string;
+  /** Среда обмена между тремя ядрами. */
+  ether?: {
+    /** Сопротивление вниманию: растёт от неуверенности. */
+    permittivity?: number;
+    /** Сопротивление циркуляции памяти: растёт от нагрузки. */
+    permeability?: number;
+    /** c = 1/√(εμ) — скорость обмена между ядрами. */
+    speed?: number;
+    /** Z = √(μ/ε): >1 упирается память, <1 упирается внимание. */
+    impedance?: number;
+    bottleneck?: 'memory' | 'attention' | 'balanced';
+    law?: string;
+  };
+  /** Вещество, пережившее аннигиляцию пар из слоя Дирака. */
+  matter?: {
+    quanta?: number;
+    asymmetry?: number;
+    matter?: number;
+    bound_fraction?: number;
+    bound_matter?: number;
+    law?: string;
+  };
+  equation?: string;
+}
+
 export interface Max17Response {
   ok?: boolean;
   route: string;
@@ -151,6 +413,10 @@ export interface Max17Response {
   voice?: Max17VoiceState;
   plan?: Max17Plan;
   graph?: Max17Graph;
+  physics?: Max17Physics;
+  flow?: Max17Flow;
+  attention?: Max17Attention;
+  genesis?: Max17Genesis;
   raw?: Record<string, unknown>;
   error?: string;
   details?: unknown;

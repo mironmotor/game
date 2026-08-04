@@ -223,7 +223,7 @@ export default function Attractor() {
       <div className="at-bar">
         <span className="at-logo">△∞</span>
         <div>
-          <div className="at-title">ХАОС-АТТРАКТОР · 3D</div>
+          <div className="at-title">БЕЗДНА ХАОСА ∞</div>
           <code className="at-formula">{a.formula}</code>
         </div>
         <div className="at-stats"><span>частиц: <b>{N.toLocaleString('ru-RU')}</b></span><span><b>{fps}</b> fps</span></div>
