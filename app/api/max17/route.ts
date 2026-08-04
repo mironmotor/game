@@ -22,6 +22,8 @@ const ALLOWED_EVENTS = new Set([
   'decode',
   'introspect',
   'physics',
+  'web',
+  'compress_similar',
 ]);
 
 const DEFAULT_RESPONSE = {
