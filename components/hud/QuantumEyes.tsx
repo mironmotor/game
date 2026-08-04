@@ -380,14 +380,21 @@ export default function QuantumEyes({ signalRef, active, className }: QuantumEye
       const sigmaN = (lerp(0.28, 0.62, clamp(sig.arousal))).toFixed(2);
       ctx.fillStyle = 'rgba(180,220,240,0.5)';
       ctx.font = '10px ui-monospace, monospace';
-      ctx.textAlign = 'left';
-      ctx.fillText(`ψ ∝ e^(−r²/2σ²)·e^(iθ)`, 10, h - 22);
-      ctx.textAlign = 'right';
-      ctx.fillText(
-        `e=2.718 · θ=${thetaDeg}° · σ=${sigmaN} · коллапс ×${collapseRef.current.count}`,
-        w - 10,
-        h - 22,
-      );
+      // В узком окне (глаза врезаны в угол другого режима) две боковые строки
+      // наезжают друг на друга — тогда показываем только короткую сводку.
+      if (w >= 420) {
+        ctx.textAlign = 'left';
+        ctx.fillText(`ψ ∝ e^(−r²/2σ²)·e^(iθ)`, 10, h - 22);
+        ctx.textAlign = 'right';
+        ctx.fillText(
+          `e=2.718 · θ=${thetaDeg}° · σ=${sigmaN} · коллапс ×${collapseRef.current.count}`,
+          w - 10,
+          h - 22,
+        );
+      } else {
+        ctx.textAlign = 'center';
+        ctx.fillText(`e=2.718 · θ=${thetaDeg}° · ×${collapseRef.current.count}`, w / 2, h - 22);
+      }
       ctx.textAlign = 'center';
       ctx.fillStyle = sig.voiced ? 'rgba(0,242,255,0.75)' : 'rgba(150,190,220,0.4)';
       ctx.fillText(
