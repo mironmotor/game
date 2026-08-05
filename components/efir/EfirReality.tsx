@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from 'react';
 import './efir.css';
 import QuantumEyes, { IDLE_SIGNAL, type QuantumSignal } from '@/components/hud/QuantumEyes';
 import { useEfirSignal } from '@/hooks/use-efir-signal';
+import { HUE_LUT, hueIndex } from '@/lib/hue-lut';
 
 // ── Эфир · 3D-реальность из голоса ───────────────────────────────────────────
 // Голос не крутит готовое облако — он РОЖДАЕТ материю. Каждый озвученный кадр
@@ -17,8 +18,16 @@ import { useEfirSignal } from '@/hooks/use-efir-signal';
 // свой проектор 3D→2D (yaw/pitch + перспектива), ноль внешних зависимостей.
 
 const E = 2.718281828459045;
-const N = 15000; // ёмкость пула частиц
+// Потолка у пула нет: массивы растут по мере надобности. Численность частиц
+// держит только сама физика — равновесие «темп рождения × время жизни»
+// (каждая гаснет по e^(−t/τ)), а не искусственный лимит.
+const INITIAL_CAP = 8192;
 const TWO_PI = Math.PI * 2;
+
+// Единственная ручка плотности — темпа рождения. Потолка на число частиц нет:
+// пул растёт сам, численность держит равновесие «рождение × время жизни».
+// 1 — плотный живой космос; 6 — шланг на сотни тысяч частиц.
+const DENSITY = 1;
 
 const clamp = (v: number, lo = 0, hi = 1) => Math.max(lo, Math.min(hi, v));
 const lerp = (a: number, b: number, t: number) => a + (b - a) * t;
@@ -47,15 +56,18 @@ export default function EfirReality() {
   });
 
   // Частицы — SoA. rad/ang/hgt — цилиндрические координаты диска-галактики.
+  // count — сколько живых; массивы растут вдвое, когда живых становится больше.
   const sim = useRef({
-    rad: new Float32Array(N),
-    ang: new Float32Array(N),
-    hgt: new Float32Array(N),
-    born: new Float32Array(N).fill(-1e9),
-    life: new Float32Array(N),
-    hue: new Float32Array(N),
-    spin: new Float32Array(N), // индивидуальная орбитальная скорость
-    cursor: 0,
+    rad: new Float32Array(INITIAL_CAP),
+    ang: new Float32Array(INITIAL_CAP),
+    hgt: new Float32Array(INITIAL_CAP),
+    born: new Float32Array(INITIAL_CAP),
+    life: new Float32Array(INITIAL_CAP),
+    hue: new Float32Array(INITIAL_CAP),
+    spin: new Float32Array(INITIAL_CAP), // индивидуальная орбитальная скорость
+    count: 0,
+    cap: INITIAL_CAP,
+    peak: 0,
     t: 0,
     phase: 0, // фаза Эйлера θ
     yaw: 0.6,
@@ -96,9 +108,52 @@ export default function EfirReality() {
     let last = 0;
     let hudAcc = 0;
 
-    // Зажечь частицу из текущего эфира: посадить её на логарифмическую спираль.
-    const ignite = (i: number, now: number, sig: QuantumSignal) => {
+    // Слой частиц: рисуем их в собственный пиксельный буфер (аддитивно) и
+    // переносим на холст одним вызовом — тогда счёт может расти без потолка.
+    const layer = document.createElement('canvas');
+    const lctx = layer.getContext('2d');
+    let img: ImageData | null = null;
+
+    // Расширить пул вдвое — вызывается, когда живых стало больше ёмкости.
+    const grow = () => {
       const s = sim.current;
+      const cap = s.cap * 2;
+      const g = (a: Float32Array) => {
+        const n = new Float32Array(cap);
+        n.set(a);
+        return n;
+      };
+      s.rad = g(s.rad);
+      s.ang = g(s.ang);
+      s.hgt = g(s.hgt);
+      s.born = g(s.born);
+      s.life = g(s.life);
+      s.hue = g(s.hue);
+      s.spin = g(s.spin);
+      s.cap = cap;
+    };
+
+    // Вычеркнуть погасшую частицу: на её место переносим последнюю живую.
+    const removeAt = (i: number) => {
+      const s = sim.current;
+      const last = s.count - 1;
+      if (i !== last) {
+        s.rad[i] = s.rad[last];
+        s.ang[i] = s.ang[last];
+        s.hgt[i] = s.hgt[last];
+        s.born[i] = s.born[last];
+        s.life[i] = s.life[last];
+        s.hue[i] = s.hue[last];
+        s.spin[i] = s.spin[last];
+      }
+      s.count = last;
+    };
+
+    // Зажечь новую частицу из текущего эфира: посадить её на лог-спираль.
+    const ignite = (now: number, sig: QuantumSignal) => {
+      const s = sim.current;
+      if (s.count >= s.cap) grow();
+      const i = s.count++;
       // напряжение закручивает рукава: спокойствие — раскрытая спираль (b велик),
       // стресс — тугая пружина (b мал).
       const b = lerp(0.5, 0.16, clamp(sig.tension));
@@ -136,13 +191,11 @@ export default function EfirReality() {
       const omega = TWO_PI * (sig.voiced ? clamp(sig.f0 / 260, 0.15, 4) : 0.25);
       s.phase += omega * dt;
 
-      // ЭМИССИЯ ИЗ ЭФИРА: озвученный кадр рождает частицы (число ∝ энергии)
+      // ЭМИССИЯ ИЗ ЭФИРА: озвученный кадр рождает частицы (число ∝ энергии).
+      // Верхней планки нет — сколько голоса, столько материи.
       if (sig.voiced) {
-        const emit = Math.round(2 + sig.energy * 12 + sig.brightness * 6);
-        for (let k = 0; k < emit; k++) {
-          ignite(s.cursor, now, sig);
-          s.cursor = (s.cursor + 1) % N;
-        }
+        const emit = Math.round((4 + sig.energy * 60 + sig.brightness * 26) * DENSITY * (dt * 60));
+        for (let k = 0; k < emit; k++) ignite(now, sig);
       }
 
       // гравитация ядра e^(−κ·d): возбуждение → сильный короткий стяг (тугое ядро)
@@ -176,18 +229,23 @@ export default function EfirReality() {
       ctx.fillRect(cx - scale * 2.4, cy - scale * 2.4, scale * 4.8, scale * 4.8);
 
       ctx.globalCompositeOperation = 'lighter';
-      let alive = 0;
-      for (let i = 0; i < N; i++) {
-        const born = s.born[i];
-        if (born < 0) continue;
-        const age = now - born;
-        const life = s.life[i];
-        const decay = expE(-age / life); // e^(−t/τ)
+
+      if (lctx && (layer.width !== w || layer.height !== h) && w > 0 && h > 0) {
+        layer.width = w;
+        layer.height = h;
+        img = lctx.createImageData(w, h);
+      }
+      const data = img ? img.data : null;
+      if (data) data.fill(0);
+
+      let i = 0;
+      while (i < s.count) {
+        const age = now - s.born[i];
+        const decay = expE(-age / s.life[i]); // e^(−t/τ)
         if (decay < 0.04) {
-          s.born[i] = -1e9;
+          removeAt(i); // на место погасшей встала последняя — i не двигаем
           continue;
         }
-        alive++;
 
         // орбита + лёгкий внешний дрейф − стяг ядра
         let rad = s.rad[i];
@@ -209,24 +267,50 @@ export default function EfirReality() {
         const z2 = wy * spit + z1 * cpit;
 
         const persp = focal / (focal + (z2 + camDist) * scale * 0.06);
-        if (persp <= 0) continue;
         const px = cx + x1 * scale * persp;
         const py = cy + y1 * scale * persp;
-        if (px < -4 || px >= w + 4 || py < -4 || py >= h + 4) continue;
+        const onScreen = persp > 0 && px >= -4 && px < w + 4 && py >= -4 && py < h + 4;
 
-        // атмосферная дымка e^(−z/d): дальнее тускнеет
-        const fog = clamp(expE(-(z2 + camDist) / 12));
-        // ближе к ядру — ярче, добела
-        const coreHot = clamp(1 - rad / 3);
-        const light = 55 + coreHot * 35 + decay * 8;
-        const alpha = decay * fog * (0.28 + coreHot * 0.4);
-        if (alpha < 0.01) continue;
-        const size = Math.max(0.6, persp * (1 + coreHot * 1.4));
+        if (onScreen && data) {
+          // атмосферная дымка e^(−z/d): дальнее тускнеет
+          const fog = clamp(expE(-(z2 + camDist) / 12));
+          // ближе к ядру — ярче, добела
+          const coreHot = clamp(1 - rad / 3);
+          const alpha = decay * fog * (0.28 + coreHot * 0.4);
+          if (alpha >= 0.01) {
+            const white = clamp(coreHot * 0.75); // к ядру выбеливает
+            const hi = hueIndex(s.hue[i]);
+            const r = (HUE_LUT[hi] + (255 - HUE_LUT[hi]) * white) * alpha;
+            const g = (HUE_LUT[hi + 1] + (255 - HUE_LUT[hi + 1]) * white) * alpha;
+            const bl = (HUE_LUT[hi + 2] + (255 - HUE_LUT[hi + 2]) * white) * alpha;
+            const xi = px | 0;
+            const yi = py | 0;
+            if (xi >= 0 && xi < w && yi >= 0 && yi < h) {
+              const o = (yi * w + xi) * 4;
+              data[o] += r;
+              data[o + 1] += g;
+              data[o + 2] += bl;
+              data[o + 3] = 255;
+              // ближние крупные частицы получают мягкое ядро
+              if (persp > 1 && coreHot > 0.3) {
+                const hr = r * 0.5;
+                const hg = g * 0.5;
+                const hb = bl * 0.5;
+                if (xi + 1 < w) { const p = o + 4; data[p] += hr; data[p + 1] += hg; data[p + 2] += hb; data[p + 3] = 255; }
+                if (yi + 1 < h) { const p = o + w * 4; data[p] += hr; data[p + 1] += hg; data[p + 2] += hb; data[p + 3] = 255; }
+              }
+            }
+          }
+        }
+        i++;
+      }
 
-        ctx.fillStyle = `hsla(${s.hue[i]}, 100%, ${Math.min(92, light)}%, ${alpha})`;
-        ctx.fillRect(px, py, size, size);
+      if (lctx && img) {
+        lctx.putImageData(img, 0, 0);
+        ctx.drawImage(layer, 0, 0, w, h);
       }
       ctx.globalCompositeOperation = 'source-over';
+      if (s.count > s.peak) s.peak = s.count;
 
       // авто-вращение, когда не тащим мышью
       if (!s.drag) s.yaw += 0.06 * dt;
@@ -240,7 +324,7 @@ export default function EfirReality() {
           arousal: sig.arousal,
           valence: sig.valence,
           tension: sig.tension,
-          alive,
+          alive: s.count,
           arms: Math.round(lerp(4, 2, clamp(sig.tension))),
           b: lerp(0.5, 0.16, clamp(sig.tension)),
           tau: lerp(1.1, 6.5, clamp(sig.valence)),
@@ -279,8 +363,6 @@ export default function EfirReality() {
   const onUp = () => {
     sim.current.drag = false;
   };
-
-  const pct = (v: number) => Math.round(v * 100);
 
   return (
     <div ref={wrapRef} className="ef-screen">
@@ -342,9 +424,8 @@ export default function EfirReality() {
       </div>
 
       <div className="ef-foot">
-        Audio · FFT → Частицы → Спираль e^(bθ) → Эфир &nbsp;·&nbsp; тащи мышью — облети космос &nbsp;·&nbsp; {pct(
-          clamp(hud.alive / N),
-        )}% плотности
+        Audio · FFT → Частицы → Спираль e^(bθ) → Эфир &nbsp;·&nbsp; тащи мышью — облети космос &nbsp;·&nbsp;
+        без потолка: {hud.alive.toLocaleString('ru-RU')} живых
       </div>
     </div>
   );
