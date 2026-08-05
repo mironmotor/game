@@ -5,6 +5,17 @@ import './efir.css';
 import QuantumEyes, { IDLE_SIGNAL, type QuantumSignal } from '@/components/hud/QuantumEyes';
 import { useEfirSignal } from '@/hooks/use-efir-signal';
 import { HUE_LUT, hueIndex } from '@/lib/hue-lut';
+import { sendMax17Event, type Max17World, type Max17WorldLaws } from '@/lib/max17-client';
+
+// Как часто отправлять ядру перепись мира. Раз в секунду достаточно: ядро
+// смотрит на мир, а не управляет каждым кадром.
+const CENSUS_INTERVAL = 1.0;
+// Сколько живых частиц считать «полным» миром при расчёте плотности.
+const DENSITY_REFERENCE = 50000;
+// На сколько угловых секторов делим диск, чтобы измерить симметрию мира.
+const SECTORS = 12;
+// Конечный радиус ядра: ближе частица подойти не может.
+const CORE_RADIUS = 0.12;
 
 // ── Эфир · 3D-реальность из голоса ───────────────────────────────────────────
 // Голос не крутит готовое облако — он РОЖДАЕТ материю. Каждый озвученный кадр
@@ -51,6 +62,11 @@ export default function EfirReality() {
   const signalRef = useRef<QuantumSignal>({ ...IDLE_SIGNAL });
   const { listening, status, start, stop } = useEfirSignal(signalRef);
   const [showEyes, setShowEyes] = useState(true);
+  // Законы, присланные ядром. Мир живёт по ним до следующей переписи.
+  const lawsRef = useRef<Max17WorldLaws | null>(null);
+  const censusBusyRef = useRef(false);
+  const sectorsRef = useRef<Float32Array>(new Float32Array(SECTORS));
+  const [world, setWorld] = useState<Max17World | null>(null);
   const [hud, setHud] = useState<HudReadout>({
     f0: 0, arousal: 0, valence: 0.5, tension: 0, alive: 0, arms: 3, b: 0.4, tau: 3, kappa: 2,
   });
@@ -68,6 +84,10 @@ export default function EfirReality() {
     count: 0,
     cap: INITIAL_CAP,
     peak: 0,
+    // счётчики для переписи: сколько родилось и погасло с прошлого отчёта
+    bornAcc: 0,
+    diedAcc: 0,
+    censusAcc: 0,
     t: 0,
     phase: 0, // фаза Эйлера θ
     yaw: 0.6,
@@ -136,6 +156,7 @@ export default function EfirReality() {
     // Вычеркнуть погасшую частицу: на её место переносим последнюю живую.
     const removeAt = (i: number) => {
       const s = sim.current;
+      s.diedAcc++;
       const last = s.count - 1;
       if (i !== last) {
         s.rad[i] = s.rad[last];
@@ -153,6 +174,7 @@ export default function EfirReality() {
     const ignite = (now: number, sig: QuantumSignal) => {
       const s = sim.current;
       if (s.count >= s.cap) grow();
+      s.bornAcc++;
       const i = s.count++;
       // напряжение закручивает рукава: спокойствие — раскрытая спираль (b велик),
       // стресс — тугая пружина (b мал).
@@ -171,8 +193,10 @@ export default function EfirReality() {
       // высота диска: тоньше к краю, чуть приподнята регистром
       s.hgt[i] = (Math.random() - 0.5) * (0.9 - tt * 0.6) + (sig.register - 0.5) * 0.7;
       s.born[i] = now;
-      // позитив — долгая светящаяся жизнь; негатив — быстрые искры
-      s.life[i] = lerp(1.1, 6.5, clamp(sig.valence)) * (0.7 + Math.random() * 0.6);
+      // Позитив — долгая светящаяся жизнь; негатив — быстрые искры. Густой
+      // эфир ядра (impedance) удерживает рождённое дольше — это его закон.
+      const lifeScale = lawsRef.current?.lifetime_scale ?? 1;
+      s.life[i] = lerp(1.1, 6.5, clamp(sig.valence)) * (0.7 + Math.random() * 0.6) * lifeScale;
       // магента-палитра: позитив → фиолет, негатив → горячий розовый
       s.hue[i] = 316 + (sig.valence - 0.5) * -40 + (Math.random() - 0.5) * 14;
       // дифференциальное вращение: ближе к ядру — быстрее (шир рукавов)
@@ -193,8 +217,13 @@ export default function EfirReality() {
 
       // ЭМИССИЯ ИЗ ЭФИРА: озвученный кадр рождает частицы (число ∝ энергии).
       // Верхней планки нет — сколько голоса, столько материи.
+      // Импеданс эфира — цена излучения в среду, поэтому он прямо задаёт,
+      // сколько материи мир может позволить себе родить.
       if (sig.voiced) {
-        const emit = Math.round((4 + sig.energy * 60 + sig.brightness * 26) * DENSITY * (dt * 60));
+        const emitScale = lawsRef.current?.emission_scale ?? 1;
+        const emit = Math.round(
+          (4 + sig.energy * 60 + sig.brightness * 26) * DENSITY * emitScale * (dt * 60),
+        );
         for (let k = 0; k < emit; k++) ignite(now, sig);
       }
 
@@ -238,6 +267,12 @@ export default function EfirReality() {
       const data = img ? img.data : null;
       if (data) data.fill(0);
 
+      // Копим перепись прямо в цикле — отдельный проход по частицам не нужен.
+      let radSum = 0;
+      let hueSum = 0;
+      const sectors = sectorsRef.current;
+      sectors.fill(0);
+
       let i = 0;
       while (i < s.count) {
         const age = now - s.born[i];
@@ -251,11 +286,19 @@ export default function EfirReality() {
         let rad = s.rad[i];
         const pull = expE(-kappa * rad) * gStrength; // экранированная гравитация
         rad += (0.22 - pull) * dt; // квазиравновесие рукавов
+        // У ядра конечный размер. Без этого частица проваливается в
+        // отрицательный радиус, там e^(−κ·r) обращается в рост, стяг взрывается
+        // и уносит её в бесконечность — облако молча теряет вещество.
+        if (rad < CORE_RADIUS) rad = CORE_RADIUS;
         s.rad[i] = rad;
         s.ang[i] += s.spin[i] * dt;
         s.hgt[i] *= 1 - 0.12 * dt; // диск потихоньку уплощается
 
         const ang = s.ang[i];
+        radSum += rad;
+        hueSum += s.hue[i];
+        sectors[(((ang % TWO_PI) + TWO_PI) % TWO_PI) * (SECTORS / TWO_PI) | 0]++;
+
         const wx = rad * Math.cos(ang);
         const wz = rad * Math.sin(ang);
         const wy = s.hgt[i];
@@ -314,6 +357,63 @@ export default function EfirReality() {
 
       // авто-вращение, когда не тащим мышью
       if (!s.drag) s.yaw += 0.06 * dt;
+
+      // ПЕРЕПИСЬ: раз в секунду ядро узнаёт, каким стал мир, и отвечает
+      // законами следующего интервала. Без этого Макс мир не видит вообще.
+      s.censusAcc += dt;
+      if (s.censusAcc >= CENSUS_INTERVAL && !censusBusyRef.current) {
+        const dtCensus = s.censusAcc;
+        s.censusAcc = 0;
+        const alive = s.count;
+        // Симметрия: насколько ровно частицы разложены по секторам диска.
+        let symmetry = 0;
+        if (alive > 0) {
+          const mean = alive / SECTORS;
+          let dev = 0;
+          for (let k = 0; k < SECTORS; k++) dev += Math.abs(sectors[k] - mean);
+          symmetry = clamp(1 - dev / (2 * alive));
+        }
+        // Ядро не должно получать нечисла ни при каком стечении обстоятельств:
+        // одна испорченная частица не имеет права испортить перепись мира.
+        const fin = (v: number) => (Number.isFinite(v) ? v : 0);
+        const census = {
+          alive,
+          born: s.bornAcc,
+          died: s.diedAcc,
+          radius: fin(alive > 0 ? radSum / alive : 0),
+          density: clamp(alive / DENSITY_REFERENCE),
+          spiral_b: fin(lerp(0.5, 0.16, clamp(sig.tension))),
+          arms: Math.round(lerp(4, 2, clamp(sig.tension))),
+          hue: fin(alive > 0 ? ((hueSum / alive) % 360 + 360) % 360 : 316),
+          symmetry: fin(symmetry),
+          energy: fin(sig.energy),
+          dt: fin(dtCensus) || 1,
+        };
+        s.bornAcc = 0;
+        s.diedAcc = 0;
+        censusBusyRef.current = true;
+        void sendMax17Event({
+          type: 'world_state',
+          user_id: 'miron',
+          title: 'эфир',
+          census,
+          voice: { tension: sig.tension, arousal: sig.arousal, valence: sig.valence },
+          source: 'efir',
+          timestamp: new Date().toISOString(),
+        })
+          .then((res) => {
+            if (res.world) {
+              setWorld(res.world);
+              if (res.world.laws) lawsRef.current = res.world.laws;
+            }
+          })
+          .catch(() => {
+            // мост недоступен — мир просто живёт по своим законам
+          })
+          .finally(() => {
+            censusBusyRef.current = false;
+          });
+      }
 
       // телеметрия HUD (throttled)
       hudAcc += dt;
@@ -415,6 +515,22 @@ export default function EfirReality() {
         <Row k="Жизнь τ" v={`${hud.tau.toFixed(1)} с`} />
         <Row k="Гравитация κ" v={hud.kappa.toFixed(2)} />
         <Row k="Частиц в эфире" v={`${hud.alive}`} accent />
+
+        {/* Что ядро знает о мире — раньше не знало ничего */}
+        {world && (
+          <div className="ef-world">
+            <div className="ef-world-title">МИР В ЯДРЕ</div>
+            <Row k="Адрес" v={world.world?.id ?? '—'} />
+            <Row k="Эпоха" v={world.laws?.epoch_title ?? '—'} />
+            <Row
+              k="Вещество"
+              v={`${world.body_count ?? 0}${world.laws?.can_condense ? '' : ' · горячо'}`}
+              accent
+            />
+            {world.hint && <div className="ef-world-hint">{world.hint}</div>}
+          </div>
+        )}
+
         <div className="ef-bars">
           <Meter label="Возбуждение" v={hud.arousal} c="#ff2fd0" />
           <Meter label="Позитив" v={hud.valence} c="#c07bff" />

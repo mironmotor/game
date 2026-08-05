@@ -26,6 +26,7 @@ from mark17.vector_memory import VectorMemory
 from mark17.synapse_graph import SynapseGraph
 from mark17.consolidation import ConsolidationEngine, SCALE_REFERENCE, friedmann
 from mark17.voice_state import VoiceProfiles, process_voice_event
+from mark17.world_model import WorldModel, process_world_event
 from mark17.planner import build_plan
 from mark17.big_idea import generate as generate_big_idea
 from mark17.dream_sim import generate as generate_dream_sim
@@ -49,6 +50,7 @@ ALLOWED_EVENTS = frozenset(
         "system_state",
         "sleep_consolidation",
         "voice_state",
+        "world_state",
         "auto_plan",
         "synapse_graph",
         "big_idea",
@@ -361,6 +363,9 @@ def normalize(result: dict[str, Any]) -> dict[str, Any]:
     voice = result.get("voice")
     if isinstance(voice, dict):
         normalized["voice"] = voice
+    world = result.get("world")
+    if isinstance(world, dict):
+        normalized["world"] = world
     plan = result.get("plan")
     if isinstance(plan, dict):
         normalized["plan"] = plan
@@ -478,6 +483,8 @@ def _handle_event(event: Event, args: argparse.Namespace, state_dir: Path) -> di
         return _handle_sleep_consolidation(event, brain, vector_memory, synapse_graph)
     if event.type == "voice_state":
         return _handle_voice_state(event, brain, vector_memory, synapse_graph, state_dir)
+    if event.type == "world_state":
+        return _handle_world_state(event, brain, synapse_graph, state_dir)
     if event.type == "auto_plan":
         return _handle_auto_plan(event, brain, vector_memory, synapse_graph)
     if event.type == "big_idea":
@@ -1067,6 +1074,85 @@ def _handle_voice_state(
     result["synapses"] = synapse_graph.update_from_event(event, result, evaluation)
     brain.plasticity.save()
     return result
+
+
+def _handle_world_state(
+    event: Event,
+    brain: Mark17Brain,
+    synapse_graph: SynapseGraph,
+    state_dir: Path,
+) -> dict[str, Any]:
+    """Перепись 3D-мира: ядро видит мир, сгущает вещество и выдаёт законы.
+
+    Это единственное место, где Max17 получает информацию о том, что рисуется
+    в браузере. Раньше поток был односторонним, и мир умирал вместе с вкладкой.
+    """
+    model = WorldModel(state_dir)
+    tension = 0.0
+    voice_payload = event.payload.get("voice")
+    if isinstance(voice_payload, dict):
+        try:
+            tension = float(voice_payload.get("tension", 0.0) or 0.0)
+        except (TypeError, ValueError):
+            tension = 0.0
+
+    world = process_world_event(event.payload, model, tension=tension)
+    hint = f"{world['world']['id']}: {world['hint']}"
+    bodies_born = len(world["new_bodies"])
+
+    result: dict[str, Any] = {
+        "ok": True,
+        "event_type": event.type,
+        "route": "world_state",
+        "world": world,
+        "memory": {"hint": hint},
+        "plasticity": {
+            "confidence": round(_clamp_unit(world["census"]["density"]), 3),
+            "action": "world_observed",
+            "learned": bodies_born > 0,
+        },
+        "llm": {"status": "skipped", "text": "Мир прочитан ядром Max, без LLM.", "latency_ms": 0.0},
+        "decision": {"reason": hint, "confidence": round(_clamp_unit(world["census"]["density"]), 3)},
+        "next_adaptation": world["hint"],
+        "self_evaluation": {
+            "score": round(_clamp_unit(world["census"]["density"]), 3),
+            "reason": hint,
+            # Помним только рождение вещества: переписи идут раз в секунду и
+            # засорили бы память, а сгустившееся вещество — событие.
+            "store_memory": bodies_born > 0,
+            "reinforce": "world_matter" if bodies_born else "world_census",
+        },
+    }
+
+    if bodies_born:
+        brain.memory.remember(
+            Event(
+                type="remember",
+                payload={
+                    "note": world["hint"],
+                    "world_id": world["world"]["id"],
+                    "seed": world["world"]["seed"],
+                    "bodies": bodies_born,
+                    "epoch": world["laws"]["epoch"],
+                },
+                source="world",
+            ),
+            hint=hint,
+            action="world_matter",
+        )
+
+    result["synapses"] = synapse_graph.update_from_event(
+        event, result, result["self_evaluation"]
+    )
+    brain.plasticity.save()
+    return result
+
+
+def _clamp_unit(value: Any) -> float:
+    try:
+        return max(0.0, min(1.0, float(value)))
+    except (TypeError, ValueError):
+        return 0.0
 
 
 def _voice_adaptation(voice: dict[str, Any]) -> str:
