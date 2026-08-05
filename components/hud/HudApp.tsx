@@ -364,6 +364,8 @@ function HudContent() {
 
   const [now, setNow] = useState(() => new Date());
   const [input, setInput] = useState('');
+  // Прикреплённый файл: содержимое уходит Максу вместе с сообщением.
+  const [attached, setAttached] = useState<{ name: string; text: string } | null>(null);
   const [agiMessage, setAgiMessage] = useState(() => t('hud.tagline'));
   const [isListening, setIsListening] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
@@ -1803,10 +1805,16 @@ function HudContent() {
       await saveMessage('user', userMsg, sid);
       reachGoal('max_message'); // цель Метрики: главное действие — заговорил с MAX
 
+      const attachedNow = attached;
+      setAttached(null);
+      const textForCore = attachedNow
+        ? `${userMsg}\n\n[ФАЙЛ: ${attachedNow.name}]\n${attachedNow.text}`
+        : userMsg;
+
       const max17 = await emitMax17HudEvent(
         {
           type: 'user_message',
-          text: userMsg,
+          text: textForCore,
           source: 'hud',
           timestamp: new Date().toISOString(),
         },
@@ -2049,6 +2057,26 @@ function HudContent() {
         ? 'listening'
         : 'idle';
 
+  // Файл читаем прямо в браузере: наружу уходит уже текст, сам файл никуда не
+  // загружается. Потолки — чтобы длинный файл не вытеснил из ответа всё остальное.
+  const handleFilePick = async (file: File) => {
+    const MAX_BYTES = 1_000_000;
+    if (file.size > MAX_BYTES) {
+      setAgiMessage(`MAX17: файл «${file.name}» больше 1 МБ — пришли кусок поменьше.`);
+      return;
+    }
+    try {
+      const text = await file.text();
+      const trimmed = text.slice(0, 20_000);
+      setAttached({ name: file.name, text: trimmed });
+      setAgiMessage(
+        `MAX17: файл «${file.name}» прочитан (${trimmed.length.toLocaleString('ru-RU')} символов). Напиши, что с ним сделать.`,
+      );
+    } catch {
+      setAgiMessage(`MAX17: не смог прочитать «${file.name}» — нужен текстовый файл.`);
+    }
+  };
+
   if (!isLoaded) {
     return <div className="hud-loading">{t('common.loading')}…</div>;
   }
@@ -2072,6 +2100,9 @@ function HudContent() {
         log={log}
         promptText={promptText}
         input={input}
+        attachedName={attached?.name}
+        onAttachClear={() => setAttached(null)}
+        onFilePick={handleFilePick}
         isListening={isListening}
         isLoading={isLoading}
         isCameraActive={cameraStatus === 'active' || cameraStatus === 'starting'}

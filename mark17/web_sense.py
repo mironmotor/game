@@ -12,9 +12,11 @@ topics and marks them honestly as curated, not fetched.
 from __future__ import annotations
 
 import html
+import ipaddress
 import json
 import os
 import re
+import socket
 import ssl
 import time
 import urllib.error
@@ -30,6 +32,7 @@ TITLE_RE = re.compile(r"<title[^>]*>(.*?)</title>", re.IGNORECASE | re.DOTALL)
 TAG_RE = re.compile(r"<[^>]+>")
 SPACE_RE = re.compile(r"\s+")
 CYRILLIC_RE = re.compile(r"[а-яёА-ЯЁ]")
+URL_RE = re.compile(r"https?://[^\s<>\"'\)\]]+", re.IGNORECASE)
 
 WEB_SYNAPSE_TARGET = 1_000_000
 
@@ -354,9 +357,79 @@ def _search_duckduckgo(query: str, *, limit: int) -> list[str]:
     return urls
 
 
+def is_public_url(url: str) -> tuple[bool, str]:
+    """Пускать наружу только публичные адреса. Возвращает (можно, причина).
+
+    Ссылку в исследование может подсунуть пользователь, а Макс ходит по ней с
+    машины, где рядом крутятся его же внутренние сервисы. Без этой проверки
+    ссылка вида http://127.0.0.1:8790/ заставила бы его дёргать собственный
+    мост, а http://169.254.169.254/ — метаданные облака (SSRF).
+    """
+    try:
+        parsed = urllib.parse.urlparse(url)
+    except ValueError:
+        return False, "неразбираемая ссылка"
+    if parsed.scheme not in ("http", "https"):
+        return False, f"схема {parsed.scheme or '—'} не поддерживается"
+    host = (parsed.hostname or "").strip("[]")
+    if not host:
+        return False, "пустой хост"
+    try:
+        infos = socket.getaddrinfo(host, None)
+    except socket.gaierror:
+        return False, "хост не резолвится"
+    for info in infos:
+        try:
+            ip = ipaddress.ip_address(info[4][0])
+        except ValueError:
+            return False, "нераспознанный адрес"
+        if (ip.is_private or ip.is_loopback or ip.is_link_local
+                or ip.is_reserved or ip.is_multicast or ip.is_unspecified):
+            return False, f"внутренний адрес ({ip}) — наружу только публичные"
+    return True, ""
+
+
+def to_ascii_url(url: str) -> str:
+    """Кириллица в адресе → проценты, домен → IDNA.
+
+    Русские ссылки — норма, а http-запрос принимает только ASCII: без этого
+    «example.com/статья» падало с 'ascii' codec can't encode.
+    """
+    parsed = urllib.parse.urlparse(url)
+    host = parsed.hostname or ""
+    try:
+        host = host.encode("idna").decode("ascii")
+    except (UnicodeError, UnicodeDecodeError):
+        pass
+    netloc = f"{host}:{parsed.port}" if parsed.port else host
+    if parsed.username:
+        creds = parsed.username + (f":{parsed.password}" if parsed.password else "")
+        netloc = f"{creds}@{netloc}"
+    # safe= с «%» не ломает уже закодированные адреса.
+    path = urllib.parse.quote(parsed.path, safe="/%:@!$&'()*+,;=~-._")
+    query = urllib.parse.quote(parsed.query, safe="/%:@!$&'()*+,;=?~-._")
+    return urllib.parse.urlunparse((parsed.scheme, netloc, path, parsed.params, query, ""))
+
+
+def extract_urls(text: str, limit: int = 3) -> list[str]:
+    """Ссылки из произвольного текста — для авторазбора сообщений в чате."""
+    found: list[str] = []
+    for match in URL_RE.finditer(str(text or "")):
+        candidate = match.group(0).rstrip(".,;:!?")
+        if candidate not in found:
+            found.append(candidate)
+        if len(found) >= limit:
+            break
+    return found
+
+
 def _fetch_url(url: str, *, timeout: int = 10) -> FetchResult:
+    allowed, why = is_public_url(url)
+    if not allowed:
+        return FetchResult(url=url, title="", text="", ok=False, error=why)
+
     request = urllib.request.Request(
-        url,
+        to_ascii_url(url),
         headers={
             "User-Agent": "Max17-WebSense/0.1 (+local research; no image upload)",
             "Accept": "text/html, text/plain;q=0.9, */*;q=0.2",

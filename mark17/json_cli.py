@@ -60,12 +60,14 @@ from mark17.neural_graph import ClusteredNeuralGraph, TARGET_NEURAL_SYNAPSES
 from mark17.curiosity import CuriosityLedger
 from mark17.orchestrator import classify as classify_intent
 from mark17.source_memory import SourceMemory
+from mark17.compression import compress as compress_similar
 from mark17.big_idea import generate as generate_big_idea
 from mark17.dream_sim import generate as generate_dream_sim
 from mark17.ingest import generate as generate_ingest, split_stream
 from mark17.decoder import generate as generate_decode
 from mark17 import reality as reality_ledger
 from mark17.ultimate_core import MAX_ULTIMATE_TARGET_SYNAPSES, bootstrap_ultimate_core
+from mark17 import web_sense
 from mark17.web_sense import (
     WEB_SYNAPSE_TARGET,
     detect_knowledge_gap,
@@ -128,6 +130,7 @@ ALLOWED_EVENTS = frozenset(
         "simulation",
         "ingest",
         "decode",
+        "compress_similar",
     }
 )
 
@@ -170,6 +173,13 @@ def _as_event(data: dict[str, Any]) -> Event:
             payload["amount"] = float(data.get("amount") or 0)
         except (TypeError, ValueError):
             payload["amount"] = 0.0
+    elif event_type == "compress_similar":
+        raw = data.get("items")
+        payload["items"] = [str(x) for x in raw] if isinstance(raw, list) else []
+        try:
+            payload["threshold"] = float(data.get("threshold") or 0) or None
+        except (TypeError, ValueError):
+            payload["threshold"] = None
     elif event_type == "big_idea":
         for key in ("domain", "audience", "trend", "twist"):
             payload[key] = str(data.get(key) or "")
@@ -581,6 +591,44 @@ def _handle_reality(event: Event, brain: Mark17Brain, synapse_graph: SynapseGrap
                   source="reality"),
             hint=verdict, action="reality",
         )
+    brain.plasticity.save()
+    return result
+
+
+def _handle_compress_similar(event: Event, brain: Mark17Brain, synapse_graph: SynapseGraph) -> dict[str, Any]:
+    """Свернуть похожие записи в одну с весом. Без items берём память ядра."""
+    items = event.payload.get("items")
+    items = [str(x) for x in items] if isinstance(items, list) else []
+    source = "переданные записи"
+    if not items:
+        source = "память ядра"
+        try:
+            for hit in brain.memory.recent(limit=200):
+                content = hit.content if isinstance(hit.content, dict) else {}
+                text = str(content.get("hint") or content.get("note") or hit.signature or "")
+                if text:
+                    items.append(text)
+        except Exception:
+            pass
+
+    threshold = event.payload.get("threshold")
+    kwargs = {"threshold": float(threshold)} if threshold else {}
+    report = compress_similar([{"text": t} for t in items], **kwargs)
+    report["source"] = source
+
+    self_eval = {"score": 0.75, "reason": report["verdict"],
+                 "store_memory": report["merged_groups"] > 0, "reinforce": "compress"}
+    result: dict[str, Any] = {
+        "ok": True, "event_type": event.type, "route": "compress_similar",
+        "compression": report,
+        "memory": {"hint": report["verdict"]},
+        "plasticity": {"confidence": 0.8, "action": "compress",
+                       "learned": report["merged_groups"] > 0},
+        "llm": {"status": "skipped", "text": "compression is deterministic", "latency_ms": 0.0},
+        "next_adaptation": report["verdict"],
+        "self_evaluation": self_eval,
+    }
+    result["synapses"] = synapse_graph.update_from_event(event, result, self_eval)
     brain.plasticity.save()
     return result
 
@@ -2593,7 +2641,7 @@ def normalize(result: dict[str, Any]) -> dict[str, Any]:
     if isinstance(chrono, dict):
         normalized["chrono"] = chrono
     # Визуальные режимы GAME.
-    for key in ("big_idea", "sim", "decode", "ingest", "reality"):
+    for key in ("big_idea", "sim", "decode", "ingest", "reality", "compression", "links"):
         value = result.get(key)
         if isinstance(value, dict):
             normalized[key] = value
@@ -2824,6 +2872,26 @@ def _build_stores(args: argparse.Namespace, state_dir: Path) -> Mark17Stores:
     )
 
 
+def _attach_links(event: Event) -> None:
+    """Прочитать ссылки из сообщения и подложить содержимое в payload.
+
+    Ссылка в чате раньше была просто текстом: Макс отвечал про сообщение, не
+    заглянув туда, куда его послали. Молча — нет сети, переписка идёт как есть.
+    """
+    text = str(event.payload.get("text") or "")
+    urls = web_sense.extract_urls(text)
+    if not urls:
+        return
+    pages = [web_sense._fetch_url(u) for u in urls]
+    event.payload["links"] = [
+        {"url": p.url, "title": p.title, "ok": p.ok, "error": p.error} for p in pages
+    ]
+    chunks = [f"ИСТОЧНИК: {p.title}\nURL: {p.url}\n{p.text[:2500]}"
+              for p in pages if p.ok and p.text]
+    if chunks:
+        event.payload["text"] = text + "\n\n[СОДЕРЖИМОЕ ССЫЛОК]\n" + "\n\n---\n\n".join(chunks)
+
+
 def _handle_event(event: Event, args: argparse.Namespace, stores: Mark17Stores) -> dict[str, Any]:
     state_dir = stores.state_dir
     brain = stores.brain
@@ -2833,6 +2901,8 @@ def _handle_event(event: Event, args: argparse.Namespace, stores: Mark17Stores) 
     concept_grounding = stores.concept_grounding
     source_memory = stores.source_memory
     curiosity = stores.curiosity
+    if event.type == "user_message":
+        _attach_links(event)
     if event.type == "graph_stats" and not args.warmup:
         return _handle_graph_stats(event, state_dir, synapse_graph)
 
@@ -2877,6 +2947,8 @@ def _handle_event(event: Event, args: argparse.Namespace, stores: Mark17Stores) 
     if event.type == "reality":
         return _handle_reality(event, brain, synapse_graph)
     # Визуальные режимы GAME.
+    if event.type == "compress_similar":
+        return _handle_compress_similar(event, brain, synapse_graph)
     if event.type == "big_idea":
         return _handle_big_idea(event, brain, synapse_graph)
     if event.type == "simulation":
@@ -2968,6 +3040,11 @@ def _handle_event(event: Event, args: argparse.Namespace, stores: Mark17Stores) 
             return _dispatch_result(event, intent)
 
     result = brain.handle(event)
+    # Что удалось вычитать по ссылкам — в ответ, чтобы в интерфейсе было видно,
+    # прочитал Макс страницу или не достучался до неё.
+    _links = event.payload.get("links")
+    if isinstance(_links, list) and _links:
+        result["links"] = {"ok": any(l.get("ok") for l in _links), "pages": _links}
     _merge_memory(
         result,
         recalled=_recalled_memories(event, brain),
