@@ -3,7 +3,7 @@
 import { useState } from 'react';
 import Link from 'next/link';
 import { useAuth } from '@/lib/auth';
-import { PLANS, DEFAULT_TIER } from '@/lib/subscription';
+import { PLANS, DEFAULT_TIER, GODMODE } from '@/lib/subscription';
 import './auth.css';
 import './pricing.css';
 
@@ -47,6 +47,15 @@ export default function Pricing() {
         <p className="pricing-sub">Открой полную мощь ядра Max.</p>
       </header>
 
+      {/* Пока GODMODE включён, страница не имеет права продавать то, что уже
+          отдано бесплатно — иначе она врёт пользователю. */}
+      {GODMODE && (
+        <div className="pricing-godmode">
+          <b>GODMODE</b> — все режимы открыты всем. Автоплан, синапс-граф,
+          эволюция и MAX VISION работают без подписки и без входа. Платить не нужно.
+        </div>
+      )}
+
       <div className="pricing-grid">
         {(['free', 'pro'] as const).map((id) => {
           const plan = PLANS[id];
@@ -63,7 +72,9 @@ export default function Pricing() {
                   <li key={p}>{p}</li>
                 ))}
               </ul>
-              {isCurrent ? (
+              {GODMODE ? (
+                <div className="pricing-current">Открыто в GODMODE</div>
+              ) : isCurrent ? (
                 <div className="pricing-current">Твой текущий план</div>
               ) : isPro ? (
                 <button className="pricing-cta" onClick={startCheckout} disabled={busy}>
@@ -79,7 +90,7 @@ export default function Pricing() {
 
       {msg && <div className="pricing-msg">{msg}</div>}
 
-      {!user && (
+      {!user && !GODMODE && (
         <p className="pricing-note">
           <Link href="/">Войди</Link>, чтобы оформить подписку.
         </p>

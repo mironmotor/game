@@ -87,3 +87,13 @@
 }
 .pricing-note { text-align: center; margin-top: 20px; color: rgba(220, 214, 255, 0.55); }
 .pricing-note a { color: #9d8bff; }
+
+/* Плашка GODMODE: пока он включён, все режимы открыты и продавать нечего. */
+.pricing-godmode {
+  max-width: 620px; margin: 0 auto 26px; text-align: center;
+  background: linear-gradient(180deg, rgba(0, 242, 255, 0.1), rgba(122, 92, 255, 0.08));
+  border: 1px solid rgba(0, 242, 255, 0.35); border-radius: 14px;
+  padding: 14px 18px; font-size: 14px; line-height: 1.5; color: #cdf3ff;
+  box-shadow: 0 0 26px rgba(0, 242, 255, 0.14);
+}
+.pricing-godmode b { color: #00f2ff; letter-spacing: 0.12em; }
