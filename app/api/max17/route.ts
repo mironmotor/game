@@ -67,6 +67,7 @@ const ALLOWED_EVENTS = new Set([
   'simulation',
   'decode',
   'ingest',
+  'compress_similar',
 ]);
 
 const DEFAULT_RESPONSE = {

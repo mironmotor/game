@@ -21,6 +21,7 @@ import {
   GitBranch,
   Mic,
   Monitor,
+  Paperclip,
   Terminal,
   Play,
   Plus,
@@ -95,6 +96,10 @@ export interface GameHudProps {
   /** Клик по демо-миссии новичка: завести её настоящей задачей и закрыть. */
   onDefaultMissionComplete: (label: string) => void;
   onKeyDown?: (e: KeyboardEvent) => void;
+  /** Прикреплённый файл: Макс прочитает его вместе с сообщением. */
+  onFilePick?: (file: File) => void;
+  attachedName?: string;
+  onAttachClear?: () => void;
 }
 
 const NAV_ITEMS: { id: HudNavId; labelKey: MessageKey; icon: ReactNode }[] = [
@@ -317,6 +322,9 @@ export function GameHud(props: GameHudProps) {
     navBadges = {},
     onInputChange,
     onSend,
+    onFilePick,
+    attachedName,
+    onAttachClear,
     onToggleListen,
     onToggleCamera,
     onToggleSpeech,
@@ -526,7 +534,27 @@ export function GameHud(props: GameHudProps) {
       {/* Always-available chat window. */}
       <HudWindow id="chat" accent="purple">
         <div className="hud-window-pad">
+          {attachedName && (
+            <div className="hud-attach-chip">
+              <Paperclip size={12} />
+              <span className="truncate">{attachedName}</span>
+              <button type="button" onClick={onAttachClear} aria-label="Убрать файл">×</button>
+            </div>
+          )}
           <div className="hud-input-bar">
+            <label className="hud-icon-btn" title="Прикрепить файл — Макс его прочитает" aria-label="Прикрепить файл">
+              <Paperclip size={18} />
+              <input
+                type="file"
+                hidden
+                accept=".txt,.md,.csv,.json,.log,.py,.ts,.tsx,.js,.html,.xml,.yml,.yaml,text/*"
+                onChange={(e) => {
+                  const f = e.target.files?.[0];
+                  if (f && onFilePick) onFilePick(f);
+                  e.target.value = '';
+                }}
+              />
+            </label>
             <button
               type="button"
               className={`hud-icon-btn ${isCameraActive ? 'active' : ''}`}
