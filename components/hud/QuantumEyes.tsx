@@ -317,10 +317,11 @@ export default function QuantumEyes({ signalRef, active, className }: QuantumEye
       g.y = clamp(g.y, -1, 1);
 
       // рождение квантовой пены (интенсивнее с яркостью/энергией)
-      const foamRate = 6 + sig.brightness * 22 + sig.energy * 14;
-      if (Math.random() < foamRate * dt) spawnFoam(now, Math.random() < 0.5 ? 0 : 1);
-      foamRef.current = foamRef.current.filter((p) => now - p.born < p.life * 3.5 && expE(-(now - p.born) / p.life) > 0.03);
-      if (foamRef.current.length > 60) foamRef.current.splice(0, foamRef.current.length - 60);
+      // потолка нет: сколько пены родит эфир, столько и живёт (гаснет по e^)
+      const foamRate = 30 + sig.brightness * 160 + sig.energy * 110;
+      const foamBurst = Math.round(foamRate * dt);
+      for (let k = 0; k < foamBurst; k++) spawnFoam(now, Math.random() < 0.5 ? 0 : 1);
+      foamRef.current = foamRef.current.filter((p) => expE(-(now - p.born) / p.life) > 0.03);
 
       // цвет поля: валентность → оттенок (роза → циан → изумруд); напряжение → акцент
       const hue = lerp(350, 158, clamp(sig.valence));
