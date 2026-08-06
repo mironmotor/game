@@ -19,6 +19,8 @@ Every mode is free and requires no sign-in — see
 Originally scaffolded in [Google AI Studio](https://ai.studio/apps/dcf78fd2-d064-4f32-a65f-e4dbd1128e38);
 this repository is where it actually lives and grows now.
 
+Built solo by a creator from Russia, coded over the course of a year.
+
 ## Quick start
 
 ```bash
