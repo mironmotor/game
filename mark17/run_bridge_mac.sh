@@ -11,7 +11,11 @@ MARK17="$(cd "$(dirname "$0")" && pwd)"
 ROOT="$(dirname "$MARK17")"
 cd "$ROOT" || exit 1
 
-PORT="${PORT:-8017}"
+# 8790, а не 8017: 8017 — это порт голосового сервера (MAX17_TTS_PORT), и когда
+# оба запущены, мост и синтез речи дерутся за него. Однажды туннель в итоге
+# смотрел на голос вместо ядра, а прод отвечал «Ядро Max недоступно».
+PORT="${PORT:-8790}"
+TTS_PORT="${MAX17_TTS_PORT:-8017}"
 LOG_DIR="${TMPDIR:-/tmp}/max17-bridge"
 mkdir -p "$LOG_DIR"
 SERVER_LOG="$LOG_DIR/server.log"
@@ -71,6 +75,11 @@ port_owner() {
   who="$(lsof -i ":$1" -sTCP:LISTEN -Fc 2>/dev/null | grep '^c' | head -1 | cut -c2-)"
   printf '%s' "${who:-неизвестно}"
 }
+
+if [ "$PORT" = "$TTS_PORT" ]; then
+  warn "PORT=$PORT совпадает с портом голосового сервера — мост и синтез речи столкнутся."
+  warn "Задай другой: PORT=8790 bash mark17/run_bridge_mac.sh"
+fi
 
 if port_busy "$PORT"; then
   warn "порт $PORT занят процессом '$(port_owner "$PORT")' — это не наш мост"

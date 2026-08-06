@@ -2,6 +2,7 @@
 
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { sendMax17Event, type Max17VoiceState } from '@/lib/max17-client';
+import QuantumEyes, { IDLE_SIGNAL, type QuantumSignal } from './QuantumEyes';
 
 interface VoiceSignatureProps {
   open: boolean;
@@ -42,6 +43,10 @@ export default function VoiceSignature({ open, onClose, context, userId }: Voice
   const toneValsRef = useRef<number[]>(new Array(50).fill(0));
   const lastSendRef = useRef(0);
   const contextRef = useRef(context);
+  // Живой срез эфира для квантовых глаз (читается их циклом отрисовки без ре-рендеров).
+  const signalRef = useRef<QuantumSignal>({ ...IDLE_SIGNAL });
+  // Последнее состояние от ядра Max17 — глаза читают его, если мост доступен.
+  const stateRef = useRef<Max17VoiceState | null>(null);
 
   const [listening, setListening] = useState(false);
   const [status, setStatus] = useState('Нажми «Слушать» — Max17 начнёт читать твоё состояние по голосу');
@@ -51,6 +56,10 @@ export default function VoiceSignature({ open, onClose, context, userId }: Voice
   useEffect(() => {
     contextRef.current = context;
   }, [context]);
+
+  useEffect(() => {
+    stateRef.current = state;
+  }, [state]);
 
   const detectPitch = useCallback((buf: Float32Array<ArrayBuffer>, sr: number) => {
     const N = buf.length;
@@ -185,6 +194,23 @@ export default function VoiceSignature({ open, onClose, context, userId }: Voice
         setAcoustics(ac);
         draw(F0);
 
+        // Кормим квантовые глаза живым эфиром. Возбуждение/позитив/напряжение
+        // берём от ядра Max17, а пока мост молчит — считаем локально по тем же
+        // правилам, что и voice_state.py, чтобы глаза реагировали сразу.
+        const st = stateRef.current;
+        const localTension = clamp(0.55 * jitter + 0.25 * register + 0.2 * energy);
+        signalRef.current = {
+          f0: F0,
+          register,
+          brightness,
+          jitter,
+          energy,
+          voiced,
+          arousal: st?.arousal ?? clamp(0.4 * register + 0.3 * brightness + 0.3 * energy),
+          valence: st?.valence ?? clamp(0.5 + 0.25 * (brightness - 0.5) - 0.4 * jitter - 0.25 * (localTension - 0.5)),
+          tension: st?.tension ?? localTension,
+        };
+
         // шлём состояние в Max17 ~ каждые 1.4 c, только когда есть голос
         const now = performance.now();
         if (voiced && now - lastSendRef.current > 1400) {
@@ -280,7 +306,7 @@ export default function VoiceSignature({ open, onClose, context, userId }: Voice
         {/* шапка */}
         <div className="flex items-center justify-between border-b border-cyan-300/15 px-5 py-3">
           <div className="font-[var(--font-hud-display)] text-sm uppercase tracking-[0.25em] text-cyan-200">
-            ◉ Звуковая сигнатура · Max17
+            ◉ Квантовые глаза · Звуковая сигнатура · Max17
           </div>
           <button
             type="button"
@@ -292,7 +318,15 @@ export default function VoiceSignature({ open, onClose, context, userId }: Voice
           </button>
         </div>
 
-        <div className="grid gap-4 p-5 md:grid-cols-[300px_1fr]">
+        {/* Глаза Макса в квантовом мире — смотрят сквозь эфир по формуле e = 2.718 */}
+        <div className="px-5 pt-4">
+          <QuantumEyes signalRef={signalRef} active={listening} className="h-[190px] sm:h-[210px]" />
+          <p className="mt-1.5 text-center text-[10px] uppercase tracking-[0.2em] text-cyan-200/35">
+            Глаза Макса в квантовом мире · e = 2.718
+          </p>
+        </div>
+
+        <div className="grid gap-4 px-5 pb-5 pt-3 md:grid-cols-[300px_1fr]">
           {/* визуализация */}
           <div className="flex flex-col items-center">
             <canvas

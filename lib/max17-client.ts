@@ -130,6 +130,78 @@ export interface Max17VoiceState {
   }>;
 }
 
+/** Перепись 3D-мира: то, что браузер шлёт ядру вместо десятков тысяч частиц. */
+export interface Max17WorldCensus {
+  alive: number;
+  born: number;
+  died: number;
+  radius: number;
+  density: number;
+  spiral_b: number;
+  arms: number;
+  hue: number;
+  symmetry: number;
+  energy: number;
+  dt: number;
+}
+
+/** Физика следующего интервала, которой ядро отвечает на перепись. */
+export interface Max17WorldLaws {
+  emission_scale?: number;
+  lifetime_scale?: number;
+  propagation?: number;
+  impedance?: number;
+  can_condense?: boolean;
+  epoch?: string;
+  epoch_title?: string;
+  temperature?: number | null;
+  bottleneck?: string;
+  bound_fraction?: number;
+  law?: string;
+}
+
+/** Связавшееся вещество — то, что переживает закрытие вкладки. */
+export interface Max17Body {
+  index: number;
+  mass: number;
+  x: number;
+  y: number;
+  z: number;
+  hue: number;
+  epoch?: string;
+  born_at?: number;
+  label?: string;
+}
+
+export interface Max17World {
+  world_id?: string;
+  seed?: number;
+  census?: Max17WorldCensus;
+  cosmos?: {
+    age_human?: string;
+    epoch?: string;
+    epoch_title?: string;
+    epoch_note?: string;
+    temperature?: number | null;
+    ether?: Record<string, unknown>;
+    matter?: Record<string, number | string>;
+  };
+  laws?: Max17WorldLaws;
+  condensate?: number;
+  new_bodies?: Max17Body[];
+  body_count?: number;
+  bodies?: Max17Body[];
+  hint?: string;
+  world?: {
+    id?: string;
+    seed?: number;
+    title?: string;
+    created_at?: number;
+    census_count?: number;
+    peak_alive?: number;
+  };
+}
+
 export interface Max17PlanTask {
   id: string;
   desc: string;
@@ -411,6 +483,7 @@ export interface Max17Response {
   consolidation?: Max17Consolidation;
   self_evaluation?: Max17SelfEvaluation;
   voice?: Max17VoiceState;
+  world?: Max17World;
   plan?: Max17Plan;
   graph?: Max17Graph;
   physics?: Max17Physics;

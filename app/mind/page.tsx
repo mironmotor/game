@@ -1,6 +1,4 @@
 import SelfAwareness from '@/components/mind/SelfAwareness';
-import AuthGate from '@/components/auth/AuthGate';
-import AccountChip from '@/components/auth/AccountChip';
 
 export const metadata = {
   title: 'САМОСОЗНАНИЕ — Макс о себе',
@@ -9,9 +7,6 @@ export const metadata = {
 
 export default function MindPage() {
   return (
-    <AuthGate>
-      <AccountChip />
-      <SelfAwareness />
-    </AuthGate>
+    <SelfAwareness />
   );
 }

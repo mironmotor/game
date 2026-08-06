@@ -1,7 +1,4 @@
 import AutoPlan from '@/components/autoplan/AutoPlan';
-import AuthGate from '@/components/auth/AuthGate';
-import Paywall from '@/components/auth/Paywall';
-import AccountChip from '@/components/auth/AccountChip';
 
 export const metadata = {
   title: 'Автоплан — ядро Max',
@@ -10,11 +7,6 @@ export const metadata = {
 
 export default function AutoPlanPage() {
   return (
-    <AuthGate>
-      <AccountChip />
-      <Paywall feature="autoplan">
-        <AutoPlan />
-      </Paywall>
-    </AuthGate>
+    <AutoPlan />
   );
 }

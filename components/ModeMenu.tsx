@@ -8,6 +8,8 @@ import Link from 'next/link';
 
 const MODES: { href: string; label: string; c: string }[] = [
   { href: '/physics', label: 'ФИЗИКА ЯДРА · 10 уравнений', c: '#4fd4ff' },
+  { href: '/vision', label: 'MAX VISION · визуализация звука', c: '#6a8bff' },
+  { href: '/efir', label: 'Эфир · реальность из голоса', c: '#ff2fd0' },
   { href: '/mind', label: 'САМОСОЗНАНИЕ Макса', c: '#9d8bff' },
   { href: '/simulation', label: 'Симуляция Макса', c: '#59ffb2' },
   { href: '/decoder', label: 'ДЕКОДЕР · взлом хэшей', c: '#39ff88' },

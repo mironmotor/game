@@ -57,19 +57,32 @@ export const DAILY_LIMITS: Record<Tier, Record<string, number>> = {
   pro: {},
 };
 
+// ── GODMODE ────────────────────────────────────────────────────────────────
+// Все замки сняты: каждый режим открыт каждому, дневных лимитов нет, вход не
+// требуется. Это один выключатель — поставь false, и тарифная стена вернётся
+// ровно такой, какой была: таблицы выше не тронуты.
+//
+// Таблицы FEATURE_MIN_TIER и DAILY_LIMITS сознательно оставлены как есть —
+// они описывают, каким продукт будет без GODMODE, и их не нужно
+// восстанавливать по памяти.
+export const GODMODE = true;
+
 const ORDER: Tier[] = ['free', 'pro'];
 
 export function tierAtLeast(have: Tier, need: Tier): boolean {
+  if (GODMODE) return true;
   return ORDER.indexOf(have) >= ORDER.indexOf(need);
 }
 
 // Может ли пользователь с данным тарифом открыть фичу?
 export function canUseFeature(tier: Tier, feature: string): boolean {
+  if (GODMODE) return true;
   const need = FEATURE_MIN_TIER[feature];
   if (!need) return true;
   return tierAtLeast(tier, need);
 }
 
 export function dailyLimitFor(tier: Tier, feature: string): number {
-  return DAILY_LIMITS[tier]?.[feature] ?? 0; // 0 = без лимита
+  if (GODMODE) return 0; // 0 = без лимита
+  return DAILY_LIMITS[tier]?.[feature] ?? 0;
 }
