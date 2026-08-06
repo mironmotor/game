@@ -5,7 +5,7 @@ coverage/
 .DS_Store
 __pycache__/
 *.pyc
-tsconfig.tsbuildinfo
+*.tsbuildinfo
 *.log
 .env*
 !.env.example
