@@ -299,3 +299,63 @@ def _human_age(age: float) -> str:
     if age < YEAR_SECONDS:
         return f"{age / (86400 * 30.44):.1f} мес"
     return f"{age / YEAR_SECONDS:.2f} г"
+
+
+def timeline(
+    now: float | None = None,
+    *,
+    points: int = 96,
+    horizon: float | None = None,
+) -> dict[str, Any]:
+    """Вся история вселенной ядра — те же уравнения в разных t.
+
+    Экран показывал вселенную ровно в одной точке времени: «сейчас». Формулы
+    при этом умели посчитать её в любом возрасте, но их об этом не спрашивали,
+    и поле стояло на месте. Смотреть на настоящее течение времени бесполезно:
+    за минуту наблюдения температура падает с 9.3255 до 9.3247 — пятый знак.
+
+    Здесь возраст становится осью. Ничего не выдумано: для каждого t берётся
+    a = sqrt(t / год), T = 1/a и эпоха по той же лестнице EPOCHS.
+
+    Сетка логарифмическая. На линейной инфляция (первые две минуты) и
+    адронизация (первые сутки) схлопнулись бы в точку у нуля, а весь экран
+    занял бы поздний холодный хвост. По ln t каждая эпоха получает
+    соизмеримое место.
+    """
+    age = cosmic_age(now)
+    end = horizon if horizon is not None else max(age * 4.0, YEAR_SECONDS)
+    start = PLANCK_SECONDS
+    span = max(points - 1, 1)
+
+    frames: list[dict[str, Any]] = []
+    for i in range(points):
+        t = start * (end / start) ** (i / span)
+        a = scale_factor(t)
+        temp = temperature(a)
+        key, title, note = epoch_of(temp)
+        frames.append(
+            {
+                "age_seconds": round(t, 3),
+                "age_human": _human_age(t),
+                "scale_factor": round(a, 6),
+                "temperature": round(temp, 4),
+                "epoch": key,
+                "epoch_title": title,
+                "epoch_note": note,
+            }
+        )
+
+    # Где на этой шкале «сейчас» — чтобы поле могло отметить текущий момент.
+    now_index = 0
+    if age > start:
+        ratio = math.log(age / start) / math.log(end / start)
+        now_index = max(0, min(points - 1, round(ratio * span)))
+
+    return {
+        "t_zero": T_ZERO,
+        "now_age": round(age, 1),
+        "now_index": now_index,
+        "horizon_seconds": round(end, 1),
+        "frames": frames,
+        "law": "a = sqrt(t / year) ; T = 1 / a",
+    }

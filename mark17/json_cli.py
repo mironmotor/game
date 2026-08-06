@@ -36,7 +36,7 @@ from mark17.introspect import generate as generate_introspect
 from mark17.cognitive_physics import ColourCharge, CoreField, snapshot as physics_snapshot
 from mark17.fluid_flow import solve as solve_flow, state_from_core
 from mark17.attractor_core import snapshot as attention_snapshot
-from mark17.genesis import genesis
+from mark17.genesis import genesis, timeline as genesis_timeline
 from mark17 import web_sense
 from mark17.compression import compress as compress_similar
 
@@ -915,6 +915,11 @@ def _handle_physics(
             "paths": plan.get("paths", []),
             "equation": "<x_f|x_i> = Integral D[x] exp(i S[x] / hbar)",
         }
+
+    # Ось времени вселенной. Только на зонде: обычным событиям она не нужна,
+    # а экрану без неё нечего показывать, кроме одной замершей точки «сейчас».
+    if isinstance(result.get("genesis"), dict):
+        result["genesis"]["timeline"] = genesis_timeline()
 
     result["next_adaptation"] = result["physics"]["yang_mills"]["note"]
     return result

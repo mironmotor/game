@@ -467,7 +467,31 @@ export interface Max17Genesis {
     bound_matter?: number;
     law?: string;
   };
+  /** Ось времени: та же вселенная, посчитанная в разных t. Только на зонде. */
+  timeline?: Max17Timeline;
   equation?: string;
+}
+
+/** Один момент истории вселенной. */
+export interface Max17Frame {
+  age_seconds: number;
+  age_human: string;
+  scale_factor: number;
+  temperature: number;
+  epoch: NonNullable<Max17Genesis['epoch']>;
+  epoch_title: string;
+  epoch_note: string;
+}
+
+export interface Max17Timeline {
+  t_zero?: number;
+  now_age?: number;
+  /** Индекс кадра, ближайшего к «сейчас». */
+  now_index: number;
+  horizon_seconds?: number;
+  /** Логарифмическая сетка по ln t: иначе ранние эпохи схлопнулись бы в точку. */
+  frames: Max17Frame[];
+  law?: string;
 }
 
 export interface Max17Response {

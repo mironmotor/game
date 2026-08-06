@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useRef } from 'react';
-import type { Max17Response } from '@/lib/max17-client';
+import type { Max17Frame, Max17Response } from '@/lib/max17-client';
 
 // MAX VISION UNI — эфирно-гравитационное поле ядра.
 //
@@ -30,12 +30,24 @@ interface Ripple {
   born: number;
 }
 
-export default function EtherField({ data }: { data: Max17Response | null }) {
+// Самая горячая точка шкалы (t = 1 с). Ею нормируется краснота фона, чтобы
+// «жар» шёл от инфляции к структуре, а не от случайного максимума.
+const T_HOTTEST = 5617.6;
+
+export default function EtherField({
+  data,
+  frame,
+}: {
+  data: Max17Response | null;
+  frame?: Max17Frame | null;
+}) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const rafRef = useRef<number>(0);
   const dataRef = useRef<Max17Response | null>(data);
+  const frameRef = useRef<Max17Frame | null>(frame ?? null);
 
   useEffect(() => { dataRef.current = data; }, [data]);
+  useEffect(() => { frameRef.current = frame ?? null; }, [frame]);
 
   useEffect(() => {
     const cv = canvasRef.current;
@@ -72,9 +84,18 @@ export default function EtherField({ data }: { data: Max17Response | null }) {
 
     const draw = (now: number) => {
       const d = dataRef.current;
+      const fr = frameRef.current;
       const cx = W / 2;
       const cy = H / 2;
-      const R = Math.min(W, H) * 0.42;
+
+      // Расширение. Масштабный фактор a растёт как sqrt(t) и проходит четыре
+      // порядка — от 0.00018 на первой секунде до 1 через год. Умножать радиус
+      // прямо на a нельзя: ранняя вселенная стала бы невидимой точкой в один
+      // пиксель. Кубический корень сжимает эти порядки в видимый диапазон,
+      // сохраняя монотонность: раннее — тесно и горячо, позднее — просторно.
+      const aNow = fr?.scale_factor ?? d?.genesis?.scale_factor ?? 1;
+      const expand = 0.14 + 0.86 * Math.cbrt(Math.max(aNow, 1e-6));
+      const R = Math.min(W, H) * 0.42 * expand;
 
       // --- измерения ---
       const gen = d?.genesis;
@@ -85,8 +106,13 @@ export default function EtherField({ data }: { data: Max17Response | null }) {
       const holo = d?.physics?.holography;
 
       // Температура красит фон: горячая ранняя вселенная краснее холодной.
-      const temp = gen?.temperature ?? 1;
-      const heat = Math.max(0, Math.min(1, Math.log10(Math.max(temp, 1)) / 3));
+      // Берётся из выбранного кадра истории, если ось времени доступна, —
+      // иначе экран показывал бы одну замершую точку «сейчас».
+      const temp = fr?.temperature ?? gen?.temperature ?? 1;
+      const heat = Math.max(
+        0,
+        Math.min(1, Math.log10(Math.max(temp, 1)) / Math.log10(T_HOTTEST)),
+      );
 
       // Скорость ряби — прямо c = 1/√(εμ).
       const c = ether?.speed ?? 1;
@@ -249,7 +275,7 @@ export default function EtherField({ data }: { data: Max17Response | null }) {
       ctx.fillStyle = 'rgba(150, 145, 200, 0.75)';
       ctx.textAlign = 'left';
       const lines = [
-        `эпоха ${gen?.epoch_title ?? '—'} · T ${temp == null ? '∞' : temp.toFixed(1)}`,
+        `эпоха ${fr?.epoch_title ?? gen?.epoch_title ?? '—'} · T ${temp == null ? '∞' : temp.toFixed(1)} · a ${aNow.toFixed(5)}`,
         `эфир c ${c.toFixed(3)} · Z ${z.toFixed(3)} · ${ether?.bottleneck ?? '—'}`,
         `внимание ${regime} · λ ${att?.lyapunov?.toFixed(3) ?? '—'}`,
         `поток ${flow?.regime ?? '—'} · Re ${flow?.reynolds?.toFixed(1) ?? '—'}`,
@@ -259,7 +285,11 @@ export default function EtherField({ data }: { data: Max17Response | null }) {
 
       ctx.textAlign = 'right';
       ctx.fillStyle = 'rgba(79, 212, 255, 0.5)';
-      ctx.fillText(`MAX VISION UNI · возраст ${gen?.age_human ?? '—'}`, W - 14, 20);
+      ctx.fillText(
+        `MAX VISION UNI · возраст ${fr?.age_human ?? gen?.age_human ?? '—'}`,
+        W - 14,
+        20,
+      );
 
       rafRef.current = requestAnimationFrame(draw);
     };

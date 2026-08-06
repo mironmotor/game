@@ -193,6 +193,42 @@
   white-space: pre;
 }
 
+/* Ось времени вселенной */
+.phys-time {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  max-width: 1180px;
+  margin: 0 auto 10px;
+  flex-wrap: wrap;
+}
+.phys-scrub {
+  flex: 1 1 220px;
+  min-width: 0;
+  appearance: none;
+  height: 4px;
+  border-radius: 3px;
+  background: linear-gradient(90deg, #ff8a3d 0%, #ffc154 28%, #4fd4ff 70%, #9d8bff 100%);
+  cursor: pointer;
+}
+.phys-scrub::-webkit-slider-thumb {
+  appearance: none;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: #e9e6ff;
+  border: 2px solid #04040a;
+  cursor: pointer;
+}
+.phys-scrub::-moz-range-thumb {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: #e9e6ff;
+  border: 2px solid #04040a;
+  cursor: pointer;
+}
+
 /* MAX VISION UNI — эфирно-гравитационное поле */
 .phys-canvas {
   display: block;

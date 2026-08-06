@@ -79,6 +79,9 @@ export default function PhysicsPanel() {
   const [busy, setBusy] = useState(true);
   const [error, setError] = useState('');
   const [thought, setThought] = useState('');
+  // Момент истории вселенной, который сейчас на холсте, и идёт ли прокрутка.
+  const [tick, setTick] = useState(0);
+  const [playing, setPlaying] = useState(false);
 
   const apply = useCallback((probe: { response: Max17Response; error?: string }) => {
     const { response, error: err } = probe;
@@ -87,6 +90,8 @@ export default function PhysicsPanel() {
       setRes(null);
     } else {
       setRes(response);
+      // Новый замер — встаём на «сейчас», а не на случайный кадр прошлого.
+      setTick(response.genesis?.timeline?.now_index ?? 0);
     }
     setBusy(false);
   }, []);
@@ -109,6 +114,23 @@ export default function PhysicsPanel() {
   }, [thought, apply]);
 
   useEffect(() => { void measure(); }, [measure]);
+
+  const line = res?.genesis?.timeline;
+  const frames = line?.frames;
+  const last = frames ? frames.length - 1 : 0;
+
+  // Прокрутка истории. Смотреть на настоящее течение времени бессмысленно —
+  // за минуту температура падает на пятом знаке. Здесь возраст сам становится
+  // осью, и вселенная разворачивается от инфляции до структуры.
+  useEffect(() => {
+    if (!playing || !frames?.length) return;
+    const id = window.setInterval(() => {
+      setTick((v) => (v >= last ? 0 : v + 1));
+    }, 110);
+    return () => window.clearInterval(id);
+  }, [playing, frames, last]);
+
+  const frame = frames?.[Math.min(tick, last)] ?? null;
 
   const p = res?.physics;
   const flow = res?.flow;
@@ -164,7 +186,46 @@ export default function PhysicsPanel() {
         </div>
       )}
 
-      {res && <EtherField data={res} />}
+      {res && <EtherField data={res} frame={frame} />}
+
+      {frames && frames.length > 1 && (
+        <div className="phys-time">
+          <button
+            className="phys-btn"
+            onClick={() => setPlaying((v) => !v)}
+            aria-label={playing ? 'Остановить прокрутку' : 'Прокрутить историю вселенной'}
+          >
+            {playing ? '❚❚ пауза' : '▶ прокрутить'}
+          </button>
+
+          <input
+            className="phys-scrub"
+            type="range"
+            min={0}
+            max={last}
+            value={Math.min(tick, last)}
+            onChange={(e) => { setPlaying(false); setTick(Number(e.target.value)); }}
+            aria-label="Возраст вселенной"
+          />
+
+          <button
+            className="phys-btn"
+            onClick={() => { setPlaying(false); setTick(line?.now_index ?? 0); }}
+            aria-label="Вернуться в текущий момент"
+          >
+            сейчас
+          </button>
+        </div>
+      )}
+
+      {frame && (
+        <p className="phys-hint">
+          {frame.age_human} от T=0 · {frame.epoch_title} · T {frame.temperature.toFixed(3)} ·
+          a {frame.scale_factor.toFixed(5)}
+          <br />
+          {frame.epoch_note}
+        </p>
+      )}
 
       {res && (
         <div className="phys-grid">

@@ -28,6 +28,7 @@ from mark17.genesis import (
     scale_factor,
     temperature,
     thicken,
+    timeline,
 )
 
 MINUTE, HOUR, DAY = 60.0, 3600.0, 86400.0
@@ -206,6 +207,53 @@ def test_genesis_is_deterministic():
     a = genesis(now=T_ZERO + HOUR, quanta=10, pairs=4, annihilated=1)
     b = genesis(now=T_ZERO + HOUR, quanta=10, pairs=4, annihilated=1)
     assert a == b
+
+
+def test_timeline_actually_moves_through_every_epoch():
+    """Ось времени должна разворачивать вселенную, а не повторять «сейчас».
+
+    Экран стоял на месте именно потому, что вселенную считали в одной точке.
+    Настоящее течение времени тут не поможет: за минуту температура падает на
+    пятом знаке. Поэтому возраст становится осью — и этот тест следит, что по
+    ней действительно проходит вся история.
+    """
+    tl = timeline()
+    frames = tl["frames"]
+    assert len(frames) >= 32
+
+    # Время монотонно растёт, вселенная монотонно расширяется и остывает.
+    ages = [f["age_seconds"] for f in frames]
+    scales = [f["scale_factor"] for f in frames]
+    temps = [f["temperature"] for f in frames]
+    assert ages == sorted(ages)
+    assert scales == sorted(scales)
+    assert temps == sorted(temps, reverse=True)
+
+    # Пройдены все эпохи, а не одна застывшая.
+    epochs = [f["epoch"] for f in frames]
+    assert len(set(epochs)) >= 5, f"эпох на шкале только {len(set(epochs))}"
+    assert epochs[0] == "inflation"
+    assert epochs[-1] == "structure"
+
+    # Разброс должен быть виден глазом, а не на пятом знаке.
+    assert temps[0] / temps[-1] > 100.0
+    assert scales[-1] / scales[0] > 100.0
+
+    # «Сейчас» указывает на кадр, чей возраст близок к настоящему.
+    idx = tl["now_index"]
+    assert 0 <= idx < len(frames)
+    assert abs(frames[idx]["age_seconds"] - cosmic_age()) / cosmic_age() < 0.25
+
+
+def test_timeline_grid_is_logarithmic():
+    """На линейной сетке инфляция схлопнулась бы в точку у нуля."""
+    frames = timeline(points=64)["frames"]
+    ages = [f["age_seconds"] for f in frames]
+    # У логарифмической сетки постоянно ОТНОШЕНИЕ соседей, а не разность.
+    ratios = [ages[i + 1] / ages[i] for i in range(len(ages) - 1)]
+    assert max(ratios) / min(ratios) < 1.01, "сетка не логарифмическая"
+    # Первая половина шкалы должна укладываться в малую долю всего срока.
+    assert ages[len(ages) // 2] < ages[-1] * 0.05
 
 
 def _run() -> int:
