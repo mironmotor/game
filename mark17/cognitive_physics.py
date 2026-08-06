@@ -459,10 +459,20 @@ def snapshot(
     evaluation: dict[str, Any] | None = None,
     *,
     previous_field: CoreField | None = None,
+    colour: ColourCharge | None = None,
 ) -> dict[str, Any]:
-    """Full cognitive-physics reading for one handled event."""
+    """Full cognitive-physics reading for one handled event.
+
+    ``colour`` overrides the reading taken from ``result``. It exists for the
+    read-only physics probe: that probe deliberately runs none of the three
+    cores, so their "result" is a stub of zeros. Reading colour off it would
+    leave Maxwell and Yang-Mills permanently blank — two of the ten equations
+    dead exactly where they are meant to be shown. The probe measures the
+    cores' standing state instead and passes it in here.
+    """
     quantum = canonize(event, result, evaluation)
-    colour = council_colour(result)
+    if colour is None:
+        colour = council_colour(result)
     field = CoreField(plasticity=colour.red, memory=colour.green, llm=colour.blue)
 
     induction = induct(

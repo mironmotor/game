@@ -33,7 +33,7 @@ from mark17.dream_sim import generate as generate_dream_sim
 from mark17.ingest import generate as generate_ingest, split_stream
 from mark17.decoder import generate as generate_decode
 from mark17.introspect import generate as generate_introspect
-from mark17.cognitive_physics import CoreField, snapshot as physics_snapshot
+from mark17.cognitive_physics import ColourCharge, CoreField, snapshot as physics_snapshot
 from mark17.fluid_flow import solve as solve_flow, state_from_core
 from mark17.attractor_core import snapshot as attention_snapshot
 from mark17.genesis import genesis
@@ -248,6 +248,7 @@ def _attach_physics(
     synapse_graph: SynapseGraph,
     *,
     previous_field: CoreField | None = None,
+    colour: ColourCharge | None = None,
 ) -> None:
     """Attach the cognitive-physics reading and the HUD flow to a result.
 
@@ -266,7 +267,9 @@ def _attach_physics(
     except Exception:
         horizon = {"area": 0, "volume": 0, "edges": 0}
 
-    physics = physics_snapshot(event, result, evaluation, previous_field=previous_field)
+    physics = physics_snapshot(
+        event, result, evaluation, previous_field=previous_field, colour=colour
+    )
     physics["holography"] = {
         key: horizon.get(key)
         for key in (
@@ -781,6 +784,41 @@ def _handle_introspect(event: Event, brain: Mark17Brain, synapse_graph: SynapseG
     return result
 
 
+def _probe_colour(brain: Mark17Brain, recalled: list[Any]) -> ColourCharge:
+    """Colour charge of the three cores for the read-only physics probe.
+
+    The probe runs none of the cores — that is the point of it. So their
+    per-event result is a stub of zeros, and reading colour off that stub
+    would pin Maxwell's field and Yang-Mills' confinement at zero forever,
+    no matter what the core actually knows.
+
+    Their standing state is measurable without running anything:
+
+      красный  — самый уверенный паттерн пластичности: что ядро уже выучило
+      зелёный  — сила отклика памяти на запрос: тот же recall, что у Эйнштейна
+      синий    — llm: голос считается за Советом, только когда до него реально
+                 достучались. Включённый, но недоступный Ollama — это ноль, и
+                 остаточный цвет честно покажет, что Совет неполный.
+    """
+    try:
+        cache = brain.plasticity.pattern_cache
+        red = max((entry.confidence for entry in cache.values()), default=0.0)
+    except Exception:
+        red = 0.0
+
+    scores = [float(getattr(hit, "score", 0.0) or 0.0) for hit in recalled]
+    green = max(scores) if scores else 0.0
+
+    llm = getattr(brain, "llm", None)
+    blue = 0.7 if getattr(llm, "enabled", False) and getattr(llm, "_available", False) else 0.0
+
+    return ColourCharge(
+        red=max(0.0, min(1.0, red)),
+        green=max(0.0, min(1.0, green)),
+        blue=blue,
+    )
+
+
 def _handle_physics(
     event: Event,
     brain: Mark17Brain,
@@ -829,12 +867,23 @@ def _handle_physics(
     evaluation = evaluate_event(probe, result)
     result["self_evaluation"] = evaluation.to_dict()
 
-    _attach_physics(probe, result, result["self_evaluation"], brain, synapse_graph)
+    # Einstein needs the recall anyway, and the Council's green charge is
+    # exactly "how strongly did memory answer this query" — so recall first
+    # and use the same measurement for both.
+    curved = vector_memory.recall(query, limit=3) if query else []
+    flat = vector_memory.recall(query, limit=3, relativistic=False) if query else []
+
+    _attach_physics(
+        probe,
+        result,
+        result["self_evaluation"],
+        brain,
+        synapse_graph,
+        colour=_probe_colour(brain, curved),
+    )
 
     # Einstein: show the curvature by comparing against flat-space recall.
     if query:
-        curved = vector_memory.recall(query, limit=3)
-        flat = vector_memory.recall(query, limit=3, relativistic=False)
         result["physics"]["einstein"] = {
             "query": query,
             "curved": [hit.to_dict() for hit in curved],

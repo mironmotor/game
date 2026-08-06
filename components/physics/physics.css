@@ -27,7 +27,7 @@
   display: flex;
   gap: 8px;
   justify-content: center;
-  margin: 18px 0 26px;
+  margin: 12px 0 10px;
   flex-wrap: wrap;
 }
 .phys-btn {
@@ -46,6 +46,46 @@
 }
 .phys-btn:hover:not(:disabled) { color: #e9e6ff; border-color: rgba(180, 170, 255, 0.5); }
 .phys-btn:disabled { opacity: 0.45; cursor: default; }
+.phys-btn.primary {
+  color: #04040a;
+  background: #4fd4ff;
+  border-color: #4fd4ff;
+  white-space: nowrap;
+}
+.phys-btn.primary:hover:not(:disabled) { color: #04040a; background: #7fe0ff; border-color: #7fe0ff; }
+
+/* Ввод мысли: без него уравнениям нечего считать */
+.phys-feed {
+  display: flex;
+  gap: 8px;
+  max-width: 720px;
+  margin: 22px auto 0;
+  flex-wrap: wrap;
+}
+.phys-input {
+  flex: 1 1 260px;
+  min-width: 0;
+  appearance: none;
+  border: 1px solid rgba(150, 140, 220, 0.28);
+  background: rgba(8, 8, 18, 0.72);
+  color: #e9e6ff;
+  font: inherit;
+  font-size: 12px;
+  padding: 10px 16px;
+  border-radius: 999px;
+}
+.phys-input::placeholder { color: #56537a; }
+.phys-input:focus { outline: none; border-color: rgba(79, 212, 255, 0.6); }
+.phys-input:disabled { opacity: 0.5; }
+
+.phys-hint {
+  max-width: 720px;
+  margin: 0 auto 26px;
+  font-size: 10.5px;
+  line-height: 1.6;
+  color: #56537a;
+  text-align: center;
+}
 
 .phys-grid {
   display: grid;

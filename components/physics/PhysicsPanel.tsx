@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
-import { probePhysics } from '@/lib/physics-client';
+import { probePhysics, feedThenProbe } from '@/lib/physics-client';
 import type { Max17Response } from '@/lib/max17-client';
 import EtherField from './EtherField';
 import './physics.css';
@@ -78,11 +78,10 @@ export default function PhysicsPanel() {
   const [res, setRes] = useState<Max17Response | null>(null);
   const [busy, setBusy] = useState(true);
   const [error, setError] = useState('');
+  const [thought, setThought] = useState('');
 
-  const measure = useCallback(async () => {
-    setBusy(true);
-    setError('');
-    const { response, error: err } = await probePhysics();
+  const apply = useCallback((probe: { response: Max17Response; error?: string }) => {
+    const { response, error: err } = probe;
     if (err || response.route === 'error') {
       setError(err || String(response.error || 'ядро не ответило'));
       setRes(null);
@@ -91,6 +90,23 @@ export default function PhysicsPanel() {
     }
     setBusy(false);
   }, []);
+
+  // Просто замерить: ядро не трогаем.
+  const measure = useCallback(async () => {
+    setBusy(true);
+    setError('');
+    apply(await probePhysics());
+  }, [apply]);
+
+  // Скормить мысль и замерить по её следам. На пустом ядре уравнениям нечего
+  // считать — им нужна проделанная работа, а не запрос о ней.
+  const feed = useCallback(async () => {
+    const text = thought.trim();
+    if (!text) return;
+    setBusy(true);
+    setError('');
+    apply(await feedThenProbe(text));
+  }, [thought, apply]);
 
   useEffect(() => { void measure(); }, [measure]);
 
@@ -111,11 +127,33 @@ export default function PhysicsPanel() {
         <p>десять уравнений на настоящем состоянии Max17</p>
       </header>
 
+      <div className="phys-feed">
+        <input
+          className="phys-input"
+          value={thought}
+          onChange={(e) => setThought(e.target.value)}
+          onKeyDown={(e) => { if (e.key === 'Enter') void feed(); }}
+          placeholder="скажи ядру что-нибудь — и посмотри, как отзовутся уравнения"
+          disabled={busy}
+          aria-label="Мысль для ядра"
+        />
+        <button className="phys-btn primary" onClick={() => void feed()} disabled={busy || !thought.trim()}>
+          прогнать через ядро
+        </button>
+      </div>
+
       <div className="phys-actions">
         <button className="phys-btn" onClick={() => void measure()} disabled={busy}>
           {busy ? 'измеряю…' : 'измерить заново'}
         </button>
       </div>
+
+      <p className="phys-hint">
+        «измерить заново» только смотрит и ничего не меняет. Пустое ядро честно
+        показывает нули: линзировать нечего, у графа нулевая площадь, поля пусты.
+        Чтобы уравнениям было что считать, ядру нужна проделанная работа —
+        напиши мысль выше.
+      </p>
 
       {error && (
         <div className="phys-empty">
