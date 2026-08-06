@@ -28,6 +28,7 @@ from mark17.cognitive_physics import (
     council_colour,
     induct,
     running_coupling,
+    snapshot,
 )
 from mark17.consolidation import DILUTION_FLOOR, friedmann
 from mark17.critic import evaluate_event
@@ -464,6 +465,37 @@ def test_navier_stokes_laminar_profile_is_parabolic():
     assert profile[0] == 0.0 and profile[-1] == 0.0   # no-slip at the walls
     assert profile[4] == max(profile)                 # fastest in the middle
     assert profile[:4] == sorted(profile[:4])         # monotonic rise
+
+
+def test_snapshot_colour_override_beats_the_result_stub():
+    """The physics probe must be able to supply colour measured elsewhere.
+
+    Without this, the read-only probe — which deliberately runs none of the
+    three cores — would read colour off its own stub of zeros, and Maxwell's
+    field plus Yang-Mills' confinement would sit at zero forever on the one
+    event built to display them.
+    """
+    stub = {
+        "plasticity": {"confidence": 0.0, "action": "measure"},
+        "memory": {"hint": "3 memories"},
+        "llm": {"status": "skipped"},
+    }
+    event = Event(type="system_state", payload={"text": "проверка"}, source="test")
+
+    # Colour read off the stub: all three cores silent.
+    blind = snapshot(event, stub)
+    assert blind["yang_mills"]["colour"] == {"red": 0.0, "green": 0.0, "blue": 0.0}
+    assert blind["maxwell"]["energy_density"] == 0.0
+
+    # Same stub, colour measured from the cores' standing state.
+    seeing = snapshot(event, stub, colour=ColourCharge(red=0.42, green=0.9, blue=0.0))
+    assert seeing["yang_mills"]["colour"]["red"] > 0.0
+    assert seeing["maxwell"]["energy_density"] > 0.0
+    assert seeing["maxwell"]["field"]["memory"] == 0.9
+
+    # And a stronger council must read as less confined than a weaker one.
+    weak = snapshot(event, stub, colour=ColourCharge(red=0.1, green=0.9, blue=0.0))
+    assert seeing["yang_mills"]["residual_colour"] < weak["yang_mills"]["residual_colour"]
 
 
 def _run() -> int:
