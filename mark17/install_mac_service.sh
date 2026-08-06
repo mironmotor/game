@@ -39,12 +39,24 @@ for cand in python3 /usr/bin/python3 /opt/homebrew/bin/python3 /usr/local/bin/py
   fi
 done
 
+# Ни у кого нет numpy — ставим сами, для конкретного интерпретатора.
+# Просить человека выполнить pip бесполезно: он выполнит его для питона из
+# своей оболочки, а служба возьмёт другой, и всё повторится. Ставим ровно
+# туда, откуда потом будем запускать.
 if [ -z "$PY_BIN" ]; then
-  FALLBACK="$(command -v python3 || echo python3)"
-  echo "[max17] СТОП: ни у одного python3 нет numpy — служба будет падать в цикле."
-  echo "[max17] Поставь и запусти установку заново:"
-  echo "[max17]   $FALLBACK -m pip install --user -r $MARK17/requirements.txt"
-  exit 1
+  PY_BIN="$(command -v python3 || true)"
+  [ -n "$PY_BIN" ] || {
+    echo "[max17] СТОП: нет python3 — установи Xcode CLT: xcode-select --install"
+    exit 1
+  }
+  echo "[max17] numpy не найден — ставлю для $PY_BIN…"
+  if "$PY_BIN" -m pip install --user -q -r "$MARK17/requirements.txt" 2>&1 | tail -3; then :; fi
+  if ! "$PY_BIN" -c 'import numpy' >/dev/null 2>&1; then
+    echo "[max17] СТОП: numpy так и не встал для $PY_BIN — служба падала бы в цикле."
+    echo "[max17] Попробуй вручную:  $PY_BIN -m pip install --user -r $MARK17/requirements.txt"
+    exit 1
+  fi
+  echo "[max17] numpy установлен."
 fi
 echo "[max17] python: $PY_BIN"
 
