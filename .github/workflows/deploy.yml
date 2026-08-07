@@ -30,6 +30,18 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      # GitHub Pages is a static host: no server, so none of the app/api
+      # routes (Max17 bridge proxy, Stripe checkout/webhook) can run there
+      # regardless of how they build — Vercel is where the live API lives.
+      # Next.js's static export (`output: 'export'`, used automatically here
+      # since VERCEL is unset) refuses to build any POST-only Route Handler
+      # at all, so app/api must be removed before `next build` runs on this
+      # target. This step only affects this CI job; the Vercel build calls
+      # `next build` on its own with VERCEL=1 set, so app/api ships there
+      # untouched.
+      - name: Remove server-only API routes (static export has no server)
+        run: rm -rf app/api
+
       - name: Build
         run: npm run build
         env:
