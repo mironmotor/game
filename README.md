@@ -1,25 +1,42 @@
-<div align="center">
-<img width="1200" height="475" alt="GAME banner" src="https://github.com/user-attachments/assets/0aa67016-6eaf-458a-adb2-6e31a0763ed6" />
-</div>
-
 # GAME — Reality Creator
 
-GAME is a gamified HUD for an AGI-style assistant ("Max"), built on a
-deterministic, from-scratch cognitive core called **Max17**
-(`mark17/` — no ML framework, no required external API). One Next.js
-frontend serves 19 modes: a mission/XP HUD with chat, a Big Idea funnel, a
-voice-reactive 3D world where speaking literally creates matter, a liquid
-audio visualizer, chaotic-attractor simulations, webcam hand-tracking
-visualizers, a real SHA-256 proof-of-work visualizer, a self-awareness
-readout, a synapse-graph explorer, and more.
+[![Live demo](https://img.shields.io/badge/demo-live-00f2ff)](https://game-orpin-two-85.vercel.app)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
+[![Next.js 15](https://img.shields.io/badge/Next.js-15-black)](https://nextjs.org)
+[![Python 3.10+](https://img.shields.io/badge/Python-3.10%2B-3776ab)](https://python.org)
+![19 modes](https://img.shields.io/badge/modes-19-ff2fd0)
 
-Every mode is free and requires no sign-in — see
-[GODMODE](docs/GAME_MODES.md#godmode).
+**Talk or play music into your microphone and watch it turn into a living
+world.** Every particle you see is born from a frequency in your voice —
+tens of thousands of them, rendered on plain Canvas 2D with no WebGL, no
+game engine, and no sign-up.
 
-Originally scaffolded in [Google AI Studio](https://ai.studio/apps/dcf78fd2-d064-4f32-a65f-e4dbd1128e38);
-this repository is where it actually lives and grows now.
+![MAX VISION — the live spectrum blooming into liquid ink](docs/media/vision.gif)
+
+*Above: `/vision` reacting to a real voice — 38,000 particles at once. Below:
+`/efir`, where speaking creates matter that condenses and persists.*
+
+![Efir — a 3D world where voice becomes matter](docs/media/efir.gif)
+
+That's one of **19 browser modes** in GAME, all free and all open in one
+click: audio-reactive worlds, chaotic attractors, webcam hand tracking, a
+real SHA-256 proof-of-work visualizer, and a hand-written cognitive core
+called **Max17** that has no ML framework and needs no API key to run.
+
+### ▶ Try it now
+
+**[game-orpin-two-85.vercel.app](https://game-orpin-two-85.vercel.app)** —
+no install, no account. Best three to start with:
+
+| Mode | What to do |
+| --- | --- |
+| [`/vision`](https://game-orpin-two-85.vercel.app/vision) | Click **🎙**, then talk or play music — the spectrum blooms into liquid ink |
+| [`/efir`](https://game-orpin-two-85.vercel.app/efir) | Speak and matter is literally created; go quiet and it fades. Drag to orbit |
+| [`/attractor`](https://game-orpin-two-85.vercel.app/attractor) | Four strange attractors in 3D, tunable live |
 
 Built solo by a creator from Russia, coded over the course of a year.
+Originally scaffolded in [Google AI Studio](https://ai.studio/apps/dcf78fd2-d064-4f32-a65f-e4dbd1128e38);
+this repository is where it actually lives and grows now.
 
 ## Quick start
 
@@ -33,6 +50,12 @@ npm run dev
 
 Open **http://localhost:3000**. Full walkthrough, including the optional
 Python core: [docs/GETTING_STARTED.md](docs/GETTING_STARTED.md).
+
+The LLM key is only needed for the chat and idea-funnel modes — every
+visual mode works without it. **GODMODE** is a single flag in
+[`lib/subscription.ts`](lib/subscription.ts) (`GODMODE = true`) that keeps
+every mode unlocked for everyone: no sign-in, no paywall, no daily limits.
+Flip it to `false` and the tier system it ships with comes back intact.
 
 ## Documentation
 
@@ -68,6 +91,26 @@ Python core: [docs/GETTING_STARTED.md](docs/GETTING_STARTED.md).
   not an arbitrary limit — tens of thousands of particles at interactive
   frame rates.
 
+## How your voice becomes a world
+
+```mermaid
+flowchart LR
+    MIC["🎙 Microphone"] --> SIG["use-efir-signal.ts<br/>pitch · brightness · jitter<br/>96-band log spectrum"]
+    SIG --> VIS["/vision<br/>spectrum → radial flower"]
+    SIG --> EFIR["/efir<br/>particles born per voiced frame"]
+    SIG --> VOICE["voice_state.py<br/>arousal · valence · tension<br/>vs. your personal baseline"]
+    EFIR -- "census: ~20 numbers/sec" --> WM["world_model.py"]
+    VOICE -- tension --> WM
+    WM --> GEN["genesis.py<br/>ether: c = 1/√(εμ), Z = √(μ/ε)"]
+    GEN -- "laws: emission_scale, lifetime_scale" --> EFIR
+    WM --> DB[("world_model.db<br/>condensed matter<br/>survives reload")]
+```
+
+The loop is real, not decorative: a denser world thickens the ether, which
+raises impedance, which makes creating new matter more expensive — so the
+world throttles its own growth. Full mechanic in
+[docs/VOICE_AND_VISION.md](docs/VOICE_AND_VISION.md#world-model-the-core-learns-what-its-world-looks-like).
+
 ## Tech stack
 
 - **Frontend:** Next.js 15 (App Router), React 19, TypeScript, Tailwind CSS 4
@@ -80,14 +123,10 @@ Python core: [docs/GETTING_STARTED.md](docs/GETTING_STARTED.md).
 
 ## Contributing
 
-Issues and pull requests are welcome. Before opening a PR:
+Issues and pull requests are welcome — see
+[CONTRIBUTING.md](CONTRIBUTING.md) for setup, the pre-PR checklist, and
+what's actually useful to work on.
 
-```bash
-npm run lint
-npx tsc --noEmit
-npm run build
-for f in mark17/test_*.py; do python3 "$f"; done
-```
+## License
 
-This repository does not currently declare an open-source license; all
-rights are reserved by default unless a `LICENSE` file is added.
+[MIT](LICENSE) — use it, fork it, build on it.
