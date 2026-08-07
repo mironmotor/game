@@ -8,15 +8,24 @@ serve different capabilities:
 | **Vercel** (primary) | The full Next.js app at the domain root | Yes — Vercel runs a real server | `vercel.json` (framework preset only) |
 | **GitHub Pages** (secondary) | A static export under `/game` | No — static hosts can't run server code | `.github/workflows/deploy.yml` |
 
-`next.config.ts` detects the target with `process.env.VERCEL` and switches
-behavior automatically — you don't configure this by hand:
+`next.config.ts` defaults to the Vercel-style build — root path, no static
+export — for everything, including plain local `npm run dev` / `npm run
+build`. Only the GitHub Pages workflow opts into the static export, via an
+explicit `GITHUB_PAGES_EXPORT=true` env var (set in
+`.github/workflows/deploy.yml`, not something you set locally):
 
 ```ts
-const isVercel = !!process.env.VERCEL;
-const basePath = isVercel ? '' : '/game';
+const isGithubPagesExport = !!process.env.GITHUB_PAGES_EXPORT;
+const basePath = isGithubPagesExport ? '/game' : '';
 // ...
-...(isVercel ? {} : { output: 'export' as const, basePath, assetPrefix: basePath }),
+...(isGithubPagesExport ? { output: 'export' as const, basePath, assetPrefix: basePath } : {}),
 ```
+
+This is deliberately **not** inferred from "is this Vercel" — that used to
+also match plain local dev (no `VERCEL` env var there either), which made
+`npm run dev` serve everything under `/game` and 404 on the exact
+`http://localhost:3000` URL this repo's README tells you to open. Local dev
+and a plain local `npm run build` now always behave like the real app.
 
 ## Deploying to Vercel
 
