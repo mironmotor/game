@@ -37,6 +37,7 @@ from mark17.cognitive_physics import CoreField, snapshot as physics_snapshot
 from mark17.fluid_flow import solve as solve_flow, state_from_core
 from mark17.attractor_core import snapshot as attention_snapshot
 from mark17.genesis import genesis
+from mark17 import autonomy, hands
 from mark17 import web_sense
 from mark17.compression import compress as compress_similar
 
@@ -61,6 +62,7 @@ ALLOWED_EVENTS = frozenset(
         "physics",
         "web",
         "compress_similar",
+        "act",
     }
 )
 
@@ -107,6 +109,15 @@ def _as_event(data: dict[str, Any]) -> Event:
         payload["prompt"] = str(prompt)
     elif event_type == "decode":
         payload["target"] = str(data.get("target") or data.get("prompt") or data.get("text") or "")
+    elif event_type == "act":
+        payload["goal"] = str(data.get("goal") or data.get("text") or "")
+        # Руки выключены, пока их не включили явно: «решил» и «сделал» —
+        # разные события, и второе должен разрешить человек.
+        payload["allow_execute"] = bool(data.get("allow_execute") or data.get("hands"))
+        try:
+            payload["steps"] = int(data.get("steps") or 1)
+        except (TypeError, ValueError):
+            payload["steps"] = 1
     elif event_type == "web":
         payload["action"] = str(data.get("action") or ("read" if data.get("url") else "search"))
         payload["url"] = str(data.get("url") or "")
@@ -399,7 +410,7 @@ def normalize(result: dict[str, Any]) -> dict[str, Any]:
     origin = result.get("genesis")
     if isinstance(origin, dict):
         normalized["genesis"] = origin
-    for key in ("web", "compression", "links"):
+    for key in ("web", "compression", "links", "agent"):
         value = result.get(key)
         if isinstance(value, dict):
             normalized[key] = value
@@ -493,6 +504,8 @@ def _handle_event(event: Event, args: argparse.Namespace, state_dir: Path) -> di
         return _handle_simulation(event, brain, synapse_graph)
     if event.type == "decode":
         return _handle_decode(event, brain, synapse_graph)
+    if event.type == "act":
+        return _handle_act(event, brain, synapse_graph)
     if event.type == "web":
         return _handle_web(event, brain, synapse_graph)
     if event.type == "compress_similar":
@@ -666,6 +679,35 @@ def _gather_self_state(brain: Mark17Brain, synapse_graph: SynapseGraph) -> dict[
         "recent_hints": recent_hints,
         "top_relations": [r for r in top_relations if r],
     }
+
+
+def _handle_act(event: Event, brain: Mark17Brain, synapse_graph: SynapseGraph) -> dict[str, Any]:
+    """Автономный такт: Макс сам решает, что сделать, и — если разрешено — делает."""
+    goal = str(event.payload.get("goal") or "")
+    allow = bool(event.payload.get("allow_execute"))
+    steps = int(event.payload.get("steps") or 1)
+
+    report = autonomy.run(brain=brain, synapse_graph=synapse_graph, goal=goal,
+                          steps=steps, allow_execute=allow, llm=brain.llm)
+    report["can_do"] = hands.describe()
+
+    self_eval = {"score": 0.8, "reason": report["verdict"],
+                 "store_memory": True, "reinforce": "act"}
+    result: dict[str, Any] = {
+        "ok": True, "event_type": event.type, "route": "act", "agent": report,
+        "memory": {"hint": report["verdict"]},
+        "plasticity": {"confidence": 0.85 if allow else 0.6, "action": "act", "learned": True},
+        "llm": {"status": "ok", "text": report["verdict"], "latency_ms": 0.0},
+        "next_adaptation": report["verdict"],
+        "self_evaluation": self_eval,
+    }
+    result["synapses"] = synapse_graph.update_from_event(event, result, self_eval)
+    brain.memory.remember(
+        Event(type="remember", payload={"note": report["verdict"], "reinforce": "act"}, source="agent"),
+        hint=report["verdict"], action="act",
+    )
+    brain.plasticity.save()
+    return result
 
 
 def _handle_web(event: Event, brain: Mark17Brain, synapse_graph: SynapseGraph) -> dict[str, Any]:

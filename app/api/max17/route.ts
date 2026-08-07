@@ -25,6 +25,7 @@ const ALLOWED_EVENTS = new Set([
   'physics',
   'web',
   'compress_similar',
+  'act',
 ]);
 
 const DEFAULT_RESPONSE = {
