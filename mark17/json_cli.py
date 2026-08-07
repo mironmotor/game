@@ -27,6 +27,7 @@ from mark17.synapse_graph import SynapseGraph
 from mark17.consolidation import ConsolidationEngine, SCALE_REFERENCE, friedmann
 from mark17.voice_state import VoiceProfiles, process_voice_event
 from mark17.world_model import WorldModel, process_world_event
+from mark17.agent import Agent, process_agent_event
 from mark17.planner import build_plan
 from mark17.big_idea import generate as generate_big_idea
 from mark17.dream_sim import generate as generate_dream_sim
@@ -52,6 +53,8 @@ ALLOWED_EVENTS = frozenset(
         "sleep_consolidation",
         "voice_state",
         "world_state",
+        "agent_tick",
+        "agent_state",
         "auto_plan",
         "synapse_graph",
         "big_idea",
@@ -98,6 +101,8 @@ def _as_event(data: dict[str, Any]) -> Event:
     elif event_type == "voice_state":
         payload["user_id"] = str(data.get("user_id") or data.get("user") or "anon")
         payload["context"] = str(data.get("context") or data.get("text") or "")
+    elif event_type in ("agent_tick", "agent_state"):
+        payload["world_id"] = str(data.get("world_id") or data.get("world") or "")
     elif event_type == "auto_plan":
         goal = data.get("goal") or data.get("message") or data.get("text") or ""
         payload["goal"] = str(goal)
@@ -496,6 +501,10 @@ def _handle_event(event: Event, args: argparse.Namespace, state_dir: Path) -> di
         return _handle_voice_state(event, brain, vector_memory, synapse_graph, state_dir)
     if event.type == "world_state":
         return _handle_world_state(event, brain, synapse_graph, state_dir)
+    if event.type == "agent_tick":
+        return _handle_agent_tick(event, brain, synapse_graph, state_dir)
+    if event.type == "agent_state":
+        return _handle_agent_state(event, state_dir)
     if event.type == "auto_plan":
         return _handle_auto_plan(event, brain, vector_memory, synapse_graph)
     if event.type == "big_idea":
@@ -1131,16 +1140,34 @@ def _handle_world_state(
     """
     model = WorldModel(state_dir)
     tension = 0.0
+    arousal = 0.0
     voice_payload = event.payload.get("voice")
     if isinstance(voice_payload, dict):
         try:
             tension = float(voice_payload.get("tension", 0.0) or 0.0)
         except (TypeError, ValueError):
             tension = 0.0
+        try:
+            arousal = float(voice_payload.get("arousal", 0.0) or 0.0)
+        except (TypeError, ValueError):
+            arousal = 0.0
 
     world = process_world_event(event.payload, model, tension=tension)
     hint = f"{world['world']['id']}: {world['hint']}"
     bodies_born = len(world["new_bodies"])
+
+    # Агент живёт на том же такте, что и перепись: мир уже пересчитан, законы
+    # уже известны — второй запрос из браузера был бы лишним.
+    try:
+        world["agent"] = Agent(state_dir).tick(
+            world["world"]["id"],
+            world["census"],
+            laws=world["laws"],
+            tension=_clamp_unit(tension),
+            arousal=_clamp_unit(arousal),
+        )
+    except Exception as exc:  # агент не имеет права уронить перепись мира
+        world["agent"] = {"ok": False, "error": f"{type(exc).__name__}: {exc}"}
 
     result: dict[str, Any] = {
         "ok": True,
@@ -1188,6 +1215,92 @@ def _handle_world_state(
     )
     brain.plasticity.save()
     return result
+
+
+def _handle_agent_tick(
+    event: Event,
+    brain: Mark17Brain,
+    synapse_graph: SynapseGraph,
+    state_dir: Path,
+) -> dict[str, Any]:
+    """Один такт автономного агента без переписи мира.
+
+    Отдельный вход нужен там, где мир уже посчитан кем-то другим или где агента
+    гоняют вхолостую — в тестах, из CLI, из режима, который сам частиц не рисует.
+    В «Эфире» агент едет прицепом к ``world_state`` и сюда не заходит.
+    """
+    agent_result = process_agent_event(event.payload, Agent(state_dir))
+    say = str(agent_result.get("say") or "")
+    confidence = _clamp_unit(agent_result.get("action", {}).get("trust", 0.6))
+
+    result: dict[str, Any] = {
+        "ok": True,
+        "event_type": event.type,
+        "route": "agent",
+        "agent": agent_result,
+        "memory": {"hint": say},
+        "plasticity": {
+            "confidence": confidence,
+            "action": f"agent_{agent_result.get('action', {}).get('key', 'idle')}",
+            "learned": bool(agent_result.get("learned")),
+        },
+        "llm": {"status": "skipped", "text": "Агент решает сам, без LLM.", "latency_ms": 0.0},
+        "decision": {"reason": say, "confidence": confidence},
+        "next_adaptation": say,
+        "self_evaluation": {
+            "score": confidence,
+            "reason": say,
+            # Каждый такт помнить незачем — их сотни. Помним только момент, когда
+            # агент пересмотрел доверие к действию: это и есть его опыт.
+            "store_memory": bool(agent_result.get("learned")),
+            "reinforce": "agent_learned" if agent_result.get("learned") else "agent_tick",
+        },
+    }
+
+    learned = agent_result.get("learned")
+    if learned:
+        brain.memory.remember(
+            Event(
+                type="remember",
+                payload={
+                    "note": say,
+                    "agent_id": agent_result.get("agent_id"),
+                    "world_id": agent_result.get("world_id"),
+                    "action": learned.get("action"),
+                    "error": learned.get("error"),
+                    "trust": learned.get("trust_after"),
+                },
+                source="agent",
+            ),
+            hint=say,
+            action="agent_learned",
+        )
+
+    result["synapses"] = synapse_graph.update_from_event(event, result, result["self_evaluation"])
+    brain.plasticity.save()
+    return result
+
+
+def _handle_agent_state(event: Event, state_dir: Path) -> dict[str, Any]:
+    """Прочитать агента, ничего не меняя: панель открывается, а такт не идёт."""
+    world_id = str(event.payload.get("world_id") or "").strip()
+    state = Agent(state_dir).state(world_id) if world_id else None
+    hint = (
+        f"Агент {state['agent_id']}: {state['tick']} тактов прожито."
+        if state
+        else "В этом мире агент ещё не рождался."
+    )
+    return {
+        "ok": True,
+        "event_type": event.type,
+        "route": "agent",
+        "agent": state,
+        "memory": {"hint": hint},
+        "plasticity": {"confidence": 1.0 if state else 0.0, "action": "agent_read"},
+        "llm": {"status": "skipped", "text": hint, "latency_ms": 0.0},
+        "decision": {"reason": hint, "confidence": 1.0 if state else 0.0},
+        "next_adaptation": hint,
+    }
 
 
 def _clamp_unit(value: Any) -> float:

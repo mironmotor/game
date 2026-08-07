@@ -218,3 +218,42 @@ Tests: `python3 mark17/test_world_model.py` (covers deterministic
 addressing, seed reproducibility, matter condensation, worlds surviving a
 new session, and that an early/hot universe refuses to condense
 structure).
+
+## The agent — someone who wants something from this world
+
+The World Model gave the core *awareness* of the 3D world. It still only
+answered when spoken to. The **agent** is the first thing that acts on that
+world on its own: it rides the same one-per-second census, forms its own
+goals from four drives, picks an action by minimizing `F = E − T·S`, and
+sends back knobs the browser applies to emission, lifetime, spiral, arms and
+hue. Next tick it checks whether the world actually went where it promised
+and adjusts its trust in that action.
+
+One world, one agent — the agent's address is derived from the world's, and
+it persists across restarts alongside the world itself.
+
+Full mechanic: [docs/GAME_MODES.md](GAME_MODES.md#agent--it-decides-on-its-own-agent).
+Tests: `python3 mark17/test_agent.py`.
+
+### Two calibration notes worth knowing
+
+Building the agent exposed two sensors in this census that were reporting
+constants, which is worth recording because both had been invisible:
+
+- **Density saturated.** `DENSITY_REFERENCE` was 50,000 while the world
+  routinely holds 50–65k particles, so `density` sat pinned at `1.0` more
+  than a quarter of the time. The core saw a permanently overfull world, the
+  ether stood at maximum thickness, and a value that feeds both the cost of
+  creating matter and half the agent's drives stopped saying anything. It is
+  now 72,000, and density moves across roughly 0.35–0.84.
+- **Symmetry was frozen at 0.99.** Particle angular velocity followed a
+  Keplerian `ω ∝ 1/r` with a random per-particle factor on top, so an arm
+  sheared itself flat within a single particle lifetime — this is the
+  classic winding problem. The disk was always uniform, so the symmetry
+  score was always ~1 regardless of what you sang. Rotation is now a density
+  wave (a rigid pattern speed plus a small differential term), the spiral
+  opens to under one turn instead of wrapping over itself, and symmetry
+  moves across 0.92–0.95.
+
+Both were pre-existing; nothing depended on them closely enough to notice
+until something started making decisions from them.

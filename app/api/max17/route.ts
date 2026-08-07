@@ -15,6 +15,8 @@ const ALLOWED_EVENTS = new Set([
   'sleep_consolidation',
   'voice_state',
   'world_state',
+  'agent_tick',
+  'agent_state',
   'auto_plan',
   'synapse_graph',
   'big_idea',

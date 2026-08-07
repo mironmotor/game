@@ -160,6 +160,103 @@ export interface Max17WorldLaws {
   law?: string;
 }
 
+/**
+ * Автономный агент: первый житель мира, который действует сам.
+ * Выбор идёт по свободной энергии F = E − T·S.
+ */
+export interface Max17AgentDrive {
+  key: 'care' | 'growth' | 'order' | 'novelty' | string;
+  title: string;
+  /** Наблюдаемая, за которой следит влечение, 0..1. */
+  value: number;
+  /** Уставка: каким агент хочет видеть мир по этой оси. */
+  target: number;
+  /** Насколько влечение сейчас голодает. 0 — сыто. */
+  deficit: number;
+  weight: number;
+  note: string;
+}
+
+/** Ручки, которыми агент реально крутит мир. Браузер их и применяет. */
+export interface Max17AgentKnobs {
+  /** Множитель темпа рождения частиц. */
+  emission?: number;
+  /** Множитель времени жизни частицы. */
+  lifetime?: number;
+  /** Сдвиг числа рукавов спирали. */
+  arms?: number;
+  /** Сдвиг закрутки логарифмической спирали b. */
+  spiral?: number;
+  /** Сдвиг цели по оттенку, градусы. */
+  hue?: number;
+}
+
+export interface Max17AgentAction {
+  key: string;
+  title: string;
+  note: string;
+  knobs: Max17AgentKnobs;
+  cost: number;
+  /** Насколько агент верит, что это действие делает обещанное. */
+  trust: number;
+}
+
+export interface Max17AgentThermo {
+  free_energy: number;
+  energy: number;
+  entropy: number;
+  /** Ниже — агент вылизывает структуру, выше — рискует. */
+  temperature: number;
+  predicted_free_energy: number;
+  law?: string;
+}
+
+/** Сверка прошлого предсказания с тем, каким мир стал на самом деле. */
+export interface Max17AgentLearned {
+  action: string;
+  title: string;
+  predicted: Record<string, number>;
+  actual: Record<string, number>;
+  error: number;
+  accuracy: number;
+  trust_before: number;
+  trust_after: number;
+}
+
+export interface Max17AgentJournalEntry {
+  ts: number;
+  tick: number;
+  action: string;
+  free_energy: number;
+  temperature: number;
+  mood: string;
+  note: string;
+}
+
+export interface Max17Agent {
+  agent_id?: string;
+  world_id?: string;
+  tick?: number;
+  born_at?: number;
+  mood?: string;
+  /** Фраза от первого лица: почему именно это действие именно сейчас. */
+  say?: string;
+  action?: Max17AgentAction;
+  thermo?: Max17AgentThermo;
+  observation?: Record<string, number>;
+  drives?: Max17AgentDrive[];
+  /** Все варианты со своей свободной энергией — агент обязан объясниться. */
+  considered?: Array<{ key: string; title: string; free_energy: number; trust: number; chosen: boolean }>;
+  trust?: Record<string, { trust: number; uses: number; error: number; last_used: number }>;
+  learned?: Max17AgentLearned | null;
+  journal?: Max17AgentJournalEntry[];
+  /** Присутствует только когда такт агента упал: мир при этом жив. */
+  ok?: boolean;
+  error?: string;
+  /** Из `agent_state`: что агент собирается сделать на следующем такте. */
+  intent?: string | null;
+}
+
 /** Связавшееся вещество — то, что переживает закрытие вкладки. */
 export interface Max17Body {
   index: number;
@@ -192,6 +289,8 @@ export interface Max17World {
   body_count?: number;
   bodies?: Max17Body[];
   hint?: string;
+  /** Агент едет прицепом к переписи: мир уже посчитан, второй запрос не нужен. */
+  agent?: Max17Agent;
   world?: {
     id?: string;
     seed?: number;
@@ -484,6 +583,7 @@ export interface Max17Response {
   self_evaluation?: Max17SelfEvaluation;
   voice?: Max17VoiceState;
   world?: Max17World;
+  agent?: Max17Agent | null;
   plan?: Max17Plan;
   graph?: Max17Graph;
   physics?: Max17Physics;

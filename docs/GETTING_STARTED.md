@@ -79,7 +79,7 @@ if 3000 is busy — check the terminal output).
 - `/efir` — a voice-reactive 3D world; click **🎙 Listen** and talk
 - `/vision` — MAX VISION, a liquid audio visualizer; click **🎙 Let sound in**
 
-See [docs/GAME_MODES.md](GAME_MODES.md) for the full list of 19 modes.
+See [docs/GAME_MODES.md](GAME_MODES.md) for the full list of modes.
 
 ## 6. Run the test suite
 

@@ -81,7 +81,9 @@ points at the `mark17/json_cli.py` function that processes it.
 | `system_state` | generic path (`brain.handle`) | Home HUD | `{ energy, focus, reputation, balance, tasks_count, active_tasks_count }` |
 | `sleep_consolidation` | `_handle_sleep_consolidation` | `npm run max17:sleep` | `{}` |
 | `voice_state` | `_handle_voice_state` | `/efir` sound signature | see below |
-| `world_state` | `_handle_world_state` | `/efir` 3D world | see below |
+| `world_state` | `_handle_world_state` | `/efir` and `/agentmind` 3D world | see below |
+| `agent_tick` | `_handle_agent_tick` | standalone agent step | `{ world_id, census?, voice?, laws? }` |
+| `agent_state` | `_handle_agent_state` | read the agent, no tick | `{ world_id }` |
 | `auto_plan` | `_handle_auto_plan` | `/autoplan` | `{ goal: string, horizon_days?: number }` |
 | `synapse_graph` | `_handle_synapse_graph` | `/maxgraph` | `{ limit?: number }` (default 400, max 2000) |
 | `big_idea` | `_handle_big_idea` | `/funnel`, `/tg` | `{ domain, audience, trend, twist }` (all optional) |
@@ -154,6 +156,74 @@ Response includes a `world` object with the world's address, the current
 cosmological epoch, and the physics laws for the next interval
 (`emission_scale`, `lifetime_scale`, `can_condense`). Full mechanic in
 [docs/VOICE_AND_VISION.md](VOICE_AND_VISION.md#world-model-the-core-learns-what-its-world-looks-like).
+
+`world.agent` rides along on the same response — the world has just been
+recomputed and its laws are already known, so a second round trip would be
+wasted. See `agent_tick` below for the shape.
+
+### `agent_tick` — one step of the autonomous agent
+
+Only needed when you want the agent to act *without* a world census (tests,
+CLI, a mode that draws no particles of its own). In `/efir` and `/agentmind` the
+agent already rides along on `world_state`.
+
+```bash
+curl -s -X POST http://localhost:3000/api/max17 \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "type": "agent_tick",
+    "world_id": "w-2b054a6eff8c",
+    "census": { "alive": 4000, "born": 300, "died": 90, "density": 0.6,
+                "symmetry": 0.93, "radius": 3.2, "hue": 316, "dt": 1.0 },
+    "voice": { "tension": 0.3, "arousal": 0.6 },
+    "laws": { "propagation": 0.8 }
+  }'
+```
+
+```json
+{
+  "agent": {
+    "agent_id": "a-2b054a6eff8c",
+    "tick": 17,
+    "mood": "тревожен",
+    "action": {
+      "key": "scatter", "title": "Рассеяние", "trust": 0.58,
+      "knobs": { "emission": 1.15, "lifetime": 0.9, "arms": 1,
+                 "spiral": 0.14, "hue": 0 }
+    },
+    "thermo": { "free_energy": -0.13, "energy": 0.09,
+                "entropy": 0.53, "temperature": 0.41, "law": "F = E - T*S" },
+    "drives": [{ "key": "care", "value": 0.67, "target": 0.85,
+                 "deficit": 0.18, "note": "ты напряжён — увожу мир в спокойное" }],
+    "considered": [{ "key": "scatter", "free_energy": -0.17, "chosen": true }],
+    "learned": { "action": "watch", "accuracy": 0.55,
+                 "trust_before": 0.6, "trust_after": 0.61 },
+    "journal": [{ "tick": 17, "action": "scatter", "free_energy": -0.13 }]
+  }
+}
+```
+
+`knobs` is the part a client is meant to apply: multiply your emission rate by
+`emission`, particle lifetime by `lifetime`, add `arms` to the arm count,
+`spiral` to the spiral tightness, and `hue` degrees to your palette. Ease
+toward them rather than jumping — the agent decides once per second, and an
+unsmoothed jump reads as a glitch rather than as intent. Clamp them too: the
+agent is meant to live inside your physics, not override it.
+
+Requires `world_id`; the request is rejected without one. An agent is
+addressed by its world, so the same `world_id` always reaches the same agent.
+
+### `agent_state` — read the agent without advancing it
+
+```bash
+curl -s -X POST http://localhost:3000/api/max17 \
+  -H 'Content-Type: application/json' \
+  -d '{"type": "agent_state", "world_id": "w-2b054a6eff8c"}'
+```
+
+Returns the stored tick count, last observation, the action it intends next,
+the full trust table, and the journal — without running a tick. `agent` is
+`null` if no agent has ever been born in that world.
 
 ### `introspect` — ask the core about itself
 

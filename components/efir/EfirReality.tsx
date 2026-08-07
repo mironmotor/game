@@ -2,20 +2,73 @@
 
 import { useEffect, useRef, useState } from 'react';
 import './efir.css';
+import AgentPanel, { AgentLine } from '@/components/agent/AgentPanel';
 import QuantumEyes, { IDLE_SIGNAL, type QuantumSignal } from '@/components/hud/QuantumEyes';
 import { useEfirSignal } from '@/hooks/use-efir-signal';
 import { HUE_LUT, hueIndex } from '@/lib/hue-lut';
-import { sendMax17Event, type Max17World, type Max17WorldLaws } from '@/lib/max17-client';
+import {
+  sendMax17Event,
+  type Max17Agent,
+  type Max17World,
+  type Max17WorldLaws,
+} from '@/lib/max17-client';
 
 // Как часто отправлять ядру перепись мира. Раз в секунду достаточно: ядро
 // смотрит на мир, а не управляет каждым кадром.
 const CENSUS_INTERVAL = 1.0;
 // Сколько живых частиц считать «полным» миром при расчёте плотности.
-const DENSITY_REFERENCE = 50000;
+//
+// Замерено на живом мире (25 переписей, реальный звук в микрофон). При старом
+// эталоне 50k плотность упиралась в 1.0 больше четверти времени: ядро видело
+// вечно переполненный мир, эфир стоял на максимальной густоте и переставал
+// что-либо сообщать — а от него зависит и цена рождения материи, и половина
+// влечений агента. На 72k плотность ходит 0.35..0.84 и обе крайности снова
+// достижимы. Выше поднимать нельзя: эфир слабее тормозит рождения, равновесная
+// численность растёт, и кадры уходят вместе с ней (на 100k — 65k частиц и
+// 27 fps против 53k и 31 fps здесь, при той же цене одной частицы).
+const DENSITY_REFERENCE = 72000;
 // На сколько угловых секторов делим диск, чтобы измерить симметрию мира.
-const SECTORS = 12;
+// На 12 секторах 3-4 рукава попадали по одному в сектор и гистограмма выходила
+// ровной при любой структуре. 24 сектора разрешают и рукав, и промежуток.
+const SECTORS = 24;
 // Конечный радиус ядра: ближе частица подойти не может.
 const CORE_RADIUS = 0.12;
+// За сколько секунд мир догоняет новое решение агента. Агент решает раз в
+// секунду; без сглаживания каждое его действие выглядело бы как рывок, а не
+// как чья-то воля. Полсекунды — переход виден, но не дёргает.
+const AGENT_EASE = 0.5;
+// Пределы, за которые агент не может утащить мир. Он живёт внутри физики
+// «Эфира», а не поверх неё: без рамок «цветение» подряд превратило бы мир
+// в белую стену, и никакой перепись это уже не спасла бы.
+const AGENT_EMISSION_RANGE: [number, number] = [0.35, 2.2];
+const AGENT_LIFETIME_RANGE: [number, number] = [0.5, 2.2];
+const AGENT_SPIRAL_RANGE: [number, number] = [-0.18, 0.18];
+const AGENT_ARMS_RANGE: [number, number] = [-2, 2];
+
+// Автоэкспозиция. Свет копится аддитивно, поэтому яркость картинки растёт
+// вместе с числом частиц: на 6k виден рисунок, на 55k центр выжжен в плоское
+// белое пятно и вся структура пропадает. Как в камере — чем больше света,
+// тем короче выдержка; при этом населении картинка держит одну яркость.
+const EXPOSURE_REFERENCE = 14000;
+const EXPOSURE_MIN = 0.22;
+// Шлейф копит свет: при гашении 14% за кадр на экране лежит около семи кадров
+// сразу. Одной выдержки мало — гасить надо тем быстрее, чем плотнее мир,
+// иначе центр всё равно выгорает в ровное пятно и рукава пропадают.
+const TRAIL_FADE_MIN = 0.14;
+const TRAIL_FADE_MAX = 0.44;
+
+// Скорость узора и добавка дифференциального вращения.
+//
+// Чистая кеплеровская орбита (ω ∝ 1/r) наматывает рукав в диск за одно время
+// жизни частицы: внутренние обгоняют внешние на 3+ радиана при расстоянии
+// между рукавами 2π/3 ≈ 2.1. Именно поэтому мир выглядел ровным светящимся
+// пятном, а перепись честно отдавала ядру симметрию 0.99 при любой музыке.
+// Это не баг отрисовки, а известная winding problem: в настоящих галактиках
+// рукава — не вещество, а волна плотности, и вращается она как целое.
+// Здесь так же: узор несёт PATTERN_SPEED, а на него накинут небольшой
+// дифференциальный член, чтобы диск не выглядел жёстким блином.
+const PATTERN_SPEED = 0.62;
+const DIFFERENTIAL_SPIN = 0.22;
 
 // ── Эфир · 3D-реальность из голоса ───────────────────────────────────────────
 // Голос не крутит готовое облако — он РОЖДАЕТ материю. Каждый озвученный кадр
@@ -44,6 +97,20 @@ const clamp = (v: number, lo = 0, hi = 1) => Math.max(lo, Math.min(hi, v));
 const lerp = (a: number, b: number, t: number) => a + (b - a) * t;
 const expE = (x: number) => Math.pow(E, x); // e^x, буквально через e = 2.718
 
+/**
+ * Закрутка логарифмической спирали r = r₀·e^(bθ). Напряжение стягивает пружину:
+ * спокойствие — раскрытые рукава (b велик), стресс — тугая навивка (b мал).
+ *
+ * Диапазон подобран из геометрии, а не на глаз. Частицы рождаются на радиусах
+ * 0.28..4.7, значит рукав занимает по углу θ = ln(4.7/0.28)/b = 2.82/b радиан.
+ * На прежних b = 0.16..0.5 это 5.6..17.6 радиан — рукав наматывается на диск
+ * от одного до трёх оборотов, перекрывает сам себя и все остальные рукава, и
+ * мир превращается в ровное светящееся пятно без какой-либо структуры. Здесь
+ * рукав укладывается в 0.43 оборота на спокойном голосе и в один — на
+ * стрессе: витки уже не пересекаются, и рукава наконец видно.
+ */
+const spiralB = (tension: number) => lerp(1.05, 0.45, clamp(tension));
+
 interface HudReadout {
   f0: number;
   arousal: number;
@@ -56,17 +123,28 @@ interface HudReadout {
   kappa: number;
 }
 
-export default function EfirReality() {
+/**
+ * `world` — мир на первом плане, агент одной строкой.
+ * `agent`  — тот же мир, но раскрыт разум агента: влечения, F = E − T·S, дневник.
+ */
+export type EfirVariant = 'world' | 'agent';
+
+export default function EfirReality({ variant = 'world' }: { variant?: EfirVariant }) {
   const wrapRef = useRef<HTMLDivElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const signalRef = useRef<QuantumSignal>({ ...IDLE_SIGNAL });
   const { listening, status, start, stop } = useEfirSignal(signalRef);
-  const [showEyes, setShowEyes] = useState(true);
+  const [showEyes, setShowEyes] = useState(variant === 'world');
   // Законы, присланные ядром. Мир живёт по ним до следующей переписи.
   const lawsRef = useRef<Max17WorldLaws | null>(null);
   const censusBusyRef = useRef(false);
   const sectorsRef = useRef<Float32Array>(new Float32Array(SECTORS));
   const [world, setWorld] = useState<Max17World | null>(null);
+  const [agent, setAgent] = useState<Max17Agent | null>(null);
+  // Куда агент тянет мир (цель) и где мир сейчас (сглаженное). Оттенок
+  // накапливается: каждый «перекрас» уводит палитру дальше по кругу.
+  const agentAim = useRef({ emission: 1, lifetime: 1, arms: 0, spiral: 0, hue: 0 });
+  const agentNow = useRef({ emission: 1, lifetime: 1, arms: 0, spiral: 0, hue: 0 });
   const [hud, setHud] = useState<HudReadout>({
     f0: 0, arousal: 0, valence: 0.5, tension: 0, alive: 0, arms: 3, b: 0.4, tau: 3, kappa: 2,
   });
@@ -176,10 +254,14 @@ export default function EfirReality() {
       if (s.count >= s.cap) grow();
       s.bornAcc++;
       const i = s.count++;
+      const ag = agentNow.current;
       // напряжение закручивает рукава: спокойствие — раскрытая спираль (b велик),
-      // стресс — тугая пружина (b мал).
-      const b = lerp(0.5, 0.16, clamp(sig.tension));
-      const arms = Math.round(lerp(4, 2, clamp(sig.tension)));
+      // стресс — тугая пружина (b мал). Агент добавляет к этому свой сдвиг:
+      // «свивание» стягивает мир к оси, «рассеяние» пускает вширь.
+      const b = clamp(spiralB(sig.tension) + ag.spiral, 0.35, 1.3);
+      const arms = Math.round(
+        clamp(lerp(4, 2, clamp(sig.tension)) + ag.arms, 2, 6),
+      );
       const arm = Math.floor(Math.random() * arms);
       // радиус рождения: выше тон (регистр) — дальше от ядра
       const tt = Math.pow(Math.random(), 0.7);
@@ -187,7 +269,9 @@ export default function EfirReality() {
       const rad = r0 + tt * (2.4 + sig.register * 3.4);
       // угол на спирали r = r0·e^(bθ)  ⟺  θ = ln(r/r0)/b
       const theta = Math.log(rad / r0) / b;
-      const scatter = (Math.random() - 0.5) * 0.5;
+      // Толщина рукава. Раньше 0.5 рад при расстоянии между рукавами 2.1 —
+      // четверть промежутка, рукава сливались ещё на рождении.
+      const scatter = (Math.random() - 0.5) * 0.22;
       s.rad[i] = rad;
       s.ang[i] = arm * (TWO_PI / arms) + theta + scatter;
       // высота диска: тоньше к краю, чуть приподнята регистром
@@ -195,12 +279,19 @@ export default function EfirReality() {
       s.born[i] = now;
       // Позитив — долгая светящаяся жизнь; негатив — быстрые искры. Густой
       // эфир ядра (impedance) удерживает рождённое дольше — это его закон.
-      const lifeScale = lawsRef.current?.lifetime_scale ?? 1;
+      // «Удержание» агента добавляется поверх закона ядра: он не отменяет
+      // физику эфира, а докручивает её в ту сторону, которую сам выбрал.
+      const lifeScale = (lawsRef.current?.lifetime_scale ?? 1) * ag.lifetime;
       s.life[i] = lerp(1.1, 6.5, clamp(sig.valence)) * (0.7 + Math.random() * 0.6) * lifeScale;
-      // магента-палитра: позитив → фиолет, негатив → горячий розовый
-      s.hue[i] = 316 + (sig.valence - 0.5) * -40 + (Math.random() - 0.5) * 14;
-      // дифференциальное вращение: ближе к ядру — быстрее (шир рукавов)
-      s.spin[i] = (0.5 + Math.random() * 0.5) / (0.4 + rad * 0.5);
+      // магента-палитра: позитив → фиолет, негатив → горячий розовый.
+      // ag.hue — накопленный «перекрас» агента, он уводит палитру по кругу.
+      s.hue[i] = 316 + ag.hue + (sig.valence - 0.5) * -40 + (Math.random() - 0.5) * 14;
+      // Волна плотности плюс лёгкий дифференциал. Разброс ±4% — чтобы
+      // структура не выглядела нарисованной; случайности больше здесь быть не
+      // должно, иначе соседи по рукаву разъедутся и рукав снова размажется.
+      s.spin[i] =
+        (0.96 + Math.random() * 0.08) *
+        (PATTERN_SPEED + DIFFERENTIAL_SPIN / (0.4 + rad * 0.5));
     };
 
     const loop = (ts: number) => {
@@ -211,6 +302,19 @@ export default function EfirReality() {
       const now = s.t;
       const sig = signalRef.current;
 
+      // Мир догоняет решение агента, а не прыгает в него. Коэффициент не
+      // зависит от частоты кадров: на 30 и на 144 fps переход одинаков.
+      {
+        const k = 1 - Math.pow(0.02, dt / AGENT_EASE);
+        const aim = agentAim.current;
+        const cur = agentNow.current;
+        cur.emission += (aim.emission - cur.emission) * k;
+        cur.lifetime += (aim.lifetime - cur.lifetime) * k;
+        cur.arms += (aim.arms - cur.arms) * k;
+        cur.spiral += (aim.spiral - cur.spiral) * k;
+        cur.hue += (aim.hue - cur.hue) * k;
+      }
+
       // фаза Эйлера θ из тона голоса (частота кванта)
       const omega = TWO_PI * (sig.voiced ? clamp(sig.f0 / 260, 0.15, 4) : 0.25);
       s.phase += omega * dt;
@@ -220,7 +324,9 @@ export default function EfirReality() {
       // Импеданс эфира — цена излучения в среду, поэтому он прямо задаёт,
       // сколько материи мир может позволить себе родить.
       if (sig.voiced) {
-        const emitScale = lawsRef.current?.emission_scale ?? 1;
+        // Цена излучения от ядра × воля агента: «цветение» раскрывает эфир,
+        // «затишье» прикручивает. Оба множителя перемножаются честно.
+        const emitScale = (lawsRef.current?.emission_scale ?? 1) * agentNow.current.emission;
         const emit = Math.round(
           (4 + sig.energy * 60 + sig.brightness * 26) * DENSITY * emitScale * (dt * 60),
         );
@@ -234,26 +340,39 @@ export default function EfirReality() {
       const { w, h, dpr } = s;
       const cx = w / 2;
       const cy = h / 2;
-      const scale = Math.min(w, h) * 0.12;
+      // Мир занимал около трети холста, а остальное было чёрным полем. При
+      // десятках тысяч частиц это решает не композицию, а видимость: на пятне
+      // радиусом 200px 66k частиц накрывают каждый пиксель, и никакая
+      // структура физически не может проступить. Втрое больший радиус — это
+      // вдевятеро больше площади на ту же численность.
+      const scale = Math.min(w, h) * 0.2;
       const focal = 520;
       const camDist = 7;
 
       const cyaw = Math.cos(s.yaw), syaw = Math.sin(s.yaw);
       const cpit = Math.cos(s.pitch), spit = Math.sin(s.pitch);
 
+      // Выдержка на этот кадр: считается по прошлому счёту, так что расходов
+      // на неё нет вообще, а разница между кадрами незаметна.
+      const exposure = clamp(EXPOSURE_REFERENCE / Math.max(1, s.count), EXPOSURE_MIN, 1);
+      const trailFade = clamp(TRAIL_FADE_MIN / exposure, TRAIL_FADE_MIN, TRAIL_FADE_MAX);
+
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
       // шлейф: при орбите мышью гасим сильнее, чтобы не смазывалось
       ctx.globalCompositeOperation = 'source-over';
-      ctx.fillStyle = s.moved ? 'rgba(6,2,16,0.5)' : 'rgba(6,2,16,0.14)';
+      ctx.fillStyle = s.moved ? 'rgba(6,2,16,0.5)' : `rgba(6,2,16,${trailFade})`;
       ctx.fillRect(0, 0, w, h);
       s.moved = false;
 
       // свечение ядра Макса
       const coreGlow = ctx.createRadialGradient(cx, cy, 0, cx, cy, scale * 2.4);
       const coreA = 0.16 + (sig.voiced ? sig.energy * 0.4 : 0.04);
-      coreGlow.addColorStop(0, `hsla(315,100%,72%,${coreA})`);
-      coreGlow.addColorStop(0.4, `hsla(315,100%,60%,${coreA * 0.4})`);
-      coreGlow.addColorStop(1, 'hsla(315,100%,60%,0)');
+      // Свечение ядра идёт за палитрой агента, иначе после «перекраса» центр
+      // остался бы старого цвета и мир развалился бы надвое.
+      const coreHue = (((315 + agentNow.current.hue) % 360) + 360) % 360;
+      coreGlow.addColorStop(0, `hsla(${coreHue},100%,72%,${coreA})`);
+      coreGlow.addColorStop(0.4, `hsla(${coreHue},100%,60%,${coreA * 0.4})`);
+      coreGlow.addColorStop(1, `hsla(${coreHue},100%,60%,0)`);
       ctx.fillStyle = coreGlow;
       ctx.fillRect(cx - scale * 2.4, cy - scale * 2.4, scale * 4.8, scale * 4.8);
 
@@ -319,7 +438,7 @@ export default function EfirReality() {
           const fog = clamp(expE(-(z2 + camDist) / 12));
           // ближе к ядру — ярче, добела
           const coreHot = clamp(1 - rad / 3);
-          const alpha = decay * fog * (0.28 + coreHot * 0.4);
+          const alpha = decay * fog * (0.28 + coreHot * 0.4) * exposure;
           if (alpha >= 0.01) {
             const white = clamp(coreHot * 0.75); // к ядру выбеливает
             const hi = hueIndex(s.hue[i]);
@@ -382,7 +501,7 @@ export default function EfirReality() {
           died: s.diedAcc,
           radius: fin(alive > 0 ? radSum / alive : 0),
           density: clamp(alive / DENSITY_REFERENCE),
-          spiral_b: fin(lerp(0.5, 0.16, clamp(sig.tension))),
+          spiral_b: fin(spiralB(sig.tension)),
           arms: Math.round(lerp(4, 2, clamp(sig.tension))),
           hue: fin(alive > 0 ? ((hueSum / alive) % 360 + 360) % 360 : 316),
           symmetry: fin(symmetry),
@@ -405,6 +524,20 @@ export default function EfirReality() {
             if (res.world) {
               setWorld(res.world);
               if (res.world.laws) lawsRef.current = res.world.laws;
+              // Агент едет прицепом к переписи — отдельного запроса нет.
+              const a = res.world.agent;
+              if (a?.action?.knobs) {
+                const k = a.action.knobs;
+                const aim = agentAim.current;
+                aim.emission = clamp(k.emission ?? 1, ...AGENT_EMISSION_RANGE);
+                aim.lifetime = clamp(k.lifetime ?? 1, ...AGENT_LIFETIME_RANGE);
+                aim.arms = clamp(k.arms ?? 0, ...AGENT_ARMS_RANGE);
+                aim.spiral = clamp(k.spiral ?? 0, ...AGENT_SPIRAL_RANGE);
+                // Оттенок — единственная накопительная ручка: «перекрас»
+                // сдвигает палитру дальше, а не ставит её в фиксированную точку.
+                aim.hue += k.hue ?? 0;
+              }
+              if (a) setAgent(a);
             }
           })
           .catch(() => {
@@ -426,7 +559,7 @@ export default function EfirReality() {
           tension: sig.tension,
           alive: s.count,
           arms: Math.round(lerp(4, 2, clamp(sig.tension))),
-          b: lerp(0.5, 0.16, clamp(sig.tension)),
+          b: spiralB(sig.tension),
           tau: lerp(1.1, 6.5, clamp(sig.valence)),
           kappa,
         });
@@ -467,10 +600,16 @@ export default function EfirReality() {
   return (
     <div ref={wrapRef} className="ef-screen">
       <div className="ef-bar">
-        <span className="ef-logo">△∞</span>
+        <span className="ef-logo">{variant === 'agent' ? '◇' : '△∞'}</span>
         <div>
-          <div className="ef-title">ЭФИР · РЕАЛЬНОСТЬ ИЗ ГОЛОСА</div>
-          <div className="ef-formula">r = r₀·e^(bθ) · яркость ∝ e^(−t/τ) · e = 2.718</div>
+          <div className="ef-title">
+            {variant === 'agent' ? 'АГЕНТ · ОН РЕШАЕТ САМ' : 'ЭФИР · РЕАЛЬНОСТЬ ИЗ ГОЛОСА'}
+          </div>
+          <div className="ef-formula">
+            {variant === 'agent'
+              ? 'F = E − T·S · влечения → действие → сверка с миром'
+              : 'r = r₀·e^(bθ) · яркость ∝ e^(−t/τ) · e = 2.718'}
+          </div>
         </div>
         <div className="ef-bar-actions">
           <button
@@ -507,8 +646,15 @@ export default function EfirReality() {
         </div>
       )}
 
+      {/* Разум агента: в режиме «Агент» он и есть главное на экране */}
+      {variant === 'agent' && (
+        <div className="ef-agentwin">
+          <AgentPanel agent={agent} />
+        </div>
+      )}
+
       {/* Панель законов на e — что сейчас лепит голос */}
-      <div className="ef-panel">
+      <div className={`ef-panel ${variant === 'agent' ? 'ef-panel-left' : ''}`}>
         <div className="ef-panel-title">ЗАКОНЫ РЕАЛЬНОСТИ · e = 2.718</div>
         <Row k="Тон f0" v={hud.f0 ? `${hud.f0} Гц` : '—'} />
         <Row k="Рукава спирали" v={`${hud.arms} · b=${hud.b.toFixed(2)}`} />
@@ -531,6 +677,9 @@ export default function EfirReality() {
           </div>
         )}
 
+        {/* В режиме мира агент — одна строка: он есть, но не заслоняет космос */}
+        {variant === 'world' && <AgentLine agent={agent} />}
+
         <div className="ef-bars">
           <Meter label="Возбуждение" v={hud.arousal} c="#ff2fd0" />
           <Meter label="Позитив" v={hud.valence} c="#c07bff" />
@@ -540,8 +689,18 @@ export default function EfirReality() {
       </div>
 
       <div className="ef-foot">
-        Audio · FFT → Частицы → Спираль e^(bθ) → Эфир &nbsp;·&nbsp; тащи мышью — облети космос &nbsp;·&nbsp;
-        без потолка: {hud.alive.toLocaleString('ru-RU')} живых
+        {variant === 'agent' ? (
+          <>
+            Перепись мира → влечения → F = E − T·S → действие → сверка с миром
+            &nbsp;·&nbsp; агент решает раз в секунду и помнит себя между
+            сессиями &nbsp;·&nbsp; {hud.alive.toLocaleString('ru-RU')} живых
+          </>
+        ) : (
+          <>
+            Audio · FFT → Частицы → Спираль e^(bθ) → Эфир &nbsp;·&nbsp; тащи мышью — облети космос
+            &nbsp;·&nbsp; без потолка: {hud.alive.toLocaleString('ru-RU')} живых
+          </>
+        )}
       </div>
     </div>
   );
