@@ -162,8 +162,17 @@ if command -v cloudflared >/dev/null 2>&1; then
   cloudflared tunnel --url "http://localhost:$PORT" >"$TUNNEL_LOG" 2>&1 &
   TUNNEL_PID=$!
   for _ in $(seq 1 40); do
-    PUBLIC_URL="$(grep -oE 'https://[a-z0-9-]+\.trycloudflare\.com' "$TUNNEL_LOG" | head -1)"
-    [ -n "$PUBLIC_URL" ] && break
+    # -a: читать лог как текст. cloudflared печатает цветной ASCII-баннер с
+    # рамками из юникода, и без -a macOS-овский (BSD) grep иногда решает,
+    # что файл бинарный, и вместо совпадения печатает "Binary file X
+    # matches" — эта строка тогда улетает в PUBLIC_URL как будто это и есть
+    # адрес. Дальше проверка ниже отсекает такой мусор явно, а не просто
+    # смотрит на "непусто".
+    PUBLIC_URL="$(grep -a -oE 'https://[a-z0-9-]+\.trycloudflare\.com' "$TUNNEL_LOG" | head -1)"
+    case "$PUBLIC_URL" in
+      https://*.trycloudflare.com) break ;;
+      *) PUBLIC_URL="" ;;
+    esac
     sleep 0.5
   done
   [ -n "$PUBLIC_URL" ] || warn "не дождался URL туннеля — смотри $TUNNEL_LOG"
