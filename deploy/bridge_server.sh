@@ -167,7 +167,11 @@ if [ -n "$NGINX" ] && [ -n "${NGINX_SITE:-}" ]; then
   if grep -q "location $LOCATION/" "$NGINX_SITE"; then
     say "nginx уже настроен, не трогаю"
   else
-    cp "$NGINX_SITE" "$NGINX_SITE.bak.$(date +%s)"
+    # Путь запоминаем в переменную, а не ищем потом маской: после второго
+    # запуска маска раскрылась бы в несколько файлов, и восстановление сломалось
+    # бы ровно в тот момент, когда оно нужнее всего.
+    NGINX_BAK="$NGINX_SITE.bak.$(date +%s)"
+    cp "$NGINX_SITE" "$NGINX_BAK"
     # proxy_pass со слэшем на конце срезает префикс: /max17/event → /event.
     if ! python3 - "$NGINX_SITE" "$LOCATION" "$PORT" <<'PY'
 import re
@@ -226,13 +230,24 @@ PY
       warn "не понял конфиг nginx — не трогаю его, настрой руками"
       warn "нужен location $LOCATION/ → http://127.0.0.1:$PORT/ в блоке с TLS"
     fi
-    if nginx -t >/dev/null 2>&1; then
+    if NGINX_ERR="$(nginx -t 2>&1)"; then
       systemctl reload nginx
       say "nginx настроен: $LOCATION/ → 127.0.0.1:$PORT"
     else
-      warn "конфиг nginx не прошёл проверку — возвращаю прежний"
-      mv "$NGINX_SITE.bak."* "$NGINX_SITE" 2>/dev/null
-      nginx -t
+      # Ошибку печатаем до отката. Прошлая версия сначала возвращала прежний
+      # конфиг и только потом запускала nginx -t — то есть показывала проверку
+      # заведомо исправного файла и выбрасывала единственную улику.
+      warn "конфиг nginx не прошёл проверку, вот почему:"
+      printf '%s\n' "$NGINX_ERR"
+      # Неудачную версию кладём в /tmp, а не рядом с конфигом: nginx включает
+      # sites-enabled/* целиком, и файл-обломок по соседству сломал бы уже
+      # весь сервер, а не только нашу вставку.
+      cp "$NGINX_SITE" /tmp/max17-nginx-failed.conf 2>/dev/null
+      warn "возвращаю прежний конфиг — сайт не затронут"
+      cp "$NGINX_BAK" "$NGINX_SITE"
+      warn "неудачная версия: /tmp/max17-nginx-failed.conf"
+      say "нужный кусок можно вставить руками в блок с TLS:"
+      printf '    location %s/ { proxy_pass http://127.0.0.1:%s/; proxy_read_timeout 70s; }\n' "$LOCATION" "$PORT"
     fi
   fi
 else
