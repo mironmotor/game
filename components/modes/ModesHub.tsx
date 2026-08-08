@@ -22,13 +22,45 @@ export interface BuildInfo {
   env: string;
 }
 
+interface BridgeStatus {
+  ok: boolean;
+  host: string;
+  source: string;
+  environment: string;
+  hint: string;
+}
+
 export default function ModesHub({ build }: { build: BuildInfo }) {
   const [avatar, setAvatar] = useState<AvatarConfig>(DEFAULT_AVATAR);
   const [mounted, setMounted] = useState(false);
+  const [bridge, setBridge] = useState<BridgeStatus | null>(null);
 
   useEffect(() => {
     setAvatar(loadAvatar());
     setMounted(true);
+  }, []);
+
+  // Состояние моста проверяется сразу при открытии, а не после первой упавшей
+  // команды: иначе о поломке узнаёшь, только нажав кнопку и получив «fetch
+  // failed», по которому всё равно ничего не понять.
+  useEffect(() => {
+    const base = process.env.NEXT_PUBLIC_BASE_PATH ?? '';
+    fetch(`${base}/api/max17`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ type: 'bridge_health' }),
+    })
+      .then((r) => r.json())
+      .then((d) =>
+        setBridge({
+          ok: Boolean(d?.ok),
+          host: String(d?.url_host || ''),
+          source: String(d?.source || d?.bridge || ''),
+          environment: String(d?.environment || ''),
+          hint: String(d?.hint || ''),
+        }),
+      )
+      .catch(() => setBridge({ ok: false, host: '', source: '', environment: '', hint: 'Проверка не дошла до сервера.' }));
   }, []);
 
   const pal = palette(avatar);
@@ -60,6 +92,21 @@ export default function ModesHub({ build }: { build: BuildInfo }) {
             </p>
           </div>
         </header>
+
+        {/* ── состояние моста ─────────────────────────────────────────────── */}
+        {bridge && !bridge.ok && (
+          <div className="mb-7 rounded-2xl border p-4" style={{ borderColor: '#ff9b3d55', background: '#ff9b3d12' }}>
+            <div className="text-[12px] font-bold uppercase tracking-[2px]" style={{ color: '#ff9b3d' }}>
+              Ядро недоступно — команды не сработают
+            </div>
+            <p className="mt-1.5 text-[12px] leading-relaxed opacity-75">{bridge.hint}</p>
+            <div className="mt-2 flex flex-wrap gap-x-5 gap-y-1 font-mono text-[10px] opacity-45">
+              {bridge.host && <span>адрес: {bridge.host}</span>}
+              {bridge.source && <span>источник: {bridge.source}</span>}
+              {bridge.environment && <span>окружение: {bridge.environment}</span>}
+            </div>
+          </div>
+        )}
 
         {/* ── режимы ──────────────────────────────────────────────────────── */}
         {GROUPS.map((group) => (

@@ -130,6 +130,34 @@ function remoteBridgeUrl() {
     .replace(/\/+$/, '');
 }
 
+/**
+ * Откуда взялся адрес моста.
+ *
+ * Различать это важнее, чем кажется. «Мост не отвечает» и «мост не отвечает,
+ * потому что адрес взят из запасного файла в репозитории, а env для этого
+ * окружения никто не задавал» — разные сообщения: по первому непонятно, что
+ * делать, а по второму понятно сразу. Именно на этом здесь уже спотыкались:
+ * переменные ставились только в production, превью молча брало прошлый
+ * туннель из файла и падало.
+ */
+function bridgeSource(): 'env' | 'fallback-file' | 'none' {
+  if ((process.env.MAX17_REMOTE_BRIDGE_URL || process.env.MAX17_BRIDGE_URL || '').trim()) return 'env';
+  if (fallbackBridge().url) return 'fallback-file';
+  return 'none';
+}
+
+/** Что именно делать при такой поломке — одной фразой, без гадания. */
+function bridgeHint(source: ReturnType<typeof bridgeSource>): string {
+  const env = process.env.VERCEL_ENV || 'development';
+  if (source === 'fallback-file') {
+    return `MAX17_BRIDGE_URL не задан для окружения «${env}», поэтому адрес взят из запасного файла в репозитории — а там прошлый туннель, которого уже нет. Перезапусти mark17/run_bridge_mac.sh: он пропишет адрес и в production, и в preview. После этого превью нужно пересобрать — переменные подхватываются в момент сборки.`;
+  }
+  if (source === 'env') {
+    return `Адрес взят из переменных окружения «${env}», но мост по нему не отвечает: туннель закрылся, Мак уснул или скрипт остановлен. Быстрые cloudflare-туннели живут только пока запущен скрипт, и при каждом запуске адрес новый.`;
+  }
+  return 'Адреса моста нет вообще. Локально события идут через python3, на Vercel нужен MAX17_BRIDGE_URL.';
+}
+
 // Диагностика моста: POST {type:"bridge_health"} — сконфигурирован ли удалённый
 // мост и жив ли он. (GET нельзя: ломает output:export для GitHub Pages.)
 async function bridgeHealth() {
@@ -152,6 +180,8 @@ async function bridgeHealth() {
       bridge: 'remote',
       configured: true,
       reachable: res.ok,
+      source: bridgeSource(),
+      environment: process.env.VERCEL_ENV || 'development',
       url_host: new URL(base).host,
       remote: payload,
     });
@@ -162,9 +192,11 @@ async function bridgeHealth() {
         bridge: 'remote',
         configured: true,
         reachable: false,
+        source: bridgeSource(),
+        environment: process.env.VERCEL_ENV || 'development',
         url_host: (() => { try { return new URL(base).host; } catch { return base; } })(),
         error: error instanceof Error ? error.message : String(error),
-        hint: 'Мост задан, но не отвечает: туннель/сервер mark17 упал или Мак уснул. Перезапусти bash mark17/run_bridge_mac.sh (или мигрируй на Railway для 24/7).',
+        hint: bridgeHint(bridgeSource()),
       },
       { status: 502 },
     );
@@ -212,7 +244,23 @@ export async function POST(request: Request) {
       { status },
     );
   } catch (error) {
-    return errorResponse('Max17 bridge failed', 502, error instanceof Error ? error.message : String(error));
+    // «Max17 bridge failed / fetch failed» само по себе не говорит ничего: по
+    // нему нельзя отличить незаданный адрес от закрытого туннеля. Поэтому к
+    // ошибке прикладывается источник адреса, окружение и что именно делать.
+    const source = bridgeSource();
+    return NextResponse.json(
+      {
+        ok: false,
+        ...DEFAULT_RESPONSE,
+        error: 'Max17 bridge failed',
+        details: error instanceof Error ? error.message : String(error),
+        source,
+        environment: process.env.VERCEL_ENV || 'development',
+        url_host: (() => { try { return new URL(remoteBridgeUrl()).host; } catch { return ''; } })(),
+        hint: bridgeHint(source),
+      },
+      { status: 502 },
+    );
   }
 }
 
