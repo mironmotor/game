@@ -59,7 +59,8 @@ say "папка проекта: ${SITE_DIR:-НЕ НАЙДЕНА}"
 say "python3:       ${PYTHON:-НЕТ} $([ -n "$PYTHON" ] && $PYTHON -V 2>&1 | cut -d' ' -f2)"
 say "nginx:         ${NGINX:-НЕТ}"
 say "свободно RAM:  ${FREE_MB:-?} МБ"
-say "мост сейчас:   $(systemctl is-active max17-bridge 2>/dev/null || echo 'не установлен')"
+BRIDGE_STATE="$(systemctl is-active max17-bridge 2>/dev/null)"
+say "мост сейчас:   ${BRIDGE_STATE:-не установлен}"
 
 # 512 МБ — это тариф за $4. Сам мост укладывается в десятки мегабайт (только
 # стандартная библиотека), но рядом живёт сборка сайта, и вот ей тесно.
@@ -68,8 +69,32 @@ if [ -n "$FREE_MB" ] && [ "$FREE_MB" -lt 250 ]; then
 fi
 
 if [ -n "$NGINX" ]; then
-  NGINX_SITE="$(grep -rl "server_name" /etc/nginx/sites-enabled/ 2>/dev/null | head -1)"
-  say "конфиг nginx:  ${NGINX_SITE:-не найден в sites-enabled}"
+  # Раскладок у nginx несколько: debian-овские sites-enabled, redhat-овский
+  # conf.d, а иногда сервер описан прямо в nginx.conf. Искать только в первой —
+  # это как раз тот случай, когда «конфиг не найден» означает «я плохо искал».
+  #
+  # Спрашиваем сам nginx: -T печатает итоговый конфиг со всеми подключёнными
+  # файлами, и по строкам «# configuration file» видно настоящие пути.
+  NGINX_SITE=""
+  while read -r candidate; do
+    [ -f "$candidate" ] || continue
+    if grep -qE 'listen[^;]*443|ssl_certificate' "$candidate"; then NGINX_SITE="$candidate"; break; fi
+  done < <(nginx -T 2>/dev/null | sed -n 's/^# configuration file \(.*\):$/\1/p')
+
+  # Если nginx -T недоступен (нет прав, битый конфиг) — обходим известные места.
+  # Именно -R, а не -r: содержимое sites-enabled почти всегда симлинки на
+  # sites-available, а -r при обходе каталога в симлинки не заходит и молча
+  # ничего не находит. Ровно на этом поиск и промахнулся в первый раз.
+  if [ -z "$NGINX_SITE" ]; then
+    NGINX_SITE="$(grep -RlE 'listen[^;]*443|ssl_certificate' \
+      /etc/nginx/sites-enabled/ /etc/nginx/conf.d/ /etc/nginx/nginx.conf 2>/dev/null | head -1)"
+  fi
+
+  if [ -n "$NGINX_SITE" ]; then
+    say "конфиг nginx:  $NGINX_SITE"
+  else
+    warn "конфиг nginx с TLS не найден — мост поставится, но наружу его выставит нечем"
+  fi
 else
   warn "nginx нет — наружу мост выставить нечем, TLS взять неоткуда"
 fi
@@ -168,11 +193,20 @@ def server_blocks(src: str):
                     break
             i += 1
 
-target = None
+# Блоков с TLS тоже может быть несколько: отдельно www → без www, отдельно сам
+# сайт. Отличаем по наличию location: блок, который только редиректит, ничего
+# не отдаёт, и мост в нём был бы недоступен. Если location нигде нет — берём
+# последний с TLS, это лучше, чем ничего.
+tls, serving = [], []
 for start, end in server_blocks(text):
     body = text[start:end]
-    if 'listen 443' in body or 'ssl_certificate' in body:
-        target = end
+    if 'listen 443' not in body and 'ssl_certificate' not in body:
+        continue
+    tls.append(end)
+    if 'location' in body:
+        serving.append(end)
+
+target = (serving or tls or [None])[-1]
 if target is None:
     sys.stderr.write('не нашёл server-блок с TLS\n')
     raise SystemExit(1)
