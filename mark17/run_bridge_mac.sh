@@ -68,7 +68,12 @@ fi
 if port_busy "$PORT"; then
   warn "порт $PORT занят процессом '$(port_owner "$PORT")' — это не наш мост"
   ORIG_PORT="$PORT"
+  # 8791 пропускаем: это порт моста NOOA (nooa_bridge/server.py). Он может быть
+  # сейчас не поднят, но занять его — значит поломать NOOA при следующем старте,
+  # причём молча: оба отвечают на /health, и понять, кто именно ответил, тяжело.
   for candidate in $(seq $((ORIG_PORT + 1)) $((ORIG_PORT + 20))); do
+    [ "$candidate" = "8791" ] && continue
+    [ "$candidate" = "${MAX17_TTS_PORT:-8017}" ] && continue
     if ! port_busy "$candidate"; then PORT="$candidate"; break; fi
   done
   [ "$PORT" = "$ORIG_PORT" ] && \
@@ -188,25 +193,42 @@ say "BRIDGE URL : ${PUBLIC_URL:-http://127.0.0.1:$PORT}"
 say "TOKEN      : $TOKEN"
 say "LLM        : $([ "$LLM_ENABLED" = true ] && echo "ollama / $MODEL" || echo "выключен (детерминированный)")"
 echo
-# Автопрописывание в Vercel: работает, если `vercel login` сделан и проект слинкован
+# Автопрописывание в Vercel: работает, если `vercel login` сделан и проект слинкован.
+#
+# Переменные ставим и в production, и в preview. Раньше — только в production, и
+# из-за этого любая ветка с превью-деплоем моста не видела: переменные окружения
+# у Vercel раздельные по окружениям, превью production-значения не наследует.
+# Вместо живого моста превью брало адрес из bridge.fallback.json — то есть
+# прошлый туннель, которого давно нет, и падало с «fetch failed».
+set_vercel_env() {
+  local name="$1" value="$2" env="$3"
+  vercel env rm "$name" "$env" --yes >/dev/null 2>&1 || true
+  printf %s "$value" | vercel env add "$name" "$env" >/dev/null 2>&1
+}
+
 if [ -n "$PUBLIC_URL" ] && command -v vercel >/dev/null 2>&1 && [ -d "$ROOT/.vercel" ]; then
-  say "обновляю MAX17_BRIDGE_URL в Vercel автоматически…"
-  (cd "$ROOT" \
-    && vercel env rm MAX17_BRIDGE_URL production --yes >/dev/null 2>&1 || true \
-    && printf %s "$PUBLIC_URL" | vercel env add MAX17_BRIDGE_URL production >/dev/null 2>&1 \
-    && vercel env rm MAX17_BRIDGE_TOKEN production --yes >/dev/null 2>&1 || true \
-    && printf %s "$TOKEN" | vercel env add MAX17_BRIDGE_TOKEN production >/dev/null 2>&1 \
-    && vercel --prod --yes >/dev/null 2>&1 \
-    && say "Vercel обновлён и передеплоен — прод смотрит на этот мост") \
-    || warn "не удалось обновить Vercel автоматически — пропиши env руками (команды ниже)"
+  say "обновляю координаты моста в Vercel (production + preview)…"
+  if (cd "$ROOT" \
+      && set_vercel_env MAX17_BRIDGE_URL   "$PUBLIC_URL" production \
+      && set_vercel_env MAX17_BRIDGE_TOKEN "$TOKEN"      production \
+      && set_vercel_env MAX17_BRIDGE_URL   "$PUBLIC_URL" preview \
+      && set_vercel_env MAX17_BRIDGE_TOKEN "$TOKEN"      preview \
+      && vercel --prod --yes >/dev/null 2>&1); then
+    say "Vercel обновлён: прод смотрит на этот мост"
+    say "превью подхватят мост при следующей сборке ветки"
+  else
+    warn "не удалось обновить Vercel автоматически — пропиши env руками (команды ниже)"
+  fi
 fi
 
 if [ -n "$PUBLIC_URL" ]; then
   say "проверка:  curl $PUBLIC_URL/health"
   echo
   say "Пропиши в Vercel (после vercel login, из папки проекта):"
-  printf '  printf %%s "%s" | vercel env add MAX17_BRIDGE_URL production\n' "$PUBLIC_URL"
-  printf '  printf %%s "%s" | vercel env add MAX17_BRIDGE_TOKEN production\n' "$TOKEN"
+  for env in production preview; do
+    printf '  printf %%s "%s" | vercel env add MAX17_BRIDGE_URL %s\n' "$PUBLIC_URL" "$env"
+    printf '  printf %%s "%s" | vercel env add MAX17_BRIDGE_TOKEN %s\n' "$TOKEN" "$env"
+  done
   printf '  vercel --prod\n'
   echo
   warn "Туннель живёт, пока работает этот скрипт и Мак не спит."
