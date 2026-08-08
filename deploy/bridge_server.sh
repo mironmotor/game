@@ -167,11 +167,25 @@ if [ -n "$NGINX" ] && [ -n "${NGINX_SITE:-}" ]; then
   if grep -q "location $LOCATION/" "$NGINX_SITE"; then
     say "nginx уже настроен, не трогаю"
   else
+    # Копия ложится в /tmp, а НЕ рядом с конфигом. nginx подключает
+    # sites-enabled/* целиком, поэтому копия по соседству грузится как ещё один
+    # конфиг — и любой upstream или server из неё становится дубликатом. Проверка
+    # падает не из-за нашей вставки, а из-за самой резервной копии, и выглядит
+    # это совершенно необъяснимо.
+    #
     # Путь запоминаем в переменную, а не ищем потом маской: после второго
     # запуска маска раскрылась бы в несколько файлов, и восстановление сломалось
     # бы ровно в тот момент, когда оно нужнее всего.
-    NGINX_BAK="$NGINX_SITE.bak.$(date +%s)"
+    NGINX_BAK="/tmp/max17-nginx-backup.$(date +%s).conf"
     cp "$NGINX_SITE" "$NGINX_BAK"
+    say "резервная копия конфига: $NGINX_BAK"
+
+    # Копии, оставленные прошлыми версиями скрипта рядом с конфигом, ломают
+    # nginx до сих пор — убираем, иначе проверка не пройдёт никогда.
+    for stale in "$NGINX_SITE".bak.*; do
+      [ -e "$stale" ] || continue
+      mv "$stale" /tmp/ 2>/dev/null && warn "убрал из sites-enabled лишний файл: $(basename "$stale")"
+    done
     # proxy_pass со слэшем на конце срезает префикс: /max17/event → /event.
     if ! python3 - "$NGINX_SITE" "$LOCATION" "$PORT" <<'PY'
 import re
