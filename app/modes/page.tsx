@@ -15,9 +15,13 @@ export const metadata = {
  */
 function buildInfo(): BuildInfo {
   const sha = process.env.VERCEL_GIT_COMMIT_SHA ?? '';
+  // Только заголовок коммита: Vercel отдаёт сообщение целиком, со всеми
+  // абзацами, и в подвале это выглядит как вываленный лог, обрезанный
+  // посреди слова.
+  const message = (process.env.VERCEL_GIT_COMMIT_MESSAGE ?? '').split('\n')[0].slice(0, 120);
   return {
     sha: sha ? sha.slice(0, 7) : 'локальная сборка',
-    message: process.env.VERCEL_GIT_COMMIT_MESSAGE ?? '',
+    message,
     branch: process.env.VERCEL_GIT_COMMIT_REF ?? 'local',
     env: process.env.VERCEL_ENV ?? 'development',
     builtAt: new Date().toISOString().replace('T', ' ').slice(0, 16) + ' UTC',
