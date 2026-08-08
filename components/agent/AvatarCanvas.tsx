@@ -22,6 +22,16 @@ interface Props {
   speaking?: boolean;
   /** Слушает — зрачок сужается, аура тянется внутрь. */
   listening?: boolean;
+  /**
+   * `glasses` — облик для просвечивающего экрана очков.
+   *
+   * Там чёрный цвет означает «прозрачно», а не «чёрное»: всё тусклое просто
+   * исчезает на фоне реального мира. Поэтому тысяча мелких точек и мягкая
+   * аура превращаются в грязь, и вместо них рисуется силуэт — жирный контур,
+   * десятки крупных точек и один цвет без подмешивания второго (на birdbath-
+   * оптике края спектра расходятся, и двухцветные детали двоятся).
+   */
+  variant?: 'full' | 'glasses';
   className?: string;
 }
 
@@ -151,14 +161,22 @@ function buildShape(config: AvatarConfig): { points: P3[]; edges: [number, numbe
   }
 }
 
-export default function AvatarCanvas({ config, size = 320, speaking = false, listening = false, className }: Props) {
+export default function AvatarCanvas({
+  config,
+  size = 320,
+  speaking = false,
+  listening = false,
+  variant = 'full',
+  className,
+}: Props) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   // Через ref, а не через зависимость эффекта: перезапускать анимацию на каждом
   // движении мыши или на каждом слове — значит рвать её на части.
-  const stateRef = useRef({ config, speaking, listening, pointer: { x: 0, y: 0 } });
+  const stateRef = useRef({ config, speaking, listening, variant, pointer: { x: 0, y: 0 } });
   stateRef.current.config = config;
   stateRef.current.speaking = speaking;
   stateRef.current.listening = listening;
+  stateRef.current.variant = variant;
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -188,7 +206,8 @@ export default function AvatarCanvas({ config, size = 320, speaking = false, lis
     window.addEventListener('pointermove', onPointer);
 
     const draw = (now: number) => {
-      const { config: cfg, speaking: isSpeaking, listening: isListening, pointer } = stateRef.current;
+      const { config: cfg, speaking: isSpeaking, listening: isListening, pointer, variant: look } = stateRef.current;
+      const glasses = look === 'glasses';
       const key = `${cfg.shape}|${cfg.density}|${cfg.hue}`;
       if (key !== shapeKey) {
         shape = buildShape(cfg);
@@ -208,7 +227,9 @@ export default function AvatarCanvas({ config, size = 320, speaking = false, lis
       ctx.clearRect(0, 0, size, size);
 
       // ── аура ───────────────────────────────────────────────────────────────
-      if (cfg.aura !== 'none') {
+      // На очках ауры нет вовсе: плавный градиент на просвете читается как
+      // мутное пятно поверх реального мира, а не как свечение.
+      if (cfg.aura !== 'none' && !glasses) {
         const auraR =
           cfg.aura === 'storm'
             ? half * (0.78 + 0.18 * Math.sin(t * 3) + voice * 0.1)
@@ -269,13 +290,14 @@ export default function AvatarCanvas({ config, size = 320, speaking = false, lis
 
       // Рёбра кристалла — рисуем до точек, чтобы вершины остались яркими.
       if (shape.edges.length) {
-        ctx.lineWidth = 1;
+        ctx.lineWidth = glasses ? Math.max(2, size * 0.012) : 1;
         for (const [a, b] of shape.edges) {
           const pa = projected[a];
           const pb = projected[b];
           const depth = (pa.z + pb.z) / 2;
+          if (glasses && depth > 0.35) continue;
           ctx.strokeStyle = pal.main;
-          ctx.globalAlpha = Math.max(0.05, 0.42 - depth * 0.18);
+          ctx.globalAlpha = glasses ? 1 : Math.max(0.05, 0.42 - depth * 0.18);
           ctx.beginPath();
           ctx.moveTo(pa.x, pa.y);
           ctx.lineTo(pb.x, pb.y);
@@ -283,16 +305,39 @@ export default function AvatarCanvas({ config, size = 320, speaking = false, lis
         }
       }
 
-      // Дальние точки рисуем первыми — иначе ближние тонут в дальних.
-      projected.sort((a, b) => b.z - a.z);
-      for (const p of projected) {
-        const depth = (1.4 - p.z) / 2.6; // 0 — далеко, 1 — близко
-        const r = (0.7 + depth * 1.9) * (1 + voice * 0.35) * temper.sharpness * 0.75;
-        ctx.globalAlpha = Math.max(0.08, Math.min(1, 0.25 + depth * 0.85));
-        ctx.fillStyle = p.z < 0 ? pal.main : pal.accent;
+      if (glasses) {
+        // Силуэт: жирный контур плюс десятки крупных точек вместо тысячи мелких.
+        // Порог по альфе тут не смягчается — на просвете полупрозрачное просто
+        // не видно, поэтому всё либо горит в полную силу, либо не рисуется.
+        ctx.strokeStyle = pal.main;
+        ctx.lineWidth = Math.max(3, size * 0.018);
+        ctx.globalAlpha = 1;
         ctx.beginPath();
-        ctx.arc(p.x, p.y, Math.max(0.4, r), 0, TAU);
-        ctx.fill();
+        ctx.arc(half, half, scale * 1.02, 0, TAU);
+        ctx.stroke();
+
+        const step = Math.max(1, Math.ceil(projected.length / 44));
+        ctx.fillStyle = pal.main;
+        const dot = Math.max(2.5, size * 0.016);
+        for (let i = 0; i < projected.length; i += step) {
+          const p = projected[i];
+          if (p.z > 0.35) continue; // ближняя половина: дальняя на просвете только мусорит
+          ctx.beginPath();
+          ctx.arc(p.x, p.y, dot, 0, TAU);
+          ctx.fill();
+        }
+      } else {
+        // Дальние точки рисуем первыми — иначе ближние тонут в дальних.
+        projected.sort((a, b) => b.z - a.z);
+        for (const p of projected) {
+          const depth = (1.4 - p.z) / 2.6; // 0 — далеко, 1 — близко
+          const r = (0.7 + depth * 1.9) * (1 + voice * 0.35) * temper.sharpness * 0.75;
+          ctx.globalAlpha = Math.max(0.08, Math.min(1, 0.25 + depth * 0.85));
+          ctx.fillStyle = p.z < 0 ? pal.main : pal.accent;
+          ctx.beginPath();
+          ctx.arc(p.x, p.y, Math.max(0.4, r), 0, TAU);
+          ctx.fill();
+        }
       }
       ctx.globalAlpha = 1;
       ctx.globalCompositeOperation = 'source-over';
@@ -309,20 +354,27 @@ export default function AvatarCanvas({ config, size = 320, speaking = false, lis
         const pupilR = eyeR * (isListening ? 0.3 : 0.45) * (1 + voice * 0.2);
 
         const drawEye = (ex: number, ey: number, radius: number) => {
-          ctx.fillStyle = 'rgba(4,2,12,0.9)';
-          ctx.beginPath();
-          ctx.arc(ex, ey, radius, 0, TAU);
-          ctx.fill();
+          if (!glasses) {
+            ctx.fillStyle = 'rgba(4,2,12,0.9)';
+            ctx.beginPath();
+            ctx.arc(ex, ey, radius, 0, TAU);
+            ctx.fill();
+          } else {
+            // На очках внутренность глаза оставляем прозрачной: заливать её
+            // «почти чёрным» бессмысленно — на просвете это и есть прозрачность.
+            ctx.beginPath();
+            ctx.arc(ex, ey, radius, 0, TAU);
+          }
 
-          ctx.strokeStyle = pal.accent;
-          ctx.lineWidth = 1.2;
-          ctx.globalAlpha = 0.8;
+          ctx.strokeStyle = glasses ? pal.main : pal.accent;
+          ctx.lineWidth = glasses ? Math.max(2.5, size * 0.014) : 1.2;
+          ctx.globalAlpha = glasses ? 1 : 0.8;
           ctx.stroke();
           ctx.globalAlpha = 1;
 
           if (blinking) {
             ctx.strokeStyle = pal.main;
-            ctx.lineWidth = 2.4;
+            ctx.lineWidth = glasses ? Math.max(3, size * 0.018) : 2.4;
             ctx.beginPath();
             ctx.moveTo(ex - radius, ey);
             ctx.lineTo(ex + radius, ey);
