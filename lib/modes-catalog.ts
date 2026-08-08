@@ -1,0 +1,141 @@
+/**
+ * Один список режимов на всё приложение.
+ *
+ * До этого перечень жил внутри ModeMenu, и любой новый режим появлялся в меню,
+ * но не на витрине — или наоборот. Теперь источник один, а меню и хаб /modes
+ * просто читают его по-разному.
+ */
+
+export interface ModeEntry {
+  href: string;
+  label: string;
+  /** Одна строка о том, что режим делает. Для хаба, не для меню. */
+  about: string;
+  color: string;
+  group: 'Ядро' | 'Зрение' | 'Хаос' | 'Дело';
+}
+
+export const MODES: ModeEntry[] = [
+  // ── Ядро ───────────────────────────────────────────────────────────────────
+  { href: '/agent', label: 'Облик агента', about: 'Собрать персонажа: форма, глаза, аура, характер', color: '#00f2ff', group: 'Ядро' },
+  { href: '/mind', label: 'Самосознание', about: 'Ядро смотрит на себя и отчитывается о состоянии', color: '#9d8bff', group: 'Ядро' },
+  { href: '/maxgraph', label: 'Синапс-граф', about: 'Связи, которые Макс успел построить', color: '#4ea8ff', group: 'Ядро' },
+  { href: '/brain', label: 'EdgeAI · Нейро-мозг', about: 'Модель прямо в браузере, без сервера', color: '#00ffc8', group: 'Ядро' },
+  { href: '/classic', label: 'Классический HUD', about: 'Обычный интерфейс без эффектов', color: '#8aa0b8', group: 'Ядро' },
+
+  // ── Зрение ─────────────────────────────────────────────────────────────────
+  { href: '/vision', label: 'MAX VISION', about: 'Звук превращается в изображение', color: '#6a8bff', group: 'Зрение' },
+  { href: '/efir', label: 'Эфир', about: 'Реальность, собранная из голоса', color: '#ff2fd0', group: 'Зрение' },
+  { href: '/handbrain', label: 'Нейро-рука', about: 'Управление жестами через камеру', color: '#ff6ae0', group: 'Зрение' },
+  { href: '/splats', label: 'Брейнданс · 4D', about: 'Сплаты, снятые во времени', color: '#be78ff', group: 'Зрение' },
+
+  // ── Хаос ───────────────────────────────────────────────────────────────────
+  { href: '/quantum', label: 'Квантовый сон', about: 'Шесть работающих симуляций: Лоренц, гравитация, стая, галактика', color: '#ff4d8d', group: 'Хаос' },
+  { href: '/attractor', label: 'Хаос Аттрактор ∞', about: 'Бездна: странные аттракторы во весь экран', color: '#d9b8ff', group: 'Хаос' },
+  { href: '/simulation', label: 'Симуляция Макса', about: 'Промпт задаёт форму и динамику мира частиц', color: '#59ffb2', group: 'Хаос' },
+  { href: '/neurodance', label: 'Хаос Нейро Дэнс', about: 'Движение под музыку, посчитанное ядром', color: '#a855f7', group: 'Хаос' },
+  { href: '/decoder', label: 'ДЕКОДЕР', about: 'Настоящий SHA-256 proof-of-work на глазах', color: '#39ff88', group: 'Хаос' },
+  { href: '/evolution', label: 'Эволюция', about: 'Триллион шагов отбора', color: '#c9a0ff', group: 'Хаос' },
+
+  // ── Дело ───────────────────────────────────────────────────────────────────
+  { href: '/funnel', label: 'Воронка → Big Idea', about: 'Из потока мыслей — одна идея, которую можно продать', color: '#00ff88', group: 'Дело' },
+  { href: '/tg', label: 'Big Idea · Telegram', about: 'Тот же генератор как мини-приложение в TG', color: '#35d0ff', group: 'Дело' },
+  { href: '/autoplan', label: 'Автоплан', about: 'Цель разбирается на шаги ядром', color: '#ffb14e', group: 'Дело' },
+  { href: '/inbox', label: 'Инбокс Макса', about: 'Фильтр входящего: важное отделяется от шума', color: '#5ad1ff', group: 'Дело' },
+  { href: '/pricing', label: 'Тарифы', about: 'Премиум-коды и оплата', color: '#ffd76a', group: 'Дело' },
+];
+
+export const GROUPS: ModeEntry['group'][] = ['Ядро', 'Зрение', 'Хаос', 'Дело'];
+
+/**
+ * Скрытые команды — события ядра, у которых до сих пор не было кнопки.
+ *
+ * Они всё это время принимались `/api/max17`, но вызвать их можно было только
+ * curl'ом. Здесь у каждой появляется форма: что за команда, что ей нужно и что
+ * она вернёт.
+ */
+export interface HiddenCommand {
+  /** Значение поля `type` для /api/max17. */
+  event: string;
+  label: string;
+  about: string;
+  color: string;
+  /** Поля ввода. Пусто — команда запускается как есть. */
+  fields?: { name: string; label: string; placeholder: string; multiline?: boolean }[];
+  /** Требует явного включения «рук»: команда способна что-то изменить. */
+  dangerous?: boolean;
+}
+
+export const HIDDEN_COMMANDS: HiddenCommand[] = [
+  {
+    event: 'web',
+    label: 'Сеть',
+    about: 'Прочитать ссылку или поискать. Приватные адреса ядро не откроет.',
+    color: '#5ad1ff',
+    fields: [
+      { name: 'url', label: 'Ссылка', placeholder: 'https://…' },
+      { name: 'query', label: 'Или запрос', placeholder: 'что искать' },
+    ],
+  },
+  {
+    event: 'compress_similar',
+    label: 'Сжатие',
+    about: 'Схлопнуть похожие формулировки в одну. Коэффициент Дайса по основам.',
+    color: '#c9a0ff',
+    fields: [{ name: 'items', label: 'Строки (по одной на строку)', placeholder: 'первая мысль\nвторая мысль\nпервая мысль другими словами', multiline: true }],
+  },
+  {
+    event: 'act',
+    label: 'Руки',
+    about: 'Автономный такт: ядро смотрит, решает и предлагает действие. Выполнение — только по галочке.',
+    color: '#ff8a4e',
+    fields: [{ name: 'goal', label: 'Цель', placeholder: 'разберись, что изменилось в репозитории' }],
+    dangerous: true,
+  },
+  {
+    event: 'introspect',
+    label: 'Самоанализ',
+    about: 'Ядро оценивает собственное состояние и называет слабое место.',
+    color: '#9d8bff',
+  },
+  {
+    event: 'physics',
+    label: 'Когнитивная физика',
+    about: 'Пересчёт внутренних полей: притяжение тем, инерция, распад.',
+    color: '#ff4d8d',
+  },
+  {
+    event: 'ingest',
+    label: 'Поглощение',
+    about: 'Скормить поток текста и оставить только то, что попадает в интерес.',
+    color: '#00ff88',
+    fields: [
+      { name: 'interest', label: 'Интерес', placeholder: 'деньги, продукт, запуск' },
+      { name: 'stream', label: 'Поток', placeholder: 'вставь сюда что угодно: заметки, переписку, статью', multiline: true },
+    ],
+  },
+  {
+    event: 'sleep_consolidation',
+    label: 'Сон ядра',
+    about: 'Консолидация памяти: слабое забывается, важное укрепляется.',
+    color: '#7c5cff',
+  },
+  {
+    event: 'synapse_graph',
+    label: 'Граф связей',
+    about: 'Сырой снимок синапсов — то, что рисует режим Синапс-граф.',
+    color: '#4ea8ff',
+  },
+  {
+    event: 'system_state',
+    label: 'Состояние',
+    about: 'Что ядро думает о себе прямо сейчас: память, уверенность, нагрузка.',
+    color: '#8aa0b8',
+  },
+  {
+    event: 'world_state',
+    label: 'Мир',
+    about: 'Внешняя картина: время, окружение, что изменилось с прошлого раза.',
+    color: '#59ffb2',
+  },
+];
