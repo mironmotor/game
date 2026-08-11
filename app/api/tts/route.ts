@@ -120,6 +120,17 @@ export async function POST(request: Request) {
       'X-TTS-Provider': result.provider,
       'X-TTS-Voice': result.voiceId,
     });
+    // Сюда мы попадаем и когда предпочтённый провайдер упал, а озвучил резерв.
+    // Раньше attempts в этом случае просто выбрасывались: наружу уходил 200 и
+    // звук, и отличить «локальный голос работает» от «локальный молча умер, вы
+    // слышите ElevenLabs» было нельзя — какой голос ни выбери, звучали одни и
+    // те же два. Причину отказа отдаём заголовком, чтобы клиент мог её показать.
+    if (attempts.length > 0) {
+      responseHeaders.set(
+        'X-TTS-Fallback',
+        attempts.map((a) => `${a.provider}=${a.error}${a.status ? `(${a.status})` : ''}`).join(', '),
+      );
+    }
     if (result.stream) {
       responseHeaders.set('X-TTS-Stream', result.stream.format);
       responseHeaders.set('X-TTS-Sample-Rate', String(result.stream.sampleRate));
