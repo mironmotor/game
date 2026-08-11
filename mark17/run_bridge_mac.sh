@@ -208,6 +208,7 @@ if command -v cloudflared >/dev/null 2>&1; then
     sleep 0.5
   done
   [ -n "$PUBLIC_URL" ] || warn "не дождался URL туннеля — смотри $TUNNEL_LOG"
+  fi
 else
   warn "cloudflared не установлен: brew install cloudflared"
   warn "пока мост доступен только локально: http://127.0.0.1:$PORT"
@@ -234,6 +235,13 @@ set_vercel_env() {
 }
 
 if [ -n "$PUBLIC_URL" ] && command -v vercel >/dev/null 2>&1 && [ -d "$ROOT/.vercel" ]; then
+  # Из этого репозитория собирается несколько проектов Vercel (game, game-ultra,
+  # game-ultra-max). Переменные уходят ровно в тот, на который смотрит
+  # .vercel/project.json — и если открываешь превью другого проекта, мост там
+  # так и останется ненастроенным. Раньше это молчало; теперь имя видно.
+  LINKED="$(python3 -c 'import json;print(json.load(open(".vercel/project.json")).get("projectName") or "?")' 2>/dev/null || echo '?')"
+  say "Vercel-проект: $LINKED  ← переменные уйдут сюда"
+  say "если открываешь превью другого проекта — мост там не заработает"
   say "обновляю координаты моста в Vercel (production + preview)…"
   if (cd "$ROOT" \
       && set_vercel_env MAX17_BRIDGE_URL   "$PUBLIC_URL" production \
