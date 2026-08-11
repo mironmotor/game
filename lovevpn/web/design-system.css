@@ -1,0 +1,106 @@
+/* ============================================================
+   Love VPN — дизайн-система (токены + базовые компоненты).
+
+   Перекраска всего бренда: правьте только блок :root.
+   Полупрозрачные оттенки акцента заданы отдельными переменными
+   (--accent-soft / --accent-line / --accent-glow), поэтому смена
+   --accent не оставляет за собой старых цветов.
+   ============================================================ */
+
+:root{
+  /* --- палитра бренда --- */
+  --bg:          #0b0710;   /* фон страницы */
+  --bg-2:        #150b1c;   /* фон панелей и секций */
+  --panel:       rgba(255,255,255,.04);
+  --line:        rgba(255,255,255,.10);
+  --text:        #fdeef4;
+  --muted:       #b198ab;
+  --accent:      #ff4d6d;   /* основной цвет бренда */
+  --accent-2:    #c02aff;   /* второй цвет градиента */
+  --accent-3:    #3ddc97;   /* успех, активные статусы, галочки */
+  --danger:      #ff5c5c;
+
+  /* оттенки акцента — производные, меняются вместе с --accent */
+  --accent-soft: rgba(255,77,109,.12);
+  --accent-line: rgba(255,77,109,.32);
+  --accent-glow: rgba(255,77,109,.38);
+  --ok-soft:     rgba(61,220,151,.10);
+  --ok-line:     rgba(61,220,151,.28);
+
+  --grad: linear-gradient(135deg, var(--accent) 0%, var(--accent-2) 100%);
+
+  /* --- геометрия и тени --- */
+  --radius:   20px;
+  --radius-s: 12px;
+  --shadow:   0 20px 60px rgba(0,0,0,.5);
+  --glow:     0 8px 40px var(--accent-glow);
+
+  /* --- типографика --- */
+  --font: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+body{
+  font-family: var(--font);
+  background: var(--bg);
+  color: var(--text);
+  line-height: 1.6;
+}
+
+/* ---------- кнопки ---------- */
+.btn{
+  display:inline-flex; align-items:center; justify-content:center; gap:10px;
+  padding:14px 28px; border-radius:14px; border:0; cursor:pointer;
+  font-size:16px; font-weight:700; text-decoration:none; color:#fff;
+  background:var(--grad); box-shadow:var(--glow);
+  transition:transform .15s, filter .15s;
+}
+.btn:hover{ transform:translateY(-2px); filter:brightness(1.08); }
+.btn.small{ padding:10px 20px; font-size:14px; border-radius:var(--radius-s); }
+.btn.ghost{
+  background:transparent; box-shadow:none; color:var(--text);
+  border:1px solid var(--line);
+}
+.btn.ghost:hover{ border-color:var(--accent); }
+.btn.danger{ background:var(--danger); box-shadow:none; }
+.btn[disabled]{ opacity:.5; pointer-events:none; }
+
+/* ---------- карточки и панели ---------- */
+.card{
+  background:var(--panel); border:1px solid var(--line); border-radius:var(--radius);
+  padding:28px; transition:transform .2s, border-color .2s;
+}
+.card:hover{ transform:translateY(-4px); border-color:var(--accent-line); }
+.panel{
+  background:var(--bg-2); border:1px solid var(--line); border-radius:var(--radius);
+  padding:28px; box-shadow:var(--shadow);
+}
+
+/* ---------- поля ввода ---------- */
+.input{
+  width:100%; padding:13px 16px; border-radius:var(--radius-s);
+  border:1px solid var(--line); background:rgba(255,255,255,.05);
+  color:var(--text); font-size:15px; font-family:var(--font);
+}
+.input:focus{ outline:none; border-color:var(--accent); }
+.input.mono{ font-family:var(--font-mono); font-size:14px; }
+
+/* ---------- статусы ---------- */
+.badge{
+  display:inline-flex; align-items:center; gap:8px;
+  padding:7px 14px; border-radius:999px; font-size:13px; font-weight:600;
+}
+.badge.on{  color:var(--accent-3); background:var(--ok-soft); border:1px solid var(--ok-line); }
+.badge.off{ color:var(--danger); background:rgba(255,92,92,.10); border:1px solid rgba(255,92,92,.28); }
+.badge .dot{ width:8px; height:8px; border-radius:50%; background:currentColor; box-shadow:0 0 12px currentColor; }
+
+/* ---------- текстовые утилиты ---------- */
+.grad-text{ background:var(--grad); -webkit-background-clip:text; background-clip:text; color:transparent; }
+.muted{ color:var(--muted); }
+.kicker{
+  display:inline-block; font-size:13px; font-weight:700;
+  letter-spacing:.14em; text-transform:uppercase;
+  background:var(--grad); -webkit-background-clip:text; background-clip:text; color:transparent;
+}
+/* Иконки-галочки берут цвет из currentColor — задайте color на родителе. */
+.ok-icon{ color:var(--accent-3); }

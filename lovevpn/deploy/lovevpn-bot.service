@@ -1,0 +1,33 @@
+[Unit]
+Description=Love VPN Telegram bot (@lovemevpn_bot)
+Documentation=https://github.com/mironmotor/game/tree/main/lovevpn
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=lovevpn
+Group=lovevpn
+WorkingDirectory=/opt/lovevpn
+ExecStart=/opt/lovevpn/.venv/bin/python -m bot.main
+Restart=always
+RestartSec=5
+
+# База и пул конфигов живут в /var/lib/lovevpn — systemd создаёт каталог сам.
+StateDirectory=lovevpn
+Environment=PYTHONUNBUFFERED=1
+Environment=LOVEVPN_DB_PATH=/var/lib/lovevpn/lovevpn.db
+Environment=LOVEVPN_CONFIGS_FILE=/var/lib/lovevpn/configs.txt
+
+# Токен и остальные настройки — в /opt/lovevpn/.env (права 600).
+EnvironmentFile=-/opt/lovevpn/.env
+
+# Ограничения: боту не нужен доступ к остальной системе.
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/lovevpn
+
+[Install]
+WantedBy=multi-user.target

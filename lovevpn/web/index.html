@@ -1,0 +1,538 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Love VPN — быстрый VPN прямо в Telegram</title>
+<meta name="description" content="Love VPN — быстрый VPN без логов. Подключение за минуту через Telegram-бот, оплата внутри Telegram, бесплатные дни за друзей." />
+<link rel="icon" type="image/svg+xml" href="logo.svg" />
+<style>
+/* ============================================================
+   Love VPN — лендинг. Токены совпадают с design-system.css:
+   чтобы перекрасить бренд, правьте только блок :root ниже.
+   ============================================================ */
+:root{
+  --bg:          #0b0710;
+  --bg-2:        #150b1c;
+  --panel:       rgba(255,255,255,.04);
+  --line:        rgba(255,255,255,.10);
+  --text:        #fdeef4;
+  --muted:       #b198ab;
+  --accent:      #ff4d6d;
+  --accent-2:    #c02aff;
+  --accent-3:    #3ddc97;
+  --danger:      #ff5c5c;
+
+  --accent-soft: rgba(255,77,109,.12);
+  --accent-line: rgba(255,77,109,.32);
+  --accent-glow: rgba(255,77,109,.38);
+  --ok-soft:     rgba(61,220,151,.10);
+  --ok-line:     rgba(61,220,151,.28);
+
+  --grad: linear-gradient(135deg, var(--accent) 0%, var(--accent-2) 100%);
+
+  --radius:   20px;
+  --radius-s: 12px;
+  --shadow:   0 20px 60px rgba(0,0,0,.5);
+  --glow:     0 8px 40px var(--accent-glow);
+
+  --font: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+*{ margin:0; padding:0; box-sizing:border-box; }
+html{ scroll-behavior:smooth; }
+body{
+  font-family:var(--font);
+  background:var(--bg);
+  color:var(--text);
+  line-height:1.6;
+  overflow-x:hidden;
+}
+
+/* фоновое свечение + сетка */
+.bg-fx{
+  position:fixed; inset:0; z-index:-1; pointer-events:none;
+  background:
+    radial-gradient(900px 500px at 80% -10%, rgba(192,42,255,.20), transparent 60%),
+    radial-gradient(800px 500px at 10% 8%, rgba(255,77,109,.18), transparent 60%),
+    radial-gradient(700px 600px at 50% 110%, rgba(255,77,109,.10), transparent 60%);
+}
+.bg-fx::after{
+  content:""; position:absolute; inset:0;
+  background-image:
+    linear-gradient(rgba(255,255,255,.03) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255,255,255,.03) 1px, transparent 1px);
+  background-size:56px 56px;
+  mask-image: radial-gradient(1200px 700px at 50% 0%, #000 0%, transparent 75%);
+  -webkit-mask-image: radial-gradient(1200px 700px at 50% 0%, #000 0%, transparent 75%);
+}
+
+.wrap{ max-width:1140px; margin:0 auto; padding:0 20px; }
+
+/* ---------- шапка ---------- */
+header{
+  position:sticky; top:0; z-index:50;
+  backdrop-filter:blur(14px); -webkit-backdrop-filter:blur(14px);
+  background:rgba(11,7,16,.75);
+  border-bottom:1px solid var(--line);
+}
+.nav{ display:flex; align-items:center; gap:28px; height:68px; }
+.brand{ display:flex; align-items:center; gap:12px; text-decoration:none; color:var(--text); margin-right:auto; }
+.brand b{ font-size:20px; letter-spacing:.04em; }
+.brand b span{ background:var(--grad); -webkit-background-clip:text; background-clip:text; color:transparent; }
+.nav a.link{ color:var(--muted); text-decoration:none; font-size:15px; transition:color .2s; }
+.nav a.link:hover{ color:var(--text); }
+
+/* ---------- кнопки ---------- */
+.btn{
+  display:inline-flex; align-items:center; justify-content:center; gap:10px;
+  padding:14px 28px; border-radius:14px; border:0; cursor:pointer;
+  font-size:16px; font-weight:700; text-decoration:none; color:#fff;
+  background:var(--grad); box-shadow:var(--glow);
+  transition:transform .15s, filter .15s;
+}
+.btn:hover{ transform:translateY(-2px); filter:brightness(1.08); }
+.btn.small{ padding:10px 20px; font-size:14px; border-radius:var(--radius-s); }
+.btn.ghost{ background:transparent; box-shadow:none; color:var(--text); border:1px solid var(--line); }
+.btn.ghost:hover{ border-color:var(--accent); }
+
+/* ---------- герой ---------- */
+.hero{ padding:96px 0 80px; display:grid; grid-template-columns:1.15fr .85fr; gap:48px; align-items:center; }
+.badge{
+  display:inline-flex; align-items:center; gap:8px;
+  padding:7px 14px; border-radius:999px; font-size:13px; font-weight:600;
+  color:var(--accent-3); background:var(--ok-soft); border:1px solid var(--ok-line);
+}
+.badge .dot{ width:8px; height:8px; border-radius:50%; background:currentColor; box-shadow:0 0 12px currentColor; animation:pulse 2s infinite; }
+@keyframes pulse{ 50%{ opacity:.4; } }
+.hero h1{
+  margin:22px 0 18px;
+  font-size:clamp(38px, 6vw, 64px);
+  line-height:1.08; font-weight:800; letter-spacing:-.02em;
+}
+.hero h1 .grad{ background:var(--grad); -webkit-background-clip:text; background-clip:text; color:transparent; }
+.hero p.sub{ color:var(--muted); font-size:19px; max-width:520px; }
+.hero .cta{ display:flex; gap:14px; margin-top:34px; flex-wrap:wrap; }
+.hero .stats{ display:flex; gap:36px; margin-top:44px; flex-wrap:wrap; }
+.hero .stats b{ display:block; font-size:26px; letter-spacing:-.01em; }
+.hero .stats span{ color:var(--muted); font-size:14px; }
+
+.hero-visual{ display:flex; justify-content:center; }
+.shield-orb{ position:relative; width:min(340px, 80vw); aspect-ratio:1; display:flex; align-items:center; justify-content:center; }
+.shield-orb::before{
+  content:""; position:absolute; inset:0; border-radius:50%;
+  background:radial-gradient(circle at 35% 30%, rgba(255,77,109,.38), rgba(192,42,255,.14) 55%, transparent 75%);
+  filter:blur(6px);
+}
+.shield-orb .ring{
+  position:absolute; inset:6%; border-radius:50%;
+  border:1px dashed rgba(255,255,255,.18);
+  animation:spin 26s linear infinite;
+}
+.shield-orb .ring.r2{ inset:16%; animation-duration:40s; animation-direction:reverse; border-color:var(--accent-line); }
+@keyframes spin{ to{ transform:rotate(360deg); } }
+.shield-orb .heart{ animation:beat 2.6s ease-in-out infinite; transform-origin:center; }
+@keyframes beat{ 0%,100%{ transform:scale(1); } 12%{ transform:scale(1.06); } 24%{ transform:scale(1); } }
+
+/* ---------- секции ---------- */
+section{ padding:84px 0; }
+.sec-head{ text-align:center; max-width:660px; margin:0 auto 52px; }
+.sec-head h2{ font-size:clamp(28px, 4vw, 40px); letter-spacing:-.02em; margin-bottom:12px; }
+.sec-head p{ color:var(--muted); font-size:17px; }
+.kicker{
+  display:inline-block; margin-bottom:14px; font-size:13px; font-weight:700;
+  letter-spacing:.14em; text-transform:uppercase;
+  background:var(--grad); -webkit-background-clip:text; background-clip:text; color:transparent;
+}
+
+/* ---------- преимущества ---------- */
+.grid{ display:grid; grid-template-columns:repeat(auto-fit, minmax(300px, 1fr)); gap:20px; }
+.card{
+  background:var(--panel); border:1px solid var(--line); border-radius:var(--radius);
+  padding:28px; transition:transform .2s, border-color .2s;
+}
+.card:hover{ transform:translateY(-4px); border-color:var(--accent-line); }
+.card .ico{
+  width:48px; height:48px; border-radius:14px; display:flex; align-items:center; justify-content:center;
+  background:var(--accent-soft); border:1px solid var(--accent-line); margin-bottom:18px;
+  color:var(--accent);
+}
+.card h3{ font-size:18px; margin-bottom:8px; }
+.card p{ color:var(--muted); font-size:15px; }
+
+/* ---------- как начать ---------- */
+.steps{ display:grid; grid-template-columns:repeat(auto-fit, minmax(240px, 1fr)); gap:20px; counter-reset:step; }
+.step{
+  background:var(--panel); border:1px solid var(--line); border-radius:var(--radius); padding:26px;
+}
+.step .num{
+  width:38px; height:38px; border-radius:12px; display:flex; align-items:center; justify-content:center;
+  font-weight:800; background:var(--grad); color:#fff; margin-bottom:16px;
+}
+.step h3{ font-size:17px; margin-bottom:6px; }
+.step p{ color:var(--muted); font-size:15px; }
+
+/* ---------- рефералка ---------- */
+.referral{
+  position:relative; overflow:hidden;
+  border-radius:28px; border:1px solid var(--accent-line);
+  background:
+    radial-gradient(600px 300px at 85% 0%, rgba(192,42,255,.24), transparent 60%),
+    radial-gradient(500px 300px at 0% 100%, rgba(255,77,109,.20), transparent 60%),
+    var(--bg-2);
+  padding:56px 48px;
+  display:grid; grid-template-columns:1.1fr .9fr; gap:44px; align-items:center;
+  box-shadow:var(--shadow);
+}
+.referral h2{ font-size:clamp(26px, 3.6vw, 36px); letter-spacing:-.02em; margin-bottom:14px; }
+.referral p.lead{ color:var(--muted); font-size:17px; margin-bottom:26px; }
+.ref-steps{ display:grid; gap:14px; }
+.ref-step{ display:flex; gap:14px; align-items:flex-start; }
+.ref-step .num{
+  flex:0 0 34px; height:34px; border-radius:10px; display:flex; align-items:center; justify-content:center;
+  font-weight:800; font-size:15px; background:var(--grad); color:#fff;
+}
+.ref-step b{ display:block; font-size:15.5px; }
+.ref-step span{ color:var(--muted); font-size:14px; }
+
+.ref-card{
+  background:rgba(11,7,16,.7); border:1px solid var(--line); border-radius:var(--radius);
+  padding:28px; backdrop-filter:blur(8px); text-align:center;
+}
+.ref-card .label{ font-size:13px; color:var(--muted); text-transform:uppercase; letter-spacing:.1em; margin-bottom:18px; }
+.ref-bonus{ display:grid; grid-template-columns:1fr 1fr; gap:12px; margin-bottom:22px; }
+.ref-bonus .cell{ border:1px solid var(--line); border-radius:14px; padding:16px; background:rgba(255,255,255,.03); }
+.ref-bonus b{ display:block; font-size:24px; background:var(--grad); -webkit-background-clip:text; background-clip:text; color:transparent; }
+.ref-bonus span{ font-size:13px; color:var(--muted); }
+.ref-card .btn{ width:100%; }
+
+/* ---------- тарифы ---------- */
+.plans{ display:grid; grid-template-columns:repeat(auto-fit, minmax(280px, 1fr)); gap:20px; align-items:stretch; }
+.plan{
+  position:relative; display:flex; flex-direction:column;
+  background:var(--panel); border:1px solid var(--line); border-radius:var(--radius); padding:32px;
+}
+.plan.popular{ border-color:transparent; background:var(--bg-2); box-shadow:var(--shadow); }
+.plan.popular::before{
+  content:""; position:absolute; inset:0; border-radius:var(--radius); padding:1.5px;
+  background:var(--grad);
+  -webkit-mask:linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite:xor; mask-composite:exclude;
+  pointer-events:none;
+}
+.plan .tag{
+  position:absolute; top:-13px; left:50%; transform:translateX(-50%);
+  padding:5px 16px; border-radius:999px; font-size:12.5px; font-weight:700;
+  background:var(--grad); color:#fff; white-space:nowrap;
+}
+.plan h3{ font-size:17px; color:var(--muted); font-weight:600; }
+.plan .price{ margin:14px 0 4px; font-size:44px; font-weight:800; letter-spacing:-.02em; }
+.plan .price small{ font-size:16px; font-weight:600; color:var(--muted); }
+.plan .per{ color:var(--muted); font-size:14px; margin-bottom:22px; }
+.plan ul{ list-style:none; display:grid; gap:11px; margin-bottom:28px; color:var(--accent-3); }
+.plan li{ display:flex; gap:10px; align-items:center; font-size:15px; color:#e6d3dd; }
+.plan li svg{ flex:0 0 auto; color:var(--accent-3); }
+.plan .btn{ margin-top:auto; width:100%; }
+
+/* ---------- FAQ ---------- */
+.faq{ max-width:760px; margin:0 auto; display:grid; gap:12px; }
+.faq details{ background:var(--panel); border:1px solid var(--line); border-radius:16px; padding:20px 24px; }
+.faq summary{
+  cursor:pointer; font-weight:700; font-size:16px; list-style:none;
+  display:flex; justify-content:space-between; align-items:center; gap:16px;
+}
+.faq summary::-webkit-details-marker{ display:none; }
+.faq summary::after{ content:"+"; font-size:22px; color:var(--accent); transition:transform .2s; }
+.faq details[open] summary::after{ transform:rotate(45deg); }
+.faq details p{ color:var(--muted); font-size:15px; margin-top:12px; }
+
+/* ---------- финальный CTA + футер ---------- */
+.final{
+  text-align:center; border-radius:28px; padding:72px 24px;
+  background:radial-gradient(600px 300px at 50% 0%, rgba(255,77,109,.20), transparent 70%), var(--bg-2);
+  border:1px solid var(--line);
+}
+.final h2{ font-size:clamp(28px, 4vw, 42px); letter-spacing:-.02em; margin-bottom:14px; }
+.final p{ color:var(--muted); margin-bottom:30px; }
+footer{ padding:48px 0 60px; color:var(--muted); font-size:14px; }
+.foot{ display:flex; justify-content:space-between; gap:20px; flex-wrap:wrap; align-items:center; }
+.foot a{ color:var(--muted); text-decoration:none; margin-left:22px; }
+.foot a:hover{ color:var(--text); }
+
+/* ---------- адаптив ---------- */
+@media (max-width: 900px){
+  .hero{ grid-template-columns:1fr; padding-top:56px; text-align:center; }
+  .hero p.sub{ margin:0 auto; }
+  .hero .cta, .hero .stats{ justify-content:center; }
+  .hero-visual{ order:-1; }
+  .shield-orb{ width:min(240px, 70vw); }
+  .referral{ grid-template-columns:1fr; padding:36px 24px; }
+  .nav a.link{ display:none; }
+  section{ padding:64px 0; }
+}
+</style>
+</head>
+<body>
+<div class="bg-fx"></div>
+
+<header>
+  <div class="wrap nav">
+    <a class="brand" href="#top" aria-label="Love VPN — на главную">
+      <!-- ЛОГОТИП Love VPN (инлайн-копия logo.svg — страница остаётся автономной) -->
+      <svg width="36" height="36" viewBox="0 0 40 40" fill="none" aria-hidden="true">
+        <defs>
+          <linearGradient id="lovegrad" x1="6" y1="4" x2="34" y2="36" gradientUnits="userSpaceOnUse">
+            <stop offset="0" stop-color="#ff4d6d"/><stop offset="1" stop-color="#c02aff"/>
+          </linearGradient>
+        </defs>
+        <path d="M20 3.5 33.5 8.9v9.6c0 8.6-5.8 14.2-13.5 17.2C12.3 32.7 6.5 27.1 6.5 18.5V8.9L20 3.5z" stroke="url(#lovegrad)" stroke-width="2.1" fill="rgba(255,77,109,.10)"/>
+        <path d="M20 27.4c-.4 0-8.2-5.3-8.2-10.4 0-2.7 2.1-4.8 4.6-4.8 1.6 0 3 .8 3.6 2.1.6-1.3 2-2.1 3.6-2.1 2.5 0 4.6 2.1 4.6 4.8 0 5.1-7.8 10.4-8.2 10.4z" fill="url(#lovegrad)"/>
+      </svg>
+      <b>Love<span>VPN</span></b>
+    </a>
+    <a class="link" href="#features">Преимущества</a>
+    <a class="link" href="#how">Как начать</a>
+    <a class="link" href="#referral">Рефералка</a>
+    <a class="link" href="#pricing">Тарифы</a>
+    <a class="btn small" href="https://t.me/lovemevpn_bot">Открыть в Telegram</a>
+  </div>
+</header>
+
+<main id="top">
+
+  <!-- ГЕРОЙ -->
+  <div class="wrap hero">
+    <div>
+      <span class="badge"><span class="dot"></span> 3 дня бесплатно, без карты</span>
+      <h1>VPN, который<br>ты <span class="grad">полюбишь.</span></h1>
+      <p class="sub">Быстрый доступ без логов и ограничений скорости. Всё живёт в Telegram: оплата, ключ и продление — в одном боте.</p>
+      <div class="cta">
+        <a class="btn" href="https://t.me/lovemevpn_bot">Подключиться за минуту</a>
+        <a class="btn ghost" href="#referral">Получить бесплатно</a>
+      </div>
+      <div class="stats">
+        <div><b>&lt; 60 сек</b><span>до подключения</span></div>
+        <div><b>0</b><span>логов и слежки</span></div>
+        <div><b>+30 дней</b><span>за каждого друга</span></div>
+      </div>
+    </div>
+    <div class="hero-visual">
+      <div class="shield-orb">
+        <div class="ring"></div>
+        <div class="ring r2"></div>
+        <svg class="heart" width="150" height="150" viewBox="0 0 40 40" fill="none" aria-hidden="true">
+          <path d="M20 3.5 33.5 8.9v9.6c0 8.6-5.8 14.2-13.5 17.2C12.3 32.7 6.5 27.1 6.5 18.5V8.9L20 3.5z" stroke="url(#lovegrad)" stroke-width="1.7" fill="rgba(11,7,16,.75)"/>
+          <path d="M20 27.4c-.4 0-8.2-5.3-8.2-10.4 0-2.7 2.1-4.8 4.6-4.8 1.6 0 3 .8 3.6 2.1.6-1.3 2-2.1 3.6-2.1 2.5 0 4.6 2.1 4.6 4.8 0 5.1-7.8 10.4-8.2 10.4z" fill="url(#lovegrad)"/>
+        </svg>
+      </div>
+    </div>
+  </div>
+
+  <!-- ПРЕИМУЩЕСТВА -->
+  <section id="features">
+    <div class="wrap">
+      <div class="sec-head">
+        <span class="kicker">Почему Love VPN</span>
+        <h2>Работает без настройки</h2>
+        <p>Никаких панелей и танцев с бубном — выбрали тариф в боте, получили ключ, подключились.</p>
+      </div>
+      <div class="grid">
+        <div class="card">
+          <div class="ico"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M13 2 3 14h7l-1 8L21 9h-7l-1-7z"/></svg></div>
+          <h3>Полная скорость</h3>
+          <p>Стримы в 4K, звонки и игры без лагов. Трафик не ограничиваем и скорость не режем.</p>
+        </div>
+        <div class="card">
+          <div class="ico"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2 4 5v7c0 5 3.4 8.6 8 10 4.6-1.4 8-5 8-10V5l-8-3z"/><path d="M9 12l2 2 4-4"/></svg></div>
+          <h3>Ноль логов</h3>
+          <p>Мы не пишем историю и не храним трафик. Чем вы заняты — известно только вам.</p>
+        </div>
+        <div class="card">
+          <div class="ico"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="12" rx="2"/><path d="M8 20h8M12 16v4"/></svg></div>
+          <h3>Все устройства</h3>
+          <p>iPhone, Android, Mac, Windows, ТВ-приставки. Один ключ — несколько устройств.</p>
+        </div>
+        <div class="card">
+          <div class="ico"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c3 3.5 3 14 0 18-3-4-3-14.5 0-18z"/></svg></div>
+          <h3>Обход блокировок</h3>
+          <p>Современные протоколы, которые не видно и не заблокировать. Открывается всё.</p>
+        </div>
+        <div class="card">
+          <div class="ico"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2v20M2 12h20"/><circle cx="12" cy="12" r="9"/></svg></div>
+          <h3>Оплата в Telegram</h3>
+          <p>Платёж проходит внутри мессенджера звёздами — без карт, форм и лишних данных.</p>
+        </div>
+        <div class="card">
+          <div class="ico"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12a9 9 0 1 1-9-9"/><path d="M21 3v6h-6"/></svg></div>
+          <h3>Живая поддержка</h3>
+          <p>Отвечают люди, а не бот-автоответчик. Поможем подключиться и решим вопрос.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- КАК НАЧАТЬ -->
+  <section id="how">
+    <div class="wrap">
+      <div class="sec-head">
+        <span class="kicker">Как начать</span>
+        <h2>Три шага и одна минута</h2>
+      </div>
+      <div class="steps">
+        <div class="step">
+          <div class="num">1</div>
+          <h3>Откройте бота</h3>
+          <p>Нажмите «Открыть в Telegram» и запустите <b>@lovemevpn_bot</b> кнопкой «Старт».</p>
+        </div>
+        <div class="step">
+          <div class="num">2</div>
+          <h3>Возьмите доступ</h3>
+          <p>Пробные 3 дня бесплатно или сразу любой тариф — оплата внутри Telegram.</p>
+        </div>
+        <div class="step">
+          <div class="num">3</div>
+          <h3>Вставьте ключ</h3>
+          <p>Бот пришлёт ключ и подскажет приложение. Импорт из буфера — и вы подключены.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- РЕФЕРАЛКА -->
+  <section id="referral">
+    <div class="wrap">
+      <div class="referral">
+        <div>
+          <span class="kicker">Реферальная программа</span>
+          <h2>Приведи друга — месяц бесплатно. Обоим.</h2>
+          <p class="lead">У каждого в боте есть личная ссылка. Друг переходит по ней и оплачивает любой тариф — вы оба получаете +30 дней. Друзей можно приглашать сколько угодно.</p>
+          <div class="ref-steps">
+            <div class="ref-step"><span class="num">1</span><div><b>Возьмите ссылку в боте</b><span>Кнопка «Пригласить друга» — ссылка уже закреплена за вами</span></div></div>
+            <div class="ref-step"><span class="num">2</span><div><b>Отправьте другу</b><span>Одна кнопка «Отправить другу» — выбираете чат и всё</span></div></div>
+            <div class="ref-step"><span class="num">3</span><div><b>Бонус приходит обоим</b><span>+30 дней вам и +30 дней другу сразу после его оплаты</span></div></div>
+          </div>
+        </div>
+        <div class="ref-card">
+          <div class="label">Ваш бонус</div>
+          <div class="ref-bonus">
+            <div class="cell"><b>+30 дней</b><span>вам за каждого друга</span></div>
+            <div class="cell"><b>+30 дней</b><span>другу на старте</span></div>
+          </div>
+          <a class="btn" href="https://t.me/lovemevpn_bot">Получить свою ссылку</a>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ТАРИФЫ -->
+  <section id="pricing">
+    <div class="wrap">
+      <div class="sec-head">
+        <span class="kicker">Тарифы</span>
+        <h2>Честные цены, без мелкого шрифта</h2>
+        <p>Во всех тарифах — полная скорость, все серверы и ноль логов.</p>
+      </div>
+      <div class="plans">
+        <div class="plan">
+          <h3>1 месяц</h3>
+          <div class="price">199 <small>₽</small></div>
+          <div class="per">разовый платёж</div>
+          <ul>
+            <li><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M5 13l4 4L19 7"/></svg> Полная скорость</li>
+            <li><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M5 13l4 4L19 7"/></svg> Все серверы</li>
+            <li><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M5 13l4 4L19 7"/></svg> До 3 устройств</li>
+          </ul>
+          <a class="btn ghost" href="https://t.me/lovemevpn_bot">Выбрать в боте</a>
+        </div>
+        <div class="plan popular">
+          <span class="tag">Выгоднее всего</span>
+          <h3>6 месяцев</h3>
+          <div class="price">555 <small>₽</small></div>
+          <div class="per">≈ 93 ₽ в месяц</div>
+          <ul>
+            <li><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M5 13l4 4L19 7"/></svg> Полная скорость</li>
+            <li><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M5 13l4 4L19 7"/></svg> Все серверы</li>
+            <li><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M5 13l4 4L19 7"/></svg> До 5 устройств</li>
+            <li><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M5 13l4 4L19 7"/></svg> Приоритетная поддержка</li>
+          </ul>
+          <a class="btn" href="https://t.me/lovemevpn_bot">Выбрать в боте</a>
+        </div>
+        <div class="plan">
+          <h3>12 месяцев</h3>
+          <div class="price">999 <small>₽</small></div>
+          <div class="per">≈ 83 ₽ в месяц</div>
+          <ul>
+            <li><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M5 13l4 4L19 7"/></svg> Всё из тарифа на 6 месяцев</li>
+            <li><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M5 13l4 4L19 7"/></svg> До 10 устройств</li>
+            <li><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M5 13l4 4L19 7"/></svg> Максимальная выгода</li>
+          </ul>
+          <a class="btn ghost" href="https://t.me/lovemevpn_bot">Выбрать в боте</a>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- FAQ -->
+  <section id="faq">
+    <div class="wrap">
+      <div class="sec-head">
+        <span class="kicker">FAQ</span>
+        <h2>Частые вопросы</h2>
+      </div>
+      <div class="faq">
+        <details>
+          <summary>Как быстро я подключусь?</summary>
+          <p>Меньше минуты. Бот выдаёт ключ сразу после оплаты, приложение подхватывает его из буфера обмена — настраивать вручную ничего не нужно.</p>
+        </details>
+        <details>
+          <summary>Правда бесплатные 3 дня?</summary>
+          <p>Да, пробный период выдаётся один раз на аккаунт и не требует карты — достаточно нажать кнопку в боте.</p>
+        </details>
+        <details>
+          <summary>Вы храните логи?</summary>
+          <p>Нет. Мы не записываем историю посещений и не храним содержимое трафика.</p>
+        </details>
+        <details>
+          <summary>Как работает реферальная программа?</summary>
+          <p>В боте есть ваша личная ссылка. Когда друг переходит по ней и оплачивает любой тариф, +30 дней получаете вы и +30 дней — он. Бонус начисляется один раз за каждого друга, после его оплаты.</p>
+        </details>
+        <details>
+          <summary>Что с оплатой — нужна карта?</summary>
+          <p>Нет, оплата проходит внутри Telegram звёздами. Данные карты мы не видим и не храним.</p>
+        </details>
+        <details>
+          <summary>На скольких устройствах можно пользоваться?</summary>
+          <p>Зависит от тарифа: от 3 до 10 устройств. Ключ один — просто добавьте его в приложение на каждом устройстве.</p>
+        </details>
+      </div>
+    </div>
+  </section>
+
+  <!-- ФИНАЛЬНЫЙ CTA -->
+  <section>
+    <div class="wrap">
+      <div class="final">
+        <h2>Попробуйте <span class="grad">Love&nbsp;VPN</span> бесплатно</h2>
+        <p>3 дня без карты. Минута на подключение. Месяц в подарок за каждого друга.</p>
+        <a class="btn" href="https://t.me/lovemevpn_bot">Открыть @lovemevpn_bot</a>
+      </div>
+    </div>
+  </section>
+
+</main>
+
+<footer>
+  <div class="wrap foot">
+    <span>© 2026 Love VPN</span>
+    <nav>
+      <a href="#features">Преимущества</a>
+      <a href="#how">Как начать</a>
+      <a href="#referral">Рефералка</a>
+      <a href="#pricing">Тарифы</a>
+      <a href="https://t.me/lovemevpn_bot">Telegram</a>
+    </nav>
+  </div>
+</footer>
+</body>
+</html>

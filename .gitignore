@@ -14,3 +14,7 @@ tsconfig.tsbuildinfo
 mark17/output/
 mark17/state/
 mark17/state/*.db
+# Love VPN: база бота и реальные VPN-конфиги в репозиторий не попадают
+lovevpn/state/
+lovevpn/configs.txt
+lovevpn/.venv/
