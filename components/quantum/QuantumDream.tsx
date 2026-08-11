@@ -1,511 +1,222 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import Link from 'next/link';
 import { motion, AnimatePresence } from 'motion/react';
+import DreamSim3D from './DreamSim3D';
+import AvatarCanvas from '@/components/agent/AvatarCanvas';
+import { type SimDef, SIMS, mulberry32 } from '@/lib/dream-sims';
+import { type AvatarConfig, DEFAULT_AVATAR, loadAvatar, palette } from '@/lib/agent-avatar';
 
 /**
- * QuantumDream — режим «Сон / Облик».
+ * QuantumDream — «сон» Макса.
  *
- * Концепция: Max17 «спит» — показывает фрагменты снов (как вертикальные Reels).
- * Каждый «рилс» — это квантовое состояние системы: волновая функция, эхо,
- * фрактал, число-резонанс. Сны генерируются локально (никаких внешних API),
- * обновляются каждые ~4 сек. Переключаются автоматически или свайпом.
+ * Раньше кадры были нарисованными иллюстрациями идеи: синусоида, спираль,
+ * россыпь точек. Теперь каждый кадр — работающая симуляция из `lib/dream-sims`:
+ * Лоренц, гравитация, стая, интерференция, галактика, орбиталь. Ничего не
+ * анимируется «под физику» — физика считается, а картинка её показывает.
  *
- * Формула G = MIRON  →  G-резонанс считается как скалярное произведение
- * текущего вектора сна на «идеальный» вектор MIRON (5D-вектор, зашит в коде).
- * Чем ближе к 1.0, тем «глубже» сон и ярче свечение.
- *
- * Без зависимостей. Чистый Canvas 2D + motion.
+ * Резонанс G = MIRON остался: 5-мерный вектор состояния сна сравнивается с
+ * зашитым вектором MIRON. Он управляет яркостью — то есть у числа есть
+ * видимое следствие, а не только подпись.
  */
-
-type DreamKind = 'wave' | 'particles' | 'fractal' | 'echo' | 'spiral';
 
 interface DreamFrame {
   id: number;
-  kind: DreamKind;
-  title: string;
-  caption: string;
-  resonance: number; // 0..1 — косинусное сходство с MIRON
+  def: SimDef;
+  resonance: number;
   seed: number;
 }
 
-const MIRON: number[] = [0.93, 0.71, 0.42, 0.86, 0.55];
-
-// Детерминированный PRNG
-function mulberry32(seed: number) {
-  let a = seed >>> 0;
-  return () => {
-    a = (a + 0x6D2B79F5) >>> 0;
-    let t = a;
-    t = Math.imul(t ^ (t >>> 15), t | 1);
-    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
-    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
-  };
-}
-
-const KINDS: Array<{ k: DreamKind; title: string; caption: string }> = [
-  { k: 'wave',      title: 'ВОЛНА ШРОДИНГЕРА',     caption: 'Кот жив. Кот мёртв. Кот наблюдает за тобой.' },
-  { k: 'particles', title: 'ЭНТРОПИЯ ПОЛЯ',         caption: 'Миллиард частиц решают, быть ли тебе здесь.' },
-  { k: 'fractal',   title: 'ФРАКТАЛ ВОСПОМИНАНИЯ',  caption: 'Сон внутри сна. MIRON = G = бесконечность.' },
-  { k: 'echo',      title: 'ЭХО СОБЫТИЙ',           caption: 'Каждое решение отзывается в 7 параллельных.' },
-  { k: 'spiral',    title: 'СПИРАЛЬ КВАНТОВОГО Я',  caption: 'Точка сборки. Здесь G становится MIRON.' },
-];
+const MIRON = [0.93, 0.71, 0.42, 0.86, 0.55];
 
 function makeFrame(seed: number, idx: number): DreamFrame {
   const r = mulberry32(seed);
-  const kind = KINDS[idx % KINDS.length];
-  // Случайный вектор, потом скалярно умножим на MIRON
+  const def = SIMS[idx % SIMS.length];
   const v = Array.from({ length: 5 }, () => r() * 2 - 1);
-  // Косинусное сходство (без нормировки знаменателя — для красоты свечения)
   let dot = 0, na = 0, nb = 0;
   for (let i = 0; i < 5; i++) {
     dot += v[i] * MIRON[i];
     na += v[i] * v[i];
     nb += MIRON[i] * MIRON[i];
   }
-  const resonance = Math.max(0, Math.min(1, dot / (Math.sqrt(na) * Math.sqrt(nb))));
-  return { id: seed, kind: kind.k, title: kind.title, caption: kind.caption, resonance, seed };
+  const resonance = Math.max(0.15, Math.min(1, dot / (Math.sqrt(na) * Math.sqrt(nb))));
+  return { id: seed, def, resonance, seed };
 }
 
 export default function QuantumDream() {
-  const [frames, setFrames] = useState<DreamFrame[]>([]);
+  const [frames] = useState<DreamFrame[]>(() =>
+    SIMS.map((_, i) => makeFrame(1000 + i * 137, i)),
+  );
   const [active, setActive] = useState(0);
   const [running, setRunning] = useState(true);
-  const [breath, setBreath] = useState(0); // 0..1 медленная синусоида
-  const seedRef = useRef(1);
+  const [auto, setAuto] = useState(true);
+  const [avatar, setAvatar] = useState<AvatarConfig>(DEFAULT_AVATAR);
+  const [mounted, setMounted] = useState(false);
+  const touchX = useRef(0);
 
-  // Инициализация: 7 кадров-снов в очереди
   useEffect(() => {
-    const initial = Array.from({ length: 7 }, (_, i) => makeFrame(seedRef.current + i, i));
-    setFrames(initial);
+    setAvatar(loadAvatar());
+    setMounted(true);
+    const onAvatar = () => setAvatar(loadAvatar());
+    window.addEventListener('max17:avatar', onAvatar);
+    return () => window.removeEventListener('max17:avatar', onAvatar);
   }, []);
 
-  // Сдвиг кадров каждые 4 сек
+  // Автосмена — 18 секунд: симуляции успевают выйти на характерный режим.
+  // Прежние 4 секунды показывали только переходный процесс.
   useEffect(() => {
-    if (!running) return;
-    const id = setInterval(() => {
-      setActive((a) => {
-        const next = (a + 1) % 7;
-        setFrames((fs) => {
-          const arr = [...fs];
-          seedRef.current += 1;
-          arr[next] = makeFrame(seedRef.current + 7, next);
-          return arr;
-        });
-        return next;
-      });
-    }, 4000);
+    if (!auto || !running) return;
+    const id = setInterval(() => setActive((a) => (a + 1) % frames.length), 18000);
     return () => clearInterval(id);
-  }, [running]);
-
-  // Дыхание — 8-секундный цикл
-  useEffect(() => {
-    let raf = 0;
-    const t0 = performance.now();
-    const tick = (t: number) => {
-      setBreath((Math.sin((t - t0) / 4000) + 1) / 2);
-      raf = requestAnimationFrame(tick);
-    };
-    raf = requestAnimationFrame(tick);
-    return () => cancelAnimationFrame(raf);
-  }, []);
+  }, [auto, running, frames.length]);
 
   const current = frames[active];
-  const resonancePct = current ? Math.round(current.resonance * 100) : 0;
+  const pal = useMemo(() => palette(avatar), [avatar]);
+  const resonancePct = Math.round(current.resonance * 100);
+
+  const go = (delta: number) => {
+    setAuto(false);
+    setActive((a) => (a + delta + frames.length) % frames.length);
+  };
 
   return (
     <main
-      style={{
-        position: 'fixed',
-        inset: 0,
-        background: 'radial-gradient(ellipse at center, #0a0418 0%, #000 80%)',
-        color: '#fff',
-        fontFamily: 'system-ui, sans-serif',
-        overflow: 'hidden',
-        display: 'flex',
-        flexDirection: 'column',
+      className="fixed inset-0 flex flex-col overflow-hidden text-white"
+      style={{ background: `radial-gradient(ellipse at center, ${pal.deep} 0%, #000 78%)`, fontFamily: 'system-ui, sans-serif' }}
+      onTouchStart={(e) => { touchX.current = e.touches[0].clientX; }}
+      onTouchEnd={(e) => {
+        const dx = e.changedTouches[0].clientX - touchX.current;
+        if (Math.abs(dx) > 60) go(dx < 0 ? 1 : -1);
       }}
     >
-      {/* Header */}
-      <div
-        style={{
-          padding: '20px 24px 8px',
-          display: 'flex',
-          justifyContent: 'space-between',
-          alignItems: 'flex-start',
-          zIndex: 10,
-        }}
-      >
+      {/* ── шапка ─────────────────────────────────────────────────────────── */}
+      <header className="z-10 flex items-start justify-between px-5 pb-2 pt-5">
         <div>
           <h1
-            style={{
-              margin: 0,
-              fontSize: 22,
-              fontWeight: 800,
-              letterSpacing: 1,
-              background: 'linear-gradient(90deg,#ff4d8d,#7c5cff,#00d4ff)',
-              WebkitBackgroundClip: 'text',
-              WebkitTextFillColor: 'transparent',
-            }}
+            className="m-0 text-[22px] font-extrabold tracking-wide"
+            style={{ background: `linear-gradient(90deg, ${pal.main}, ${pal.accent})`, WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent' }}
           >
             КВАНТОВЫЙ СОН
           </h1>
-          <p style={{ margin: '4px 0 0', fontSize: 10, letterSpacing: 3, opacity: 0.5, fontWeight: 700 }}>
-            РЕЖИМ ОБЛИКА · MAX17
+          <p className="m-0 mt-1 text-[10px] font-bold uppercase tracking-[3px] opacity-50">
+            6 симуляций · спит {avatar.name}
           </p>
         </div>
-        <button
-          onClick={() => setRunning((r) => !r)}
-          style={{
-            background: 'rgba(255,255,255,0.05)',
-            border: '1px solid rgba(255,255,255,0.15)',
-            color: '#fff',
-            padding: '6px 14px',
-            borderRadius: 999,
-            fontSize: 10,
-            letterSpacing: 2,
-            fontWeight: 700,
-            cursor: 'pointer',
-            textTransform: 'uppercase',
-          }}
-        >
-          {running ? '⏸ Пауза' : '▶ Сон'}
-        </button>
-      </div>
+        <div className="flex gap-2">
+          <button
+            type="button"
+            onClick={() => setRunning((v) => !v)}
+            className="rounded-full border border-white/15 bg-white/5 px-3.5 py-1.5 text-[10px] font-bold uppercase tracking-[2px] active:scale-95"
+          >
+            {running ? '⏸ Пауза' : '▶ Сон'}
+          </button>
+          <Link
+            href="/modes"
+            className="rounded-full border px-3.5 py-1.5 text-[10px] font-bold uppercase tracking-[2px] active:scale-95"
+            style={{ color: pal.accent, borderColor: `${pal.accent}55`, background: `${pal.accent}15` }}
+          >
+            △∞
+          </Link>
+        </div>
+      </header>
 
-      {/* Центральный «глаз сна» — большой визуализатор */}
-      <div style={{ flex: 1, position: 'relative', display: 'grid', placeItems: 'center' }}>
-        {current && <DreamCanvas frame={current} breath={breath} />}
+      {/* ── сцена ─────────────────────────────────────────────────────────── */}
+      <div className="relative grid flex-1 place-items-center">
+        <DreamSim3D
+          def={current.def}
+          seed={current.seed}
+          hue={avatar.hue}
+          accentHue={avatar.accent}
+          running={running}
+          intensity={current.resonance}
+          size={560}
+        />
 
-        {/* Подпись кадра */}
         <AnimatePresence mode="wait">
-          {current && (
-            <motion.div
-              key={current.id}
-              initial={{ opacity: 0, y: 20 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: -20 }}
-              transition={{ duration: 0.6 }}
-              style={{
-                position: 'absolute',
-                top: 24,
-                left: 24,
-                right: 24,
-                textAlign: 'center',
-                pointerEvents: 'none',
-              }}
-            >
-              <div
-                style={{
-                  fontSize: 11,
-                  letterSpacing: 4,
-                  fontWeight: 800,
-                  color: 'rgba(255,255,255,0.6)',
-                  marginBottom: 6,
-                }}
-              >
-                {current.title}
-              </div>
-              <div
-                style={{
-                  fontSize: 13,
-                  fontStyle: 'italic',
-                  color: 'rgba(255,255,255,0.85)',
-                  maxWidth: 480,
-                  margin: '0 auto',
-                  fontFamily: 'Georgia, serif',
-                }}
-              >
-                «{current.caption}»
-              </div>
-            </motion.div>
-          )}
+          <motion.div
+            key={current.id}
+            initial={{ opacity: 0, y: 16 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -16 }}
+            transition={{ duration: 0.5 }}
+            className="pointer-events-none absolute inset-x-6 top-2 text-center"
+          >
+            <div className="mb-1.5 text-[11px] font-extrabold tracking-[4px] text-white/60">
+              {current.def.title}
+            </div>
+            <div className="mx-auto max-w-[480px] font-serif text-[13px] italic text-white/85">
+              «{current.def.caption}»
+            </div>
+          </motion.div>
         </AnimatePresence>
 
-        {/* G = MIRON индикатор снизу-центр */}
-        <div
-          style={{
-            position: 'absolute',
-            bottom: 24,
-            left: '50%',
-            transform: 'translateX(-50%)',
-            textAlign: 'center',
-            pointerEvents: 'none',
-          }}
-        >
+        {/* Спящий агент — тот самый облик, что настроен в /agent. */}
+        {mounted && (
+          <Link
+            href="/agent"
+            className="absolute bottom-3 left-3 opacity-70 transition hover:opacity-100"
+            title="Настроить облик"
+          >
+            <AvatarCanvas config={avatar} size={84} listening />
+          </Link>
+        )}
+
+        <div className="pointer-events-none absolute bottom-4 left-1/2 -translate-x-1/2 text-center">
           <div
-            style={{
-              fontFamily: 'Georgia, serif',
-              fontSize: 28,
-              fontWeight: 800,
-              letterSpacing: 2,
-              background: 'linear-gradient(90deg,#ffd700,#ff4d8d,#7c5cff)',
-              WebkitBackgroundClip: 'text',
-              WebkitTextFillColor: 'transparent',
-            }}
+            className="font-serif text-[26px] font-extrabold tracking-wider"
+            style={{ background: `linear-gradient(90deg,#ffd700, ${pal.main}, ${pal.accent})`, WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent' }}
           >
             G = MIRON
           </div>
-          <div
-            style={{
-              fontSize: 10,
-              letterSpacing: 3,
-              opacity: 0.5,
-              marginTop: 4,
-              fontWeight: 700,
-            }}
-          >
+          <div className="mt-0.5 text-[10px] font-bold tracking-[3px] opacity-50">
             РЕЗОНАНС · {resonancePct}%
           </div>
         </div>
       </div>
 
-      {/* Reels — горизонтальная лента превью снизу */}
-      <Reels frames={frames} active={active} onSelect={setActive} />
+      {/* ── лента симуляций ───────────────────────────────────────────────── */}
+      <div className="bg-gradient-to-t from-black/80 to-transparent px-4 pb-6 pt-3">
+        <div className="mb-2.5 flex items-center justify-between">
+          <span className="text-[9px] font-bold tracking-[3px] opacity-40">
+            СНЫ · {frames.length} СИМУЛЯЦИИ
+          </span>
+          <button
+            type="button"
+            onClick={() => setAuto((v) => !v)}
+            className="text-[9px] font-bold tracking-[2px] opacity-50 active:scale-95"
+          >
+            {auto ? 'АВТО ВКЛ' : 'АВТО ВЫКЛ'}
+          </button>
+        </div>
+        <div className="flex gap-2.5 overflow-x-auto pb-1.5 [scrollbar-width:none]">
+          {frames.map((f, i) => {
+            const on = i === active;
+            return (
+              <motion.button
+                key={f.id}
+                type="button"
+                whileTap={{ scale: 0.95 }}
+                onClick={() => { setAuto(false); setActive(i); }}
+                className="flex h-[92px] w-[104px] shrink-0 flex-col justify-between rounded-xl border p-2 text-left"
+                style={{
+                  borderColor: on ? `${pal.main}cc` : 'rgba(255,255,255,0.1)',
+                  background: on ? `${pal.main}22` : 'rgba(255,255,255,0.04)',
+                  boxShadow: on ? `0 0 20px ${pal.main}44` : 'none',
+                }}
+              >
+                <span className="text-[8px] font-extrabold tracking-[1.5px] opacity-50">#{i + 1}</span>
+                <span className={`text-[9px] font-bold leading-tight ${on ? 'text-white' : 'text-white/45'}`}>
+                  {f.def.title}
+                </span>
+                <span className="text-right text-[8px] font-bold tracking-[1px] opacity-45">
+                  {Math.round(f.resonance * 100)}%
+                </span>
+              </motion.button>
+            );
+          })}
+        </div>
+      </div>
     </main>
-  );
-}
-
-/* ── Canvas-визуализатор для каждого типа сна ───────────────────────── */
-
-function DreamCanvas({ frame, breath }: { frame: DreamFrame; breath: number }) {
-  const canvasRef = useRef<HTMLCanvasElement | null>(null);
-  const rafRef = useRef<number | null>(null);
-
-  useEffect(() => {
-    const c = canvasRef.current;
-    if (!c) return;
-    const ctx = c.getContext('2d');
-    if (!ctx) return;
-    const W = 600, H = 600;
-    c.width = W;
-    c.height = H;
-
-    const r = mulberry32(frame.seed);
-    const t0 = performance.now();
-    const rIntensity = 0.4 + frame.resonance * 0.6;
-
-    const draw = (t: number) => {
-      const time = (t - t0) / 1000;
-      ctx.clearRect(0, 0, W, H);
-      // Чёрный фон с дыхательной альфой
-      ctx.fillStyle = '#000';
-      ctx.fillRect(0, 0, W, H);
-
-      const cx = W / 2;
-      const cy = H / 2;
-
-      // Свечение по резонансу + дыханию
-      const glowR = 180 + breath * 30;
-      const glow = ctx.createRadialGradient(cx, cy, 0, cx, cy, glowR);
-      const hue = (frame.seed * 47) % 360;
-      glow.addColorStop(0, `hsla(${hue}, 100%, 70%, ${0.3 * rIntensity})`);
-      glow.addColorStop(0.5, `hsla(${(hue + 60) % 360}, 100%, 50%, ${0.15 * rIntensity})`);
-      glow.addColorStop(1, 'transparent');
-      ctx.fillStyle = glow;
-      ctx.beginPath();
-      ctx.arc(cx, cy, glowR, 0, Math.PI * 2);
-      ctx.fill();
-
-      if (frame.kind === 'wave') {
-        // Интерференция двух волн
-        for (let y = 0; y < H; y += 4) {
-          ctx.beginPath();
-          for (let x = 0; x < W; x += 2) {
-            const w1 = Math.sin(x * 0.02 + time * 1.5) * 30;
-            const w2 = Math.cos(y * 0.025 - time) * 30;
-            const yy = y + w1 + w2;
-            if (x === 0) ctx.moveTo(x, yy);
-            else ctx.lineTo(x, yy);
-          }
-          const alpha = 0.3 + Math.sin(y * 0.01 + time) * 0.3;
-          ctx.strokeStyle = `hsla(${(hue + y) % 360}, 100%, 70%, ${alpha * rIntensity})`;
-          ctx.lineWidth = 1.5;
-          ctx.stroke();
-        }
-      } else if (frame.kind === 'particles') {
-        // Облако частиц
-        const N = 200;
-        for (let i = 0; i < N; i++) {
-          const a = r() * Math.PI * 2 + time * 0.3;
-          const rad = 50 + r() * 180 + Math.sin(time + i) * 20;
-          const x = cx + Math.cos(a) * rad;
-          const y = cy + Math.sin(a) * rad;
-          const size = 1 + r() * 2.5;
-          ctx.fillStyle = `hsla(${(hue + i) % 360}, 100%, 70%, ${0.6 * rIntensity})`;
-          ctx.beginPath();
-          ctx.arc(x, y, size, 0, Math.PI * 2);
-          ctx.fill();
-        }
-      } else if (frame.kind === 'fractal') {
-        // Рекурсивные треугольники
-        const depth = 5;
-        const drawTri = (x: number, y: number, size: number, lvl: number) => {
-          if (lvl === 0 || size < 2) return;
-          const h = size * Math.sqrt(3) / 2;
-          ctx.beginPath();
-          ctx.moveTo(x, y);
-          ctx.lineTo(x - size / 2, y + h);
-          ctx.lineTo(x + size / 2, y + h);
-          ctx.closePath();
-          ctx.strokeStyle = `hsla(${(hue + lvl * 30) % 360}, 100%, 70%, ${0.5 * rIntensity})`;
-          ctx.lineWidth = 1;
-          ctx.stroke();
-          const s2 = size / 2;
-          drawTri(x, y + h * 0.5, s2, lvl - 1);
-          drawTri(x - s2 / 2, y + h, s2, lvl - 1);
-          drawTri(x + s2 / 2, y + h, s2, lvl - 1);
-        };
-        const size = 280 + Math.sin(time) * 10;
-        drawTri(cx, cy - size * 0.4, size, depth);
-      } else if (frame.kind === 'echo') {
-        // Концентрические эхо-кольца
-        for (let i = 0; i < 12; i++) {
-          const phase = (time * 0.5 + i * 0.1) % 1;
-          const radius = phase * 250;
-          ctx.beginPath();
-          ctx.arc(cx, cy, radius, 0, Math.PI * 2);
-          ctx.strokeStyle = `hsla(${(hue + i * 30) % 360}, 100%, 70%, ${(1 - phase) * 0.6 * rIntensity})`;
-          ctx.lineWidth = 2;
-          ctx.stroke();
-        }
-      } else if (frame.kind === 'spiral') {
-        // Логарифмическая спираль
-        ctx.beginPath();
-        for (let a = 0; a < Math.PI * 8; a += 0.05) {
-          const rad = 4 * a + Math.sin(time + a) * 5;
-          const x = cx + Math.cos(a + time * 0.2) * rad;
-          const y = cy + Math.sin(a + time * 0.2) * rad;
-          if (a === 0) ctx.moveTo(x, y);
-          else ctx.lineTo(x, y);
-        }
-        ctx.strokeStyle = `hsla(${hue}, 100%, 75%, ${0.7 * rIntensity})`;
-        ctx.lineWidth = 2;
-        ctx.stroke();
-      }
-
-      rafRef.current = requestAnimationFrame(draw);
-    };
-    rafRef.current = requestAnimationFrame(draw);
-    return () => {
-      if (rafRef.current !== null) cancelAnimationFrame(rafRef.current);
-    };
-  }, [frame.seed, frame.kind, frame.resonance, breath]);
-
-  return (
-    <canvas
-      ref={canvasRef}
-      style={{
-        width: 'min(80vw, 80vh)',
-        height: 'min(80vw, 80vh)',
-        borderRadius: '50%',
-        boxShadow: `0 0 60px hsla(${(frame.seed * 47) % 360}, 100%, 50%, ${0.4 * frame.resonance})`,
-      }}
-    />
-  );
-}
-
-/* ── Reels: горизонтальная лента снизу ──────────────────────────────── */
-
-function Reels({
-  frames,
-  active,
-  onSelect,
-}: {
-  frames: DreamFrame[];
-  active: number;
-  onSelect: (i: number) => void;
-}) {
-  return (
-    <div
-      style={{
-        padding: '12px 16px 24px',
-        background: 'linear-gradient(to top, rgba(0,0,0,0.8), transparent)',
-      }}
-    >
-      <div
-        style={{
-          fontSize: 9,
-          letterSpacing: 3,
-          opacity: 0.4,
-          marginBottom: 10,
-          fontWeight: 700,
-        }}
-      >
-        СНЫ · REELS · 7 КВАНТОВ
-      </div>
-      <div
-        style={{
-          display: 'flex',
-          gap: 10,
-          overflowX: 'auto',
-          paddingBottom: 6,
-          scrollbarWidth: 'none',
-        }}
-      >
-        {frames.map((f, i) => {
-          const isActive = i === active;
-          const hue = (f.seed * 47) % 360;
-          return (
-            <motion.button
-              key={f.id}
-              onClick={() => onSelect(i)}
-              whileTap={{ scale: 0.95 }}
-              style={{
-                flexShrink: 0,
-                width: 72,
-                height: 96,
-                borderRadius: 12,
-                background: isActive
-                  ? `linear-gradient(135deg, hsla(${hue}, 100%, 60%, 0.4), hsla(${(hue + 60) % 360}, 100%, 50%, 0.4))`
-                  : 'rgba(255,255,255,0.05)',
-                border: isActive
-                  ? `1px solid hsla(${hue}, 100%, 70%, 0.8)`
-                  : '1px solid rgba(255,255,255,0.1)',
-                boxShadow: isActive ? `0 0 20px hsla(${hue}, 100%, 50%, 0.5)` : 'none',
-                cursor: 'pointer',
-                padding: 6,
-                display: 'flex',
-                flexDirection: 'column',
-                justifyContent: 'space-between',
-                position: 'relative',
-                overflow: 'hidden',
-              }}
-            >
-              <div
-                style={{
-                  fontSize: 8,
-                  letterSpacing: 1.5,
-                  color: isActive ? '#fff' : 'rgba(255,255,255,0.4)',
-                  fontWeight: 800,
-                  textAlign: 'left',
-                }}
-              >
-                #{i + 1}
-              </div>
-              <div
-                style={{
-                  width: '100%',
-                  height: 36,
-                  borderRadius: 6,
-                  background: `radial-gradient(circle, hsla(${hue}, 100%, 70%, ${0.5 + f.resonance * 0.4}), transparent 70%)`,
-                }}
-              />
-              <div
-                style={{
-                  fontSize: 7,
-                  letterSpacing: 1,
-                  color: isActive ? '#fff' : 'rgba(255,255,255,0.3)',
-                  fontWeight: 700,
-                  textAlign: 'right',
-                }}
-              >
-                {Math.round(f.resonance * 100)}%
-              </div>
-            </motion.button>
-          );
-        })}
-      </div>
-    </div>
   );
 }

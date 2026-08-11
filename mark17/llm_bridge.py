@@ -9,6 +9,8 @@ import urllib.request
 from dataclasses import dataclass
 from typing import Any
 
+from .max_prompt import system_prompt
+
 
 # MBA 2015 ~8GB RAM: qwen2.5:0.5b (~400MB). phi3:mini ~2.3GB — если хватает памяти.
 DEFAULT_MODEL = "qwen2.5:0.5b"
@@ -92,15 +94,14 @@ class LlmBridge:
         return self._available
 
     def build_prompt(self, event_type: str, context: str, memory_snippets: list[str]) -> str:
+        """Пользовательская часть запроса. Кто такой MAX — не здесь: это
+        системная хартия из max_prompt.py, она уходит отдельной ролью."""
         mem = "\n".join(f"- {m}" for m in memory_snippets[:5]) if memory_snippets else "(нет)"
-        return f"""Ты — локальный ассистент Mark 17 на MacBook Air (слабое железо, CPU).
-Событие: {event_type}
+        return f"""Событие: {event_type}
 Контекст: {context}
 
 Память:
-{mem}
-
-Дай короткий ответ (до 6 предложений): что проверить и 1–3 конкретные команды shell."""
+{mem}"""
 
     def ask(
         self,
@@ -141,8 +142,12 @@ class LlmBridge:
         body = {
             "model": self.model,
             "prompt": prompt,
+            "system": system_prompt(),
             "stream": False,
-            "options": {"num_predict": 256, "temperature": 0.3},
+            # 256 токенов хватало на «проверь то-то и вот команда», но хартия
+            # просит различать факт и допущение и называть неизвестное — на это
+            # нужен воздух, иначе ответ обрывается на полуслове.
+            "options": {"num_predict": 512, "temperature": 0.3},
         }
         data = json.dumps(body).encode("utf-8")
         req = urllib.request.Request(
@@ -188,7 +193,10 @@ class LlmBridge:
             )
         body = {
             "model": self.model,
-            "messages": [{"role": "user", "content": prompt}],
+            "messages": [
+                {"role": "system", "content": system_prompt()},
+                {"role": "user", "content": prompt},
+            ],
             "temperature": 0.3,
             "max_tokens": 512,
         }

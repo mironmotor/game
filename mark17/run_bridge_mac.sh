@@ -68,7 +68,12 @@ fi
 if port_busy "$PORT"; then
   warn "порт $PORT занят процессом '$(port_owner "$PORT")' — это не наш мост"
   ORIG_PORT="$PORT"
+  # 8791 пропускаем: это порт моста NOOA (nooa_bridge/server.py). Он может быть
+  # сейчас не поднят, но занять его — значит поломать NOOA при следующем старте,
+  # причём молча: оба отвечают на /health, и понять, кто именно ответил, тяжело.
   for candidate in $(seq $((ORIG_PORT + 1)) $((ORIG_PORT + 20))); do
+    [ "$candidate" = "8791" ] && continue
+    [ "$candidate" = "${MAX17_TTS_PORT:-8017}" ] && continue
     if ! port_busy "$candidate"; then PORT="$candidate"; break; fi
   done
   [ "$PORT" = "$ORIG_PORT" ] && \
@@ -131,8 +136,24 @@ if command -v caffeinate >/dev/null 2>&1; then
   say "caffeinate включён — Мак не заснёт, пока работает мост"
 fi
 
+# Веб-обучение. Два флага, и нужны оба: WEB_ENABLED разрешает брать факты из
+# сети вообще, AUTO_WEB — уходить в сеть самому, без запроса. Оба читает ядро
+# на этой машине (mark17/json_cli.py), а не Vercel: прописывать их в облаке
+# бессмысленно, там питоновского ядра нет.
+#
+# Включены по умолчанию; выключить — MAX17_WEB=false перед запуском.
+if [ "${MAX17_WEB:-true}" = "false" ]; then
+  WEB_ENABLED=false; AUTO_WEB=false
+  say "веб-обучение выключено (MAX17_WEB=false) — рост только локальный"
+else
+  WEB_ENABLED=true; AUTO_WEB=true
+  say "веб-обучение включено: MAX растёт из реальных источников"
+fi
+
 say "стартую мост Max17 на :$PORT (лог: $SERVER_LOG)"
 PORT="$PORT" \
+MAX17_WEB_ENABLED="$WEB_ENABLED" \
+MAX17_AUTO_WEB="$AUTO_WEB" \
 MAX17_BRIDGE_TOKEN="$TOKEN" \
 MAX17_LLM_ENABLED="$LLM_ENABLED" \
 MAX17_LLM_PROVIDER="$PROVIDER" \
@@ -156,8 +177,35 @@ done
 say "мост жив: http://127.0.0.1:$PORT/health"
 
 # ── туннель ───────────────────────────────────────────────────────────────────
+# Два режима.
+#
+# Постоянный (MAX17_TUNNEL=имя): cloudflared поднимает именованный туннель на
+# своём домене, адрес НЕ меняется между запусками. Тогда MAX17_BRIDGE_URL в
+# Vercel прописывается один раз и живёт вечно — ни перезаписи env, ни
+# пересборки после каждого перезапуска Мака.
+#
+# Одноразовый (по умолчанию): trycloudflare выдаёт新ый случайный адрес при
+# каждом старте. Работает без домена и без аккаунта, но каждый перезапуск
+# инвалидирует то, что записано в Vercel, и превью снова падает.
 PUBLIC_URL=""
+TUNNEL_MODE="quick"
 if command -v cloudflared >/dev/null 2>&1; then
+  if [ -n "${MAX17_TUNNEL:-}" ] && [ -n "${MAX17_TUNNEL_HOSTNAME:-}" ]; then
+    TUNNEL_MODE="named"
+    say "поднимаю постоянный туннель «$MAX17_TUNNEL» → $MAX17_TUNNEL_HOSTNAME"
+    cloudflared tunnel run --url "http://localhost:$PORT" "$MAX17_TUNNEL" >"$TUNNEL_LOG" 2>&1 &
+    TUNNEL_PID=$!
+    PUBLIC_URL="https://$MAX17_TUNNEL_HOSTNAME"
+    # Ждём, пока туннель реально начнёт отдавать /health, а не просто стартует:
+    # именованный туннель поднимается через DNS, и первые пару секунд имя ещё
+    # не резолвится.
+    ok=""
+    for _ in $(seq 1 40); do
+      if curl -fsS --max-time 2 "$PUBLIC_URL/health" >/dev/null 2>&1; then ok=1; break; fi
+      sleep 0.5
+    done
+    [ -n "$ok" ] || warn "туннель поднят, но $PUBLIC_URL/health пока не отвечает — смотри $TUNNEL_LOG"
+  else
   say "поднимаю cloudflared-туннель (лог: $TUNNEL_LOG)"
   cloudflared tunnel --url "http://localhost:$PORT" >"$TUNNEL_LOG" 2>&1 &
   TUNNEL_PID=$!
@@ -176,6 +224,7 @@ if command -v cloudflared >/dev/null 2>&1; then
     sleep 0.5
   done
   [ -n "$PUBLIC_URL" ] || warn "не дождался URL туннеля — смотри $TUNNEL_LOG"
+  fi
 else
   warn "cloudflared не установлен: brew install cloudflared"
   warn "пока мост доступен только локально: http://127.0.0.1:$PORT"
@@ -188,25 +237,49 @@ say "BRIDGE URL : ${PUBLIC_URL:-http://127.0.0.1:$PORT}"
 say "TOKEN      : $TOKEN"
 say "LLM        : $([ "$LLM_ENABLED" = true ] && echo "ollama / $MODEL" || echo "выключен (детерминированный)")"
 echo
-# Автопрописывание в Vercel: работает, если `vercel login` сделан и проект слинкован
+# Автопрописывание в Vercel: работает, если `vercel login` сделан и проект слинкован.
+#
+# Переменные ставим и в production, и в preview. Раньше — только в production, и
+# из-за этого любая ветка с превью-деплоем моста не видела: переменные окружения
+# у Vercel раздельные по окружениям, превью production-значения не наследует.
+# Вместо живого моста превью брало адрес из bridge.fallback.json — то есть
+# прошлый туннель, которого давно нет, и падало с «fetch failed».
+set_vercel_env() {
+  local name="$1" value="$2" env="$3"
+  vercel env rm "$name" "$env" --yes >/dev/null 2>&1 || true
+  printf %s "$value" | vercel env add "$name" "$env" >/dev/null 2>&1
+}
+
 if [ -n "$PUBLIC_URL" ] && command -v vercel >/dev/null 2>&1 && [ -d "$ROOT/.vercel" ]; then
-  say "обновляю MAX17_BRIDGE_URL в Vercel автоматически…"
-  (cd "$ROOT" \
-    && vercel env rm MAX17_BRIDGE_URL production --yes >/dev/null 2>&1 || true \
-    && printf %s "$PUBLIC_URL" | vercel env add MAX17_BRIDGE_URL production >/dev/null 2>&1 \
-    && vercel env rm MAX17_BRIDGE_TOKEN production --yes >/dev/null 2>&1 || true \
-    && printf %s "$TOKEN" | vercel env add MAX17_BRIDGE_TOKEN production >/dev/null 2>&1 \
-    && vercel --prod --yes >/dev/null 2>&1 \
-    && say "Vercel обновлён и передеплоен — прод смотрит на этот мост") \
-    || warn "не удалось обновить Vercel автоматически — пропиши env руками (команды ниже)"
+  # Из этого репозитория собирается несколько проектов Vercel (game, game-ultra,
+  # game-ultra-max). Переменные уходят ровно в тот, на который смотрит
+  # .vercel/project.json — и если открываешь превью другого проекта, мост там
+  # так и останется ненастроенным. Раньше это молчало; теперь имя видно.
+  LINKED="$(python3 -c 'import json;print(json.load(open(".vercel/project.json")).get("projectName") or "?")' 2>/dev/null || echo '?')"
+  say "Vercel-проект: $LINKED  ← переменные уйдут сюда"
+  say "если открываешь превью другого проекта — мост там не заработает"
+  say "обновляю координаты моста в Vercel (production + preview)…"
+  if (cd "$ROOT" \
+      && set_vercel_env MAX17_BRIDGE_URL   "$PUBLIC_URL" production \
+      && set_vercel_env MAX17_BRIDGE_TOKEN "$TOKEN"      production \
+      && set_vercel_env MAX17_BRIDGE_URL   "$PUBLIC_URL" preview \
+      && set_vercel_env MAX17_BRIDGE_TOKEN "$TOKEN"      preview \
+      && vercel --prod --yes >/dev/null 2>&1); then
+    say "Vercel обновлён: прод смотрит на этот мост"
+    say "превью подхватят мост при следующей сборке ветки"
+  else
+    warn "не удалось обновить Vercel автоматически — пропиши env руками (команды ниже)"
+  fi
 fi
 
 if [ -n "$PUBLIC_URL" ]; then
   say "проверка:  curl $PUBLIC_URL/health"
   echo
   say "Пропиши в Vercel (после vercel login, из папки проекта):"
-  printf '  printf %%s "%s" | vercel env add MAX17_BRIDGE_URL production\n' "$PUBLIC_URL"
-  printf '  printf %%s "%s" | vercel env add MAX17_BRIDGE_TOKEN production\n' "$TOKEN"
+  for env in production preview; do
+    printf '  printf %%s "%s" | vercel env add MAX17_BRIDGE_URL %s\n' "$PUBLIC_URL" "$env"
+    printf '  printf %%s "%s" | vercel env add MAX17_BRIDGE_TOKEN %s\n' "$TOKEN" "$env"
+  done
   printf '  vercel --prod\n'
   echo
   warn "Туннель живёт, пока работает этот скрипт и Мак не спит."
