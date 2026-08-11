@@ -278,6 +278,29 @@ async function playPcmStream(
 }
 
 /** Озвучить текст: MAX Voice → ElevenLabs → системный голос. */
+/** Чем реально закончилась последняя попытка озвучки. */
+export interface VoiceOutcome {
+  /** Кто произнёс: провайдер из ответа, либо 'system' при полной деградации. */
+  spokeBy: 'max-local' | 'elevenlabs' | 'system';
+  /** Голос, которым озвучили (из заголовка ответа). */
+  voice?: string;
+  /** Почему предпочтённый провайдер не смог — если он не смог. */
+  fallbackReason?: string;
+}
+
+let lastOutcome: VoiceOutcome | null = null;
+
+export function getLastVoiceOutcome(): VoiceOutcome | null {
+  return lastOutcome;
+}
+
+function recordOutcome(outcome: VoiceOutcome): void {
+  lastOutcome = outcome;
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new CustomEvent('max:voice-outcome', { detail: outcome }));
+  }
+}
+
 export async function speakNeural(text: string, hooks?: VoiceHooks): Promise<void> {
   const clean = text.replace(/\s+/g, ' ').trim();
   if (!clean) return;
@@ -314,6 +337,11 @@ export async function speakNeural(text: string, hooks?: VoiceHooks): Promise<voi
     });
     const ct = res.headers.get('content-type') || '';
     if (!res.ok || !ct.includes('audio')) throw new Error(`tts_${res.status}`);
+    recordOutcome({
+      spokeBy: (res.headers.get('x-tts-provider') as VoiceOutcome['spokeBy']) || 'system',
+      voice: res.headers.get('x-tts-voice') || undefined,
+      fallbackReason: res.headers.get('x-tts-fallback') || undefined,
+    });
     const streamFormat = res.headers.get('x-tts-stream');
     if (streamFormat === 'pcm_s16le' && context && res.body) {
       const sampleRate = Number(res.headers.get('x-tts-sample-rate'));
@@ -343,6 +371,10 @@ export async function speakNeural(text: string, hooks?: VoiceHooks): Promise<voi
     const started = session.started;
     cancelSession(session, started);
     if (started) return;
+    recordOutcome({
+      spokeBy: 'system',
+      fallbackReason: err instanceof Error ? err.message : 'tts_failed',
+    });
     jarvisSpeak(clean, hooks); // системный голос — деградированный, но рабочий
   }
 }

@@ -16,10 +16,18 @@ import {
   setPersona,
   setVoiceId,
   speakNeural,
+  getLastVoiceOutcome,
   type NeuralVoice,
   type NeuralProvider,
   type Persona,
+  type VoiceOutcome,
 } from '@/lib/neural-voice';
+
+const PROVIDER_NAME: Record<VoiceOutcome['spokeBy'], string> = {
+  'max-local': 'MAX Voice',
+  elevenlabs: 'ElevenLabs',
+  system: 'системный голос',
+};
 
 const TEST_LINE: Record<Persona, string> = {
   jarvis: 'Системы в норме, сэр. Я на связи и готов к работе.',
@@ -33,6 +41,7 @@ export default function VoicePicker() {
   const [providers, setProviders] = useState<NeuralProvider[]>([]);
   const [status, setStatus] = useState<'loading' | 'ok' | 'system' | 'error'>('loading');
   const [testing, setTesting] = useState(false);
+  const [outcome, setOutcome] = useState<VoiceOutcome | null>(null);
 
   useEffect(() => {
     const p = getPersona();
@@ -65,6 +74,7 @@ export default function VoicePicker() {
     setTesting(true);
     try {
       await speakNeural(TEST_LINE[persona]);
+      setOutcome(getLastVoiceOutcome());
     } finally {
       setTimeout(() => setTesting(false), 600);
     }
@@ -171,6 +181,19 @@ export default function VoicePicker() {
         {status === 'error' && <span className="text-[10px] text-rose-300/80">Голосовые ядра недоступны — играю системным.</span>}
         {status === 'loading' && <span className="text-[10px] text-white/40">загрузка голосов…</span>}
       </div>
+
+      {outcome && (
+        <p
+          className={cn(
+            'mt-1.5 text-[10px] leading-relaxed',
+            outcome.fallbackReason ? 'text-amber-200/80' : 'text-emerald-200/70',
+          )}
+        >
+          Озвучил: {PROVIDER_NAME[outcome.spokeBy]}
+          {outcome.voice ? ` · ${outcome.voice}` : ''}
+          {outcome.fallbackReason ? ` — выбранный не смог: ${outcome.fallbackReason}` : ''}
+        </p>
+      )}
 
       <p className="mt-1.5 text-[10px] leading-relaxed text-white/35">
         Персона меняет голос и приветствие. MAX сначала говорит локально, затем через облачный резерв.
