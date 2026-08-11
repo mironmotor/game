@@ -161,8 +161,35 @@ done
 say "мост жив: http://127.0.0.1:$PORT/health"
 
 # ── туннель ───────────────────────────────────────────────────────────────────
+# Два режима.
+#
+# Постоянный (MAX17_TUNNEL=имя): cloudflared поднимает именованный туннель на
+# своём домене, адрес НЕ меняется между запусками. Тогда MAX17_BRIDGE_URL в
+# Vercel прописывается один раз и живёт вечно — ни перезаписи env, ни
+# пересборки после каждого перезапуска Мака.
+#
+# Одноразовый (по умолчанию): trycloudflare выдаёт新ый случайный адрес при
+# каждом старте. Работает без домена и без аккаунта, но каждый перезапуск
+# инвалидирует то, что записано в Vercel, и превью снова падает.
 PUBLIC_URL=""
+TUNNEL_MODE="quick"
 if command -v cloudflared >/dev/null 2>&1; then
+  if [ -n "${MAX17_TUNNEL:-}" ] && [ -n "${MAX17_TUNNEL_HOSTNAME:-}" ]; then
+    TUNNEL_MODE="named"
+    say "поднимаю постоянный туннель «$MAX17_TUNNEL» → $MAX17_TUNNEL_HOSTNAME"
+    cloudflared tunnel run --url "http://localhost:$PORT" "$MAX17_TUNNEL" >"$TUNNEL_LOG" 2>&1 &
+    TUNNEL_PID=$!
+    PUBLIC_URL="https://$MAX17_TUNNEL_HOSTNAME"
+    # Ждём, пока туннель реально начнёт отдавать /health, а не просто стартует:
+    # именованный туннель поднимается через DNS, и первые пару секунд имя ещё
+    # не резолвится.
+    ok=""
+    for _ in $(seq 1 40); do
+      if curl -fsS --max-time 2 "$PUBLIC_URL/health" >/dev/null 2>&1; then ok=1; break; fi
+      sleep 0.5
+    done
+    [ -n "$ok" ] || warn "туннель поднят, но $PUBLIC_URL/health пока не отвечает — смотри $TUNNEL_LOG"
+  else
   say "поднимаю cloudflared-туннель (лог: $TUNNEL_LOG)"
   cloudflared tunnel --url "http://localhost:$PORT" >"$TUNNEL_LOG" 2>&1 &
   TUNNEL_PID=$!
