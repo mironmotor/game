@@ -545,7 +545,11 @@ KNOWLEDGE CONNECTS.
 
 CREATION TRANSFORMS.
 
-THE FUTURE REMAINS OPEN."""
+THE FUTURE REMAINS OPEN.
+
+━━━━━━━━━━━━━━━━━━━━
+
+MIRON GOD"""
 
 
 # Хартия задаёт ценности, но не формат ответа. Локальная модель на слабом
