@@ -1,0 +1,19 @@
+# Generated artifacts (reproducible via `python3 main.py`)
+reports/output/*.md
+reports/output/*.csv
+reports/output/*.html
+reports/output/*.png
+!reports/output/.gitkeep
+
+# Local data dumps
+data/storage/*.csv
+data/storage/*.db
+
+# Trained model artifacts (reproducible via `python3 main.py train`)
+ml/models/*.json
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
