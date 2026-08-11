@@ -136,8 +136,24 @@ if command -v caffeinate >/dev/null 2>&1; then
   say "caffeinate включён — Мак не заснёт, пока работает мост"
 fi
 
+# Веб-обучение. Два флага, и нужны оба: WEB_ENABLED разрешает брать факты из
+# сети вообще, AUTO_WEB — уходить в сеть самому, без запроса. Оба читает ядро
+# на этой машине (mark17/json_cli.py), а не Vercel: прописывать их в облаке
+# бессмысленно, там питоновского ядра нет.
+#
+# Включены по умолчанию; выключить — MAX17_WEB=false перед запуском.
+if [ "${MAX17_WEB:-true}" = "false" ]; then
+  WEB_ENABLED=false; AUTO_WEB=false
+  say "веб-обучение выключено (MAX17_WEB=false) — рост только локальный"
+else
+  WEB_ENABLED=true; AUTO_WEB=true
+  say "веб-обучение включено: MAX растёт из реальных источников"
+fi
+
 say "стартую мост Max17 на :$PORT (лог: $SERVER_LOG)"
 PORT="$PORT" \
+MAX17_WEB_ENABLED="$WEB_ENABLED" \
+MAX17_AUTO_WEB="$AUTO_WEB" \
 MAX17_BRIDGE_TOKEN="$TOKEN" \
 MAX17_LLM_ENABLED="$LLM_ENABLED" \
 MAX17_LLM_PROVIDER="$PROVIDER" \
