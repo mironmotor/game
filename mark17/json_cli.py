@@ -125,6 +125,8 @@ ALLOWED_EVENTS = frozenset(
         "health",
         "chrono_day",
         "reality",
+        # MAX VISION: фото и видео как отдельная способность, а не поток с камеры.
+        "see",
         # Визуальные режимы GAME (Воронка, Симуляция, Инбокс, ДЕКОДЕР).
         "big_idea",
         "simulation",
@@ -1605,6 +1607,108 @@ def _dispatch_result(event: Event, intent: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+VIDEO_SUFFIXES = {".mp4", ".mov", ".m4v", ".webm", ".avi", ".mkv"}
+
+
+def _handle_see(event: Event, stores: Mark17Stores) -> dict[str, Any]:
+    """MAX VISION: посмотреть фото или видео и запомнить увиденное.
+
+    Зрение здесь — способность ядра, а не сенсор HUD: увиденное ложится в
+    память и в синапс-граф наравне с прочитанным и услышанным, иначе кадр
+    исчезает сразу после того, как его описали.
+
+    payload: path (файл), mode ('auto'|'photo'|'video'|'corners'),
+             depth ('auto'|'quick'|'full'), eye ('auto'|'local'|'cloud'),
+             branches (bool — развернуть ветки того, что могло бы дальше).
+    """
+    from pathlib import Path as _Path
+
+    from mark17 import vision_core as vision
+
+    raw_path = str(event.payload.get("path") or event.payload.get("text") or "").strip()
+    if not raw_path:
+        return {"ok": False, "route": "see", "error": "нечего смотреть: нет path"}
+    path = _Path(raw_path).expanduser()
+    if not path.exists():
+        return {"ok": False, "route": "see", "error": f"файл не найден: {path}"}
+
+    mode = str(event.payload.get("mode") or "auto").lower()
+    if mode == "auto":
+        mode = "video" if path.suffix.lower() in VIDEO_SUFFIXES else "photo"
+    eye = str(event.payload.get("eye") or "auto").lower()
+    depth = str(event.payload.get("depth") or "auto").lower()
+
+    try:
+        if mode == "video":
+            seen = vision.perceive_video(path, count=int(event.payload.get("frames") or 6), prefer=eye)
+        elif mode == "corners":
+            seen = vision.perceive_corners(path, prefer=eye)
+        else:
+            seen = vision.perceive(path, depth=depth, prefer=eye)
+    except Exception as exc:  # noqa: BLE001 - слепота не должна ронять ядро
+        return {"ok": False, "route": "see", "error": f"зрение не сработало: {exc}"}
+
+    text = str(seen.get("text") or "").strip()
+    if not text:
+        return {"ok": False, "route": "see", "error": "ничего не разглядел", "vision": seen}
+
+    # Увиденное — такое же воспоминание, как услышанное. Пишем и в эпизодическую
+    # память, и в векторную: первое даёт «когда», второе — «на что похоже».
+    note = text[:600]
+    seen_event = Event(type="see", payload={"note": note, "source": str(path), "mode": mode}, source="vision")
+    evaluation = {"score": 0.75, "reason": f"увидел: {path.name}", "store_memory": True, "reinforce": "vision"}
+    try:
+        stores.brain.memory.remember(seen_event, hint=note[:200], action="seeing")
+        stores.vector_memory.remember(seen_event, evaluation)
+    except Exception:  # noqa: BLE001 - память лучше пропустить, чем потерять взгляд
+        pass
+
+    # Синапс «этот файл ↔ что в нём было»: чтобы через неделю MAX нашёл кадр
+    # по смыслу, а не по имени файла.
+    try:
+        stores.synapse_graph.upsert_synapse(
+            source_type="media",
+            source_id=path.name,
+            target_type="sight",
+            target_id=note[:80],
+            relation_type="seen_as",
+            weight=0.7,
+        )
+    except Exception:  # noqa: BLE001
+        pass
+
+    result: dict[str, Any] = {
+        "ok": True,
+        "route": "see",
+        "vision": seen,
+        "answer": {"text": text, "source": "vision", "confidence": 0.75},
+        "memory": {"stored": True},
+        "next_adaptation": "Увиденное записано в память ядра.",
+        "self_evaluation": {**evaluation, "store_memory": True},
+    }
+
+    # Ветки: увиденное — это состояние мира, из которого есть продолжения.
+    # Считаем их только по просьбе: каждая ветка стоит отдельного запроса.
+    if event.payload.get("branches"):
+        try:
+            from mark17 import dream_sim
+
+            def _llm(prompt: str) -> str:
+                res = gonka_chat(
+                    [{"role": "user", "content": prompt}], role="chat", max_tokens=600, temperature=0.7
+                )
+                return res.text or ""
+
+            result["branches"] = dream_sim.generate(
+                "Вот что видно прямо сейчас:\n" + text + "\n\nРазверни, что могло бы произойти дальше.",
+                _llm,
+            )
+        except Exception as exc:  # noqa: BLE001 - ветки необязательны
+            result["branches_error"] = str(exc)
+
+    return result
+
+
 def _handle_music_observation(event: Event, stores: Mark17Stores) -> dict[str, Any]:
     """Phase 9: one listening window. Analyze → remember → grow taste history,
     so bridges link «что играло» with the moment, and Dreaming composes later."""
@@ -3063,6 +3167,8 @@ def _handle_event(event: Event, args: argparse.Namespace, stores: Mark17Stores) 
         return _handle_ingest_corpus(event, stores)
     if event.type == "introspect":
         return _handle_introspect(stores)
+    if event.type == "see":
+        return _handle_see(event, stores)
     if event.type in OUTCOME_EVENT_TYPES:
         res = _handle_outcome_event(event, brain, vector_memory, synapse_graph, working_memory)
         _succ = {

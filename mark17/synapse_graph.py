@@ -51,6 +51,9 @@ RELATION_TYPES = frozenset(
         "enables",
         "emotion_of",
         "action_result",
+        # MAX VISION: «этот файл был увиден вот так». Без своего типа связь
+        # схлопывалась в related_to, и граф терял, что знание пришло глазами.
+        "seen_as",
         "alias_of",
         "duplicate_of",
         "validated_by",

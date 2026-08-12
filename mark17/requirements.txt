@@ -7,6 +7,13 @@ numpy>=1.24.0
 # hnswlib>=0.8.0   # full-corpus ANN recall; without it — exact scan
 # pypdf>=4.0       # PDF ingest into «Корпус» (ingest_corpus)
 
+# MAX VISION (mark17/vision_core.py). Зрение работает и без них — просто уже:
+# без Pillow нет разбора по углам, без imageio нет видео. Сами глаза (Ollama
+# с VLM или Gemini) в pip не ставятся, см. docs/08-max-vision.md.
+# Pillow>=10.0          # нарезка кадра на углы, подготовка кадров видео
+# imageio>=2.31         # чтение видеофайлов
+# imageio-ffmpeg>=0.4   # ffmpeg-бинарник для imageio (иначе нужен системный ffmpeg)
+
 # Optional demo-only dependencies (not required by json_cli.py or /api/max17):
 # matplotlib>=3.7.0
 # snntorch>=0.7.0
