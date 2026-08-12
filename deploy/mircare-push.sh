@@ -58,6 +58,19 @@ say "диск:       $(ssh "$SERVER" "df -h / | awk 'NR==2{print \$4\" своб�
 say "память:     $(ssh "$SERVER" "free -m | awk 'NR==2{print \$7\" МБ доступно\"}'")"
 say "state:      $(ssh "$SERVER" "du -sh $SITE/mark17/state 2>/dev/null | cut -f1") — останется нетронутой"
 
+# Сборку делает наш Next, а запускает серверный. Разошлись версии — `next start`
+# не прочитает чужой .next и отдаст 502. Ловим это здесь, до сборки, потому что
+# иначе ошибка всплывает через три минуты и уже после подмены файлов на проде.
+# Спека в package.json («^15.4.9») совпадением НЕ является: сервер ставили без
+# lock-файла, и он подтянул более свежий патч.
+LOCAL_NEXT="$(node -p "require('next/package.json').version" 2>/dev/null)"
+SERVER_NEXT="$(ssh "$SERVER" "cd $SITE && node -p 'require(\"next/package.json\").version'" 2>/dev/null)"
+say "next:       локально ${LOCAL_NEXT:-?}, на сервере ${SERVER_NEXT:-?}"
+if [ -n "$SERVER_NEXT" ] && [ "$LOCAL_NEXT" != "$SERVER_NEXT" ]; then
+  fail "версии Next разошлись — сборка не запустится на сервере (502).
+       Выровняй и повтори:  npm i next@$SERVER_NEXT"
+fi
+
 if [ "$MODE" = "scan" ]; then
   echo
   say "Ничего не сделано — это разведка."
@@ -110,19 +123,28 @@ say "везу ядро mark17 (без state/)…"
 rsync -az --exclude='state/' --exclude='__pycache__/' --exclude='*.pyc' \
   mark17/ "$SERVER:$SITE/mark17/" || fail "не довёз mark17"
 
+# package.json везём как справку о том, из чего собрано. Зависимости на сервере
+# НЕ переустанавливаем: `npm ci` сначала сносит node_modules, и если ему не хватит
+# памяти (а её там меньше двухсот мегабайт), сайт останется вообще без модулей —
+# то есть лечение опаснее болезни. Версия Next сверена выше, остальное совпадает.
 if ! ssh "$SERVER" "cmp -s $SITE/package.json /dev/stdin" < package.json; then
-  say "package.json изменился — обновляю зависимости на сервере…"
+  say "package.json разошёлся — везу его, зависимости не трогаю"
   rsync -az package.json package-lock.json "$SERVER:$SITE/"
-  ssh "$SERVER" "cd $SITE && npm ci --omit=dev" \
-    || warn "npm ci не прошёл (вероятно память) — сборка может не подняться"
 fi
 
 # ── 5. перезапуск и проверка ─────────────────────────────────────────────────
 say "перезапускаю…"
 ssh "$SERVER" 'pm2 restart game --update-env' >/dev/null 2>&1 || fail "pm2 не перезапустился"
-sleep 5
 
-CODE="$(curl -s -o /dev/null -w '%{http_code}' https://mir.care)"
+# Ждём до минуты: на слабой машине Next поднимается по-разному, и поспешный
+# вывод «502» откатил бы живую сборку просто за медлительность.
+say "жду, пока поднимется…"
+CODE="000"
+for _ in 1 2 3 4 5 6 7 8 9 10 11 12; do
+  sleep 5
+  CODE="$(curl -s -o /dev/null -w '%{http_code}' https://mir.care)"
+  [ "$CODE" = "200" ] && break
+done
 if [ "$CODE" = "200" ]; then
   say "готово: https://mir.care отвечает $CODE"
   ssh "$SERVER" "rm -rf $SITE/.next.backup"
