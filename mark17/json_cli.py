@@ -2313,6 +2313,41 @@ def _detect_locale(text: str, fallback: str = "ru") -> str:
     return "en"
 
 
+def _vision_answer_ok(text: str, question: str) -> bool:
+    """Справилось ли мировоззрение MAX VISION с ролью системного промпта.
+
+    Манифест написан по-английски и столбиком лозунгов — модель, получив его,
+    иногда отвечает в его же форме вместо разговора. Ловим ровно два таких
+    провала (пустота, чужой язык, речь-манифест) и ничего больше: судить о
+    содержании ответа здесь нельзя, это не цензор, а страховка формы.
+    """
+    body = (text or "").strip()
+    if len(body) < 2:
+        return False
+
+    def cyr(s: str) -> int:
+        return sum(1 for c in s.lower() if "а" <= c <= "я" or c == "ё")
+
+    def lat(s: str) -> int:
+        return sum(1 for c in s.lower() if "a" <= c <= "z")
+
+    # Спросили по-русски, ответили латиницей — промпт утянул язык на себя.
+    if cyr(question) > 3 and lat(body) > cyr(body):
+        return False
+
+    # Речь-манифест: столбик коротких строк капсом, как разделы текста выше.
+    lines = [ln.strip() for ln in body.splitlines() if ln.strip()]
+    if len(lines) >= 6:
+        shouty = sum(
+            1
+            for ln in lines
+            if len(ln) <= 60 and ln == ln.upper() and (lat(ln) + cyr(ln)) >= 3
+        )
+        if shouty * 2 >= len(lines):
+            return False
+    return True
+
+
 def _synthesize_natural_answer(result: dict[str, Any], event: Event, working_memory: WorkingMemory) -> None:
     """Optional voice layer: turn the retrieved source-backed facts + live camera
     vision + the deterministic draft into a natural reply via the Gonka
@@ -2358,6 +2393,7 @@ def _synthesize_natural_answer(result: dict[str, Any], event: Event, working_mem
     # (payload persona="sage"). Память и охрана жизни остаются в обоих случаях.
     persona_mode = str(event.payload.get("persona") or "").lower()
     cache_ok = True  # кризис/тревога не кэшируем — ответ должен генериться свежим
+    vision_text = ""  # непустой ⇒ в system стоит MAX VISION и возможен откат к max_persona
     if persona_mode == "sage":
         from mark17.sage_prompt import SAGE_SYSTEM
 
@@ -2369,13 +2405,15 @@ def _synthesize_natural_answer(result: dict[str, Any], event: Event, working_mem
         except Exception:  # noqa: BLE001
             pass
     else:
-        # Личность MAX (живой персонаж), а не исполнительный JARVIS-контракт —
-        # чтобы голос был своим, а не «меню задач».
-        from mark17.max_persona import max_self
+        # Мировоззрение MAX VISION (mark17/max_vision.py) — основная личность.
+        # Не исполнительный JARVIS-контракт и не «меню задач»: способ мыслить
+        # плюс речевой контракт, чтобы манифест не зачитывался вслух.
+        from mark17.max_vision import max_mind
 
         # Личность строится под ВЛАДЕЛЬЦА (MAX17_OWNER): на чужой машине MAX
         # становится своим для того человека, а не копией чужого спутника.
-        system = max_self() + "\n\n" + RUNTIME_GROUNDING
+        vision_text = max_mind()
+        system = vision_text + "\n\n" + RUNTIME_GROUNDING
         # Сердце — слой привязанности: MAX отвечает из памяти о том, что важно создателю,
         # подстраивая тепло под его тон. Никогда не ломает голос (мягкий фолбэк).
         try:
@@ -2433,22 +2471,43 @@ def _synthesize_natural_answer(result: dict[str, Any], event: Event, working_mem
     from mark17.llm_config import voice_max_tokens
 
     voice_max = voice_max_tokens("chat")
-    res = gonka_chat(
-        [
-            {"role": "system", "content": system},
-            {"role": "user", "content": user},
-        ],
-        role="chat",
-        max_tokens=voice_max,
-        temperature=0.35,
-        cache=cache_ok,
-    )
+
+    def _ask(system_prompt: str):
+        return gonka_chat(
+            [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user},
+            ],
+            role="chat",
+            max_tokens=voice_max,
+            temperature=0.35,
+            cache=cache_ok,
+        )
+
+    res = _ask(system)
+
+    # Подмога: если мировоззрение не справилось с ролью голоса (пустота, чужой
+    # язык, речь-манифест), переспрашиваем прежней личностью MAX. Всё остальное
+    # в промпте — сердце, миссии, заземление, языковой контракт — остаётся как
+    # было: подменяется ровно кусок персоны. В кризисе (system == heart_block)
+    # персоны в промпте нет, и подмена не сработает — так и задумано, там
+    # говорит только сердце.
+    persona_used = "vision" if vision_text else "sage"
+    if vision_text and vision_text in system and not _vision_answer_ok(res.text or "", question):
+        from mark17.max_persona import max_self
+
+        legacy = _ask(system.replace(vision_text, max_self()))
+        if legacy.ok and legacy.text:
+            res = legacy
+            persona_used = "max_persona (откат: видение не удержало голос)"
+
     voice: dict[str, Any] = {
         "provider": "gonka",
         "status": res.status,
         "model": res.model,
         "role": res.role,
         "latency_ms": res.latency_ms,
+        "persona": persona_used,
     }
     if res.error:
         voice["error"] = res.error
