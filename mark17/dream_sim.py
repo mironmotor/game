@@ -94,6 +94,94 @@ def deterministic_params(prompt: str) -> dict[str, Any]:
     return out
 
 
+def params_from_measures(measures: dict[str, Any]) -> dict[str, Any]:
+    """Параметры мира прямо из измерений кадра, минуя слова.
+
+    До сих пор сон строился так: текст описания → хэш → совпадение со списком
+    тем. Из-за этого кадр Cyberpunk окрашивался в зелёно-бирюзовый — не потому
+    что он такой, а потому что в описании попадалось слово «кибер», а в теме
+    «кибер» записаны hue 140/180. Мир красился в цвет СЛОВА.
+
+    Здесь всё берётся из самого кадра: тон — из доминирующего цвета, хаос — из
+    энтропии, скорость — из силы движения, характер потока — из того, на чём
+    кадр держится, аттрактор — из формы гистограммы направлений. Слов в этой
+    цепочке нет вообще, поэтому сон повторяет то, что видно, а не то, что
+    сказано.
+    """
+    pal = measures.get("палитра") or []
+    det = measures.get("детали") or {}
+    rhy = measures.get("ритм") or {}
+    mot = measures.get("движение") or {}
+    comp = measures.get("композиция") or {}
+    geo = measures.get("геометрия") or {}
+
+    # Цвет сна берётся из НАСЫЩЕННЫХ оттенков, а не из доминирующего. В тёмном
+    # кадре доминирует чёрный, у него разница каналов на уровне шума — и тон
+    # мира определялся бы случайностью. Цвет сцене задают акценты: неон, огонь,
+    # небо, даже когда занимают три процента кадра.
+    def _vivid() -> list[int]:
+        out: list[int] = []
+        for entry in pal:
+            rgb = entry.get("rgb") or [0, 0, 0]
+            r, g, b = (float(c) / 255.0 for c in rgb)
+            mx, mn = max(r, g, b), min(r, g, b)
+            span = mx - mn
+            if span < 0.12 or mx < 0.12:
+                continue  # серое, чёрное или белое — тона не несёт
+            if mx == r:
+                hue = (60 * ((g - b) / span)) % 360
+            elif mx == g:
+                hue = 60 * ((b - r) / span) + 120
+            else:
+                hue = 60 * ((r - g) / span) + 240
+            out.append(int(hue) % 360)
+        return out
+
+    vivid = _vivid()
+
+    def hue_of(idx: int, fallback: int) -> int:
+        if idx < len(vivid):
+            return vivid[idx]
+        # Нет ни одного насыщенного цвета — кадр действительно серый, и врать
+        # про его тон не надо: берём запасной, а не шум почти-чёрного.
+        return vivid[0] if vivid else fallback
+
+    # Энтропия по 32 корзинам упирается в пять — делим на неё, а не на глаз.
+    chaos = _clamp(float(det.get("энтропия") or 0.0) / 5.0, 0.05, 0.9)
+    speed = _clamp(0.4 + float(mot.get("сила") or 0.0) * 12.0, 0.4, 2.5)
+
+    holds = str(rhy.get("держится_на") or "")
+    flow = "wave" if "крупных" in holds else ("burst" if "фактуре" in holds else "orbit")
+
+    center = comp.get("центр_масс") or [0.5, 0.5]
+    off = abs(float(center[0]) - 0.5) + abs(float(center[1]) - 0.5)
+    zoom = round(_clamp(1.4 - off * 1.2, 0.8, 1.4), 2)
+
+    # Аттрактор по тому, сколько направлений держат кадр: два сильных — сцена
+    # с осями, один — поток, размазанные — мягкий вихрь.
+    peaks = int(geo.get("пиков_направлений") or 0)
+    if peaks >= 4:
+        attractor = "halvorsen"
+    elif peaks == 3:
+        attractor = "thomas"
+    elif peaks == 2:
+        attractor = "lorenz"
+    else:
+        attractor = "aizawa"
+
+    return {
+        "attractor": attractor,
+        "hue": hue_of(0, 210),
+        "hue2": hue_of(1, 280),
+        "speed": round(speed, 2),
+        "chaos": round(chaos, 2),
+        "flow": flow,
+        "zoom": zoom,
+        "thought": _THOUGHTS[int(round(chaos * 100)) % len(_THOUGHTS)],
+        "source": "measures",
+    }
+
+
 def build_prompt(user_prompt: str) -> str:
     return (
         "Ты — ядро визуальной симуляции из частиц. По описанию сцены выбери параметры.\n"
