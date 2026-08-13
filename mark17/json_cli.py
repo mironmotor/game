@@ -1792,6 +1792,33 @@ def _handle_see(event: Event, stores: Mark17Stores) -> dict[str, Any]:
         except Exception:  # noqa: BLE001 - физика необязательна, зрение важнее
             pass
 
+    # Увиденное входит в ту же ленту наблюдений, что и камера: среда умеет
+    # помнить недавние кадры и замечать переходы («стало темнее», «появилось
+    # движение»), копя из них ассоциации в граф. До сих пор она питалась только
+    # камерой HUD, и присланные фотографии проходили мимо этой памяти.
+    if pixels and not pixels.get("error"):
+        try:
+            from mark17 import vision_pixels as _vp
+
+            observation = _vp.as_observation(pixels)
+            env = analyze_environment(observation, stores.working_memory.get_env_history(limit=8))
+            stores.working_memory.push_env_observation(observation)
+            result["environment"] = {
+                k: env[k] for k in ("state", "transitions", "conclusions", "presence") if k in env
+            }
+            for assoc in env.get("associations") or []:
+                if isinstance(assoc, dict) and assoc.get("from") and assoc.get("to"):
+                    stores.synapse_graph.upsert_synapse(
+                        source_type="concept",
+                        source_id=str(assoc["from"]),
+                        target_type="concept",
+                        target_id=str(assoc["to"]),
+                        relation_type=str(assoc.get("relation") or "related_to"),
+                        weight=float(assoc.get("weight") or 0.5),
+                    )
+        except Exception:  # noqa: BLE001 - среда необязательна, зрение важнее
+            pass
+
     # Зрительная память: подпись кадра из его же измерений. Сначала ищем, не
     # видели ли похожее — и только потом запоминаем, иначе кадр найдёт сам
     # себя и любое узнавание станет бессмысленным.
@@ -2825,6 +2852,9 @@ def normalize(result: dict[str, Any]) -> dict[str, Any]:
     seen_before = result.get("seen_before")
     if isinstance(seen_before, dict):
         normalized["seen_before"] = seen_before
+    env_of_sight = result.get("environment")
+    if isinstance(env_of_sight, dict):
+        normalized["environment"] = env_of_sight
     world = result.get("world")
     if isinstance(world, dict):
         normalized["world"] = world

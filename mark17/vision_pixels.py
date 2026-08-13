@@ -634,6 +634,56 @@ def describe(measures: dict[str, Any]) -> str:
     return " ".join(parts)
 
 
+def as_observation(measures: dict[str, Any]) -> dict[str, Any]:
+    """Кадр в тех же терминах, в каких ядро воспринимает камеру.
+
+    У среды (environment.py) уже есть вся машинерия: она помнит недавние кадры,
+    замечает переходы «стало темнее», «появилось движение», копит из них
+    ассоциации в граф. Питалась она при этом только статистикой камеры HUD и о
+    присланных фотографиях не знала ничего — то есть увиденное и наблюдаемое
+    жили в ядре порознь.
+
+    Адаптер ничего не изобретает: все поля уже посчитаны, их надо лишь назвать
+    привычными словами. Лица и присутствие человека остаются пустыми — это
+    честно, из пиксельной статистики их не вывести, а угадывать здесь значило
+    бы кормить память выдумкой.
+    """
+    lig = measures.get("свет") or {}
+    mot = measures.get("движение") or {}
+    pal = measures.get("палитра") or []
+
+    brightness = float(lig.get("яркость") or 0.0)
+    force = float(mot.get("сила") or 0.0)
+
+    light_level = "low" if brightness < 0.35 else ("high" if brightness > 0.65 else "medium")
+    # Пороги движения взяты из замеров: соседние кадры одной сцены дают силу
+    # около 0.05, смена сцены — заметно больше, статика — сотые доли.
+    motion_level = "still" if force < 0.01 else ("subtle" if force < 0.05 else "moving")
+
+    if motion_level == "moving":
+        scene_mode = "active"
+    elif light_level == "low":
+        scene_mode = "dark"
+    elif light_level == "high":
+        scene_mode = "bright"
+    else:
+        scene_mode = "calm"
+
+    return {
+        "active": True,
+        "brightness": round(brightness, 3),
+        "motion_score": round(force, 3),
+        "stability": round(max(0.0, 1.0 - float(mot.get("доля_изменений") or 0.0)), 3),
+        "light_level": light_level,
+        "motion_level": motion_level,
+        "scene_mode": scene_mode,
+        "dominant_tone": str(pal[0]["цвет"]) if pal else "unknown",
+        "faces": None,
+        "person": None,
+        "source": "vision_pixels",
+    }
+
+
 def _hue_deg(r: float, g: float, b: float) -> float:
     """Тон в градусах — то же вычисление, что в `_hue_name`, но без имени.
 
