@@ -2074,16 +2074,47 @@ function HudContent() {
       }
       setAttached(null);
       setIsLoading(true);
+      // Пишем и в ленту, и в строку статуса: GameHud показывает agiMessage
+      // ТОЛЬКО пока лента пуста, поэтому после первого же диалога ответ,
+      // отправленный лишь в agiMessage, не виден вообще.
+      const seeSay = (line: string) => {
+        pushLog(line);
+        setAgiMessage(line);
+      };
       // Взгляд идёт десятки секунд (видео — минуты), поэтому говорим об этом
       // сразу: молчащий интерфейс здесь читается как «не загрузилось».
-      setAgiMessage(`MAX17: смотрю «${file.name}»… это займёт до минуты.`);
+      seeSay(`MAX17: смотрю «${file.name}»…`);
       try {
-        const dataUrl = await new Promise<string>((resolve, reject) => {
+        let dataUrl = await new Promise<string>((resolve, reject) => {
           const reader = new FileReader();
           reader.onload = () => resolve(String(reader.result || ''));
           reader.onerror = () => reject(reader.error ?? new Error('read failed'));
           reader.readAsDataURL(file);
         });
+
+        // Снимок с телефона весит мегабайты, а base64 добавляет к ним ещё
+        // треть — nginx рубит такое тело, и загрузка молча не доезжает. Ядру
+        // подробности не нужны: и пиксельный разбор, и модель работают с
+        // уменьшенной копией. Видео не трогаем — его не пережать на канвасе.
+        if (isImage) {
+          dataUrl = await new Promise<string>((resolve) => {
+            const img = new Image();
+            img.onload = () => {
+              const side = 1600;
+              const scale = Math.min(1, side / Math.max(img.width, img.height));
+              if (scale >= 1) return resolve(dataUrl);
+              const canvas = document.createElement('canvas');
+              canvas.width = Math.round(img.width * scale);
+              canvas.height = Math.round(img.height * scale);
+              const ctx = canvas.getContext('2d');
+              if (!ctx) return resolve(dataUrl);
+              ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+              resolve(canvas.toDataURL('image/jpeg', 0.85));
+            };
+            img.onerror = () => resolve(dataUrl);
+            img.src = dataUrl;
+          });
+        }
         const seen = await sendMax17Event({
           type: 'see',
           image: dataUrl,
@@ -2093,14 +2124,14 @@ function HudContent() {
         });
         const text = String(seen?.answer?.text || '').trim();
         if (text) {
-          setAgiMessage(`MAX17: ${text}`);
+          seeSay(`MAX17: ${text}`);
         } else {
           const why = String((seen as { error?: unknown })?.error || 'ничего не разглядел');
-          setAgiMessage(`MAX17: не увидел «${file.name}» — ${why}`);
+          seeSay(`MAX17: не увидел «${file.name}» — ${why}`);
         }
       } catch (error) {
         const why = error instanceof Error ? error.message : String(error);
-        setAgiMessage(`MAX17: не смог посмотреть «${file.name}» — ${why}`);
+        seeSay(`MAX17: не смог посмотреть «${file.name}» — ${why}`);
       } finally {
         setIsLoading(false);
       }
