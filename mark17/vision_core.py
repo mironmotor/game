@@ -47,8 +47,31 @@ GEMINI_MODEL = os.environ.get("MAX17_VISION_MODEL") or "gemini-2.5-flash"
 
 # Сколько ждать взгляда. Локальная модель на 8 ГБ думает над кадром долго,
 # облако отвечает за пару секунд — таймауты у них разные не случайно.
-LOCAL_TIMEOUT = float(os.environ.get("MAX17_VLM_TIMEOUT") or 90)
+LOCAL_TIMEOUT = float(os.environ.get("MAX17_VLM_TIMEOUT") or 180)
 CLOUD_TIMEOUT = 45.0
+
+# Держать модель в памяти между кадрами. Без этого на 8 ГБ, где рядом живёт
+# dev-сервер, Ollama выгружает VLM сразу после ответа и грузит заново на
+# следующий кадр — разбор видео из-за этого растягивался в разы и падал по
+# таймауту на последних кадрах.
+KEEP_ALIVE = os.environ.get("MAX17_VLM_KEEP_ALIVE") or "10m"
+
+
+def _workers(prefer: str, count: int) -> int:
+    """Сколько взглядов запускать разом.
+
+    Для облака — сколько угодно: там запросы действительно идут параллельно.
+    Для своих глаз — строго по одному, и это не перестраховка. Ollama считает
+    запросы по очереди, а таймаут у отправленных тикает с момента отправки:
+    пошли три кадра сразу — третий простоит в очереди всё время работы первых
+    двух и умрёт, не начав считаться. Именно так видео и падало целиком,
+    сваливаясь в облако, которого может не быть.
+    """
+    if prefer == "cloud":
+        return min(4, max(1, count))
+    if prefer == "local" or local_eye_ready():
+        return 1
+    return min(4, max(1, count))
 
 
 # ── линзы ────────────────────────────────────────────────────────────────────
@@ -132,7 +155,7 @@ def local_eye_ready() -> bool:
 def _see_local(image_b64: str, prompt: str) -> str:
     data = _post_json(
         f"{OLLAMA_URL}/api/generate",
-        {"model": OLLAMA_VLM, "prompt": prompt, "images": [image_b64], "stream": False},
+        {"model": OLLAMA_VLM, "prompt": prompt, "images": [image_b64], "stream": False, "keep_alive": KEEP_ALIVE},
         LOCAL_TIMEOUT,
     )
     return str(data.get("response") or "").strip()
@@ -157,7 +180,7 @@ def _see_cloud(image_b64: str, prompt: str, mime: str) -> str:
 def _see_local_many(images_b64: list[str], prompt: str) -> str:
     data = _post_json(
         f"{OLLAMA_URL}/api/generate",
-        {"model": OLLAMA_VLM, "prompt": prompt, "images": images_b64, "stream": False},
+        {"model": OLLAMA_VLM, "prompt": prompt, "images": images_b64, "stream": False, "keep_alive": KEEP_ALIVE},
         LOCAL_TIMEOUT,
     )
     return str(data.get("response") or "").strip()
@@ -251,7 +274,7 @@ def unwrap(image_b64: str, lenses: tuple[str, ...], mime: str = "image/jpeg", pr
         except Exception as exc:  # noqa: BLE001
             return name, "", str(exc)
 
-    with ThreadPoolExecutor(max_workers=min(4, len(lenses))) as pool:
+    with ThreadPoolExecutor(max_workers=_workers(prefer, len(lenses))) as pool:
         for name, text, via_or_err in pool.map(look, lenses):
             if text:
                 sight.lenses[name] = text
@@ -365,7 +388,7 @@ def perceive_corners(path: str | Path, grid: int = 2, prefer: str = "auto") -> d
         except Exception as exc:  # noqa: BLE001
             return name, f"(не разглядел: {exc})"
 
-    with ThreadPoolExecutor(max_workers=min(4, len(pieces))) as pool:
+    with ThreadPoolExecutor(max_workers=_workers(prefer, len(pieces))) as pool:
         parts = list(pool.map(look, pieces))
 
     return {
@@ -400,7 +423,7 @@ def _video_frames(path: str | Path, count: int = 6) -> list[str]:
     for arr in picked:
         buf = io.BytesIO()
         img = Image.fromarray(arr).convert("RGB")
-        img.thumbnail((1024, 1024))  # кадр 4K в сетчатке не нужен, а время съедает
+        img.thumbnail((768, 768))  # кадр 4K в сетчатке не нужен, а время съедает
         img.save(buf, format="JPEG", quality=85)
         out.append(base64.b64encode(buf.getvalue()).decode("ascii"))
     return out
@@ -426,7 +449,7 @@ def perceive_video(path: str | Path, count: int = 6, prefer: str = "auto") -> di
         except Exception as exc:  # noqa: BLE001
             return i, f"(кадр не прочитан: {exc})"
 
-    with ThreadPoolExecutor(max_workers=min(4, len(frames))) as pool:
+    with ThreadPoolExecutor(max_workers=_workers(prefer, len(frames))) as pool:
         shots = dict(pool.map(look, list(enumerate(frames))))
 
     timeline = [shots[i] for i in sorted(shots)]

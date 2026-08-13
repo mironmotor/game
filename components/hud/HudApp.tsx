@@ -2060,6 +2060,53 @@ function HudContent() {
   // Файл читаем прямо в браузере: наружу уходит уже текст, сам файл никуда не
   // загружается. Потолки — чтобы длинный файл не вытеснил из ответа всё остальное.
   const handleFilePick = async (file: File) => {
+    // Фото и видео идут не в текст, а в зрение: file.text() на картинке даёт
+    // бинарный мусор, из которого ядру нечего понять.
+    const isImage = file.type.startsWith('image/');
+    const isVideo = file.type.startsWith('video/');
+    if (isImage || isVideo) {
+      const MAX_MEDIA_BYTES = 12_000_000;
+      if (file.size > MAX_MEDIA_BYTES) {
+        setAgiMessage(
+          `MAX17: «${file.name}» — ${(file.size / 1048576).toFixed(1)} МБ, а я беру до 12 МБ. Сожми или обрежь.`,
+        );
+        return;
+      }
+      setAttached(null);
+      setIsLoading(true);
+      // Взгляд идёт десятки секунд (видео — минуты), поэтому говорим об этом
+      // сразу: молчащий интерфейс здесь читается как «не загрузилось».
+      setAgiMessage(`MAX17: смотрю «${file.name}»… это займёт до минуты.`);
+      try {
+        const dataUrl = await new Promise<string>((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onload = () => resolve(String(reader.result || ''));
+          reader.onerror = () => reject(reader.error ?? new Error('read failed'));
+          reader.readAsDataURL(file);
+        });
+        const seen = await sendMax17Event({
+          type: 'see',
+          image: dataUrl,
+          name: file.name,
+          mime: file.type,
+          mode: isVideo ? 'video' : 'photo',
+        });
+        const text = String(seen?.answer?.text || '').trim();
+        if (text) {
+          setAgiMessage(`MAX17: ${text}`);
+        } else {
+          const why = String((seen as { error?: unknown })?.error || 'ничего не разглядел');
+          setAgiMessage(`MAX17: не увидел «${file.name}» — ${why}`);
+        }
+      } catch (error) {
+        const why = error instanceof Error ? error.message : String(error);
+        setAgiMessage(`MAX17: не смог посмотреть «${file.name}» — ${why}`);
+      } finally {
+        setIsLoading(false);
+      }
+      return;
+    }
+
     const MAX_BYTES = 1_000_000;
     if (file.size > MAX_BYTES) {
       setAgiMessage(`MAX17: файл «${file.name}» больше 1 МБ — пришли кусок поменьше.`);

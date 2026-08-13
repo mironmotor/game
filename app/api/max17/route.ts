@@ -1,4 +1,6 @@
 import { spawn } from 'node:child_process';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { NextResponse } from 'next/server';
 import { canonicalizeLocale, detectTextLocale, languageName } from '@/lib/i18n/config';
@@ -14,6 +16,7 @@ import {
 export const runtime = 'nodejs';
 
 const ALLOWED_EVENTS = new Set([
+  'see',
   'user_message',
   'task_created',
   'task_completed',
@@ -101,6 +104,46 @@ type CloudLlmResult = {
   source: 'gonka' | 'gemini' | 'none';
   error?: string;
 };
+
+// Зрение не укладывается в общий таймаут моста: локальные глаза на слабой
+// машине разбирают кадр десятками секунд, а видео — минутами.
+const SEE_TIMEOUT_MS = 8 * 60_000;
+const MAX_MEDIA_BYTES = 12 * 1024 * 1024;
+
+const MEDIA_EXT: Record<string, string> = {
+  'image/jpeg': '.jpg',
+  'image/jpg': '.jpg',
+  'image/png': '.png',
+  'image/webp': '.webp',
+  'image/gif': '.gif',
+  'video/mp4': '.mp4',
+  'video/quicktime': '.mov',
+  'video/webm': '.webm',
+};
+
+/** Положить присланное фото/видео во временный файл. null — если ничего не прислали. */
+function stageMedia(body: Record<string, unknown>): { dir: string; file: string } | null {
+  const raw = String(body.image || body.media || '').trim();
+  if (!raw) return null;
+
+  const m = raw.match(/^data:([^;]+);base64,([\s\S]+)$/);
+  const mime = (m ? m[1] : String(body.mime || 'image/jpeg')).toLowerCase();
+  const buf = Buffer.from(m ? m[2] : raw, 'base64');
+  if (!buf.length) throw new Error('Файл пустой или это не base64');
+  if (buf.length > MAX_MEDIA_BYTES) {
+    throw new Error(`Файл ${(buf.length / 1048576).toFixed(1)} МБ — больше лимита в 12 МБ`);
+  }
+
+  // Расширение решает, посмотрит ядро на это как на фото или как на видео,
+  // поэтому берём его из mime, а имя файла — только как запасной вариант.
+  const fromName = path.extname(String(body.name || '')).toLowerCase();
+  const ext = MEDIA_EXT[mime] || (fromName && fromName.length <= 5 ? fromName : '.jpg');
+
+  const dir = mkdtempSync(path.join(tmpdir(), 'max17-see-'));
+  const file = path.join(dir, `media${ext}`);
+  writeFileSync(file, buf);
+  return { dir, file };
+}
 
 function errorResponse(message: string, status = 400, details?: unknown) {
   return NextResponse.json(
@@ -687,6 +730,27 @@ export async function POST(request: Request) {
     return NextResponse.json({ ...fallback, remote_bridge_error: remote.error, remote_bridge: remote.bridge });
   }
 
+  // MAX VISION принимает файл, а не base64: видео в JSON-строке раздувается на
+  // треть и гоняется через stdin питона целиком. Кладём во временную папку,
+  // отдаём ядру путь и обязательно убираем за собой — иначе каждый присланный
+  // кадр остаётся на диске навсегда.
+  let staged: { dir: string; file: string } | null = null;
+  if (eventType === 'see') {
+    try {
+      staged = stageMedia(body);
+    } catch (error) {
+      return errorResponse(error instanceof Error ? error.message : 'bad media', 400);
+    }
+    if (!staged && !body.path) {
+      return errorResponse('Нечего смотреть: пришли image (data URL) или path', 400);
+    }
+    if (staged) {
+      body.path = staged.file;
+      delete body.image;
+      delete body.media;
+    }
+  }
+
   try {
     let result: Record<string, unknown>;
     // Forge is intentionally CPU-heavy and may run for minutes. Keep it out of
@@ -694,6 +758,10 @@ export async function POST(request: Request) {
     // daemon's 30s warm timeout cannot kill the job midway through a batch.
     if (eventType === 'synapse_forge') {
       result = await runMax17Bridge(body, FORGE_TIMEOUT_MS);
+    } else if (eventType === 'see') {
+      // Зрение идёт мимо демона: локальная VLM думает над кадром десятки секунд
+      // и на всё это время заблокировала бы очередь обычных сообщений.
+      result = await runMax17Bridge(body, SEE_TIMEOUT_MS);
     } else if (process.env.MAX17_DAEMON !== 'false') {
       try {
         const { sendToDaemon } = await import('./max17-daemon');
@@ -719,5 +787,7 @@ export async function POST(request: Request) {
       return NextResponse.json(await runCloudFallback(body, message));
     }
     return errorResponse('Max17 bridge failed', 502, error instanceof Error ? error.message : String(error));
+  } finally {
+    if (staged) rmSync(staged.dir, { recursive: true, force: true });
   }
 }

@@ -2658,6 +2658,11 @@ def normalize(result: dict[str, Any]) -> dict[str, Any]:
     synapses = result.get("synapses")
     if isinstance(synapses, dict):
         normalized["synapses"] = synapses
+    # Разбор по линзам и то, чем смотрели: без этого клиент видит только
+    # итоговый текст и не может отличить свои глаза от облачных.
+    vision = result.get("vision")
+    if isinstance(vision, dict):
+        normalized["vision"] = vision
     consolidation = result.get("consolidation")
     if isinstance(consolidation, dict):
         normalized["consolidation"] = consolidation

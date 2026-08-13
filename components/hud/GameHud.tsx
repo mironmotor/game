@@ -547,7 +547,7 @@ export function GameHud(props: GameHudProps) {
               <input
                 type="file"
                 hidden
-                accept=".txt,.md,.csv,.json,.log,.py,.ts,.tsx,.js,.html,.xml,.yml,.yaml,text/*"
+                accept=".txt,.md,.csv,.json,.log,.py,.ts,.tsx,.js,.html,.xml,.yml,.yaml,text/*,image/*,video/*"
                 onChange={(e) => {
                   const f = e.target.files?.[0];
                   if (f && onFilePick) onFilePick(f);
