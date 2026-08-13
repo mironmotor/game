@@ -309,10 +309,32 @@ def weave(lenses: dict[str, str]) -> str:
 
 # ── входы ────────────────────────────────────────────────────────────────────
 def _read_image(path: str | Path) -> tuple[str, str]:
+    """Кадр для сетчатки — ужатый, а не оригинал.
+
+    Скриншот с ретины — это 3420×2224 и одиннадцать мегабайт. Модель всё равно
+    режет вход до своего разрешения, но пока кадр дойдёт до неё, он успевает
+    прожевать память и время на каждом взгляде, а линз может быть четыре.
+    Тысяча пикселей по длинной стороне — предел, за которым VLM уже ничего не
+    добавляет к пониманию.
+    """
     p = Path(path)
     raw = p.read_bytes()
     ext = p.suffix.lower().lstrip(".")
     mime = {"png": "image/png", "webp": "image/webp", "gif": "image/gif"}.get(ext, "image/jpeg")
+    try:
+        import io
+
+        from PIL import Image
+
+        img = Image.open(p)
+        if max(img.size) > 1024:
+            img = img.convert("RGB")
+            img.thumbnail((1024, 1024))
+            buf = io.BytesIO()
+            img.save(buf, format="JPEG", quality=88)
+            return base64.b64encode(buf.getvalue()).decode("ascii"), "image/jpeg"
+    except Exception:  # noqa: BLE001 - без Pillow отдаём как есть, зрение важнее оптимизации
+        pass
     return base64.b64encode(raw).decode("ascii"), mime
 
 

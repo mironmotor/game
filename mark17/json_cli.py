@@ -1758,15 +1758,28 @@ def _handle_see(event: Event, stores: Mark17Stores) -> dict[str, Any]:
         try:
             from mark17 import dream_sim
 
-            def _llm(prompt: str) -> str:
-                res = gonka_chat(
-                    [{"role": "user", "content": prompt}], role="chat", max_tokens=600, temperature=0.7
-                )
-                return res.text or ""
+            # dream_sim.generate ждёт не функцию, а объект с .enabled/.available/.ask
+            # (см. dream_sim.py:143). Обычная функция молча проваливала проверку,
+            # и ветки всегда оставались детерминированным хэшем от текста —
+            # LLM не вызывался ни разу, хотя формально «был передан».
+            class _Llm:
+                enabled = True
+
+                @property
+                def available(self) -> bool:
+                    return gonka_is_enabled("chat")
+
+                def ask(self, prompt: str):
+                    return gonka_chat(
+                        [{"role": "user", "content": prompt}],
+                        role="chat",
+                        max_tokens=600,
+                        temperature=0.7,
+                    )
 
             result["branches"] = dream_sim.generate(
                 "Вот что видно прямо сейчас:\n" + text + "\n\nРазверни, что могло бы произойти дальше.",
-                _llm,
+                _Llm(),
             )
         except Exception as exc:  # noqa: BLE001 - ветки необязательны
             result["branches_error"] = str(exc)
