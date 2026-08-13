@@ -230,6 +230,116 @@ def rhythm(rgb: np.ndarray) -> dict[str, Any]:
     }
 
 
+def kind(rgb: np.ndarray) -> dict[str, Any]:
+    """Что это вообще: снимок, скриншот, рисунок, текст.
+
+    Различие держится на статистике, а не на догадках. У фотографии много
+    уникальных оттенков и мягкий шум; у скриншота палитра бедная, зато края
+    идеально прямые и повторяются по вертикали; текст даёт частые
+    горизонтальные перепады при почти пустом фоне.
+    """
+    y = _luma(rgb)
+    q = np.clip(rgb * 31.999, 0, 31).astype(np.int16)
+    keys = q[..., 0] * 1024 + q[..., 1] * 32 + q[..., 2]
+    unique = float(np.unique(keys).size) / keys.size
+
+    gx = np.abs(np.diff(y, axis=1))
+    gy = np.abs(np.diff(y, axis=0))
+    # Идеально вертикальные и горизонтальные границы — признак интерфейса:
+    # в природе прямых линий такой длины почти не бывает.
+    col_edges = float((gx.mean(axis=0) > 0.12).mean())
+    row_edges = float((gy.mean(axis=1) > 0.12).mean())
+    flat = float((np.abs(y - np.median(y)) < 0.03).mean())
+
+    if unique < 0.02 and (col_edges > 0.05 or row_edges > 0.05) and flat > 0.3:
+        verdict = "скриншот или интерфейс"
+    elif unique < 0.01 and flat > 0.6:
+        verdict = "рисунок или график"
+    elif unique > 0.15:
+        verdict = "фотография"
+    else:
+        verdict = "смешанный кадр"
+    return {
+        "тип": verdict,
+        "уникальных_оттенков": round(unique, 4),
+        "ровный_фон": round(flat, 3),
+        "прямых_границ": round(max(col_edges, row_edges), 3),
+    }
+
+
+def text_lines(rgb: np.ndarray) -> dict[str, Any]:
+    """Есть ли в кадре строки текста и сколько их.
+
+    Текст виден по профилю: если сложить перепады яркости по строкам, у текста
+    получается гребёнка — узкие всплески на пустом фоне, повторяющиеся с
+    примерно равным шагом. Это не чтение букв, а обнаружение самого факта,
+    что в кадре есть written-строки: ядру важно знать, что тут «есть текст».
+    """
+    y = _luma(rgb)
+    profile = np.abs(np.diff(y, axis=1)).mean(axis=1)
+    if profile.size < 8:
+        return {"строк": 0, "есть_текст": False}
+    thr = float(profile.mean() + profile.std())
+    peaks = profile > thr
+    # Считаем группы подряд идущих активных строк — это и есть строки текста.
+    count, prev = 0, False
+    gaps: list[int] = []
+    last_end = -1
+    for i, active in enumerate(peaks):
+        if active and not prev:
+            count += 1
+            if last_end >= 0:
+                gaps.append(i - last_end)
+        if not active and prev:
+            last_end = i
+        prev = bool(active)
+    step = float(np.median(gaps)) if gaps else 0.0
+    regular = bool(len(gaps) >= 2 and np.std(gaps) < max(2.0, step * 0.5))
+    return {
+        "строк": int(count),
+        "шаг_строк_px": round(step, 1) if step else None,
+        "равномерные": regular,
+        "есть_текст": bool(count >= 3 and regular),
+    }
+
+
+def zones(rgb: np.ndarray) -> list[dict[str, Any]]:
+    """Кадр по девяти зонам: где светлее, где гуще детали, какого цвета.
+
+    Это и есть разматывание по углам, только считанное: общий план говорит
+    «в среднем темно», а по зонам видно, что низ пустой, а вся жизнь наверху
+    слева. Модели для этого не нужно.
+    """
+    y = _luma(rgb)
+    h, w = y.shape
+    names = [
+        "верх-слева", "верх-центр", "верх-справа",
+        "центр-слева", "центр", "центр-справа",
+        "низ-слева", "низ-центр", "низ-справа",
+    ]
+    out: list[dict[str, Any]] = []
+    for gy in range(3):
+        for gx in range(3):
+            ys, ye = h * gy // 3, h * (gy + 1) // 3
+            xs, xe = w * gx // 3, w * (gx + 1) // 3
+            cell = rgb[ys:ye, xs:xe]
+            cy = y[ys:ye, xs:xe]
+            if cell.size == 0:
+                continue
+            mean = cell.reshape(-1, 3).mean(axis=0)
+            grad = float(np.abs(np.diff(cy, axis=1)).mean()) if cy.shape[1] > 1 else 0.0
+            out.append(
+                {
+                    "зона": names[gy * 3 + gx],
+                    "яркость": round(float(cy.mean()), 3),
+                    "цвет": _hue_name(float(mean[0]), float(mean[1]), float(mean[2])),
+                    "детали": round(grad, 4),
+                    "пусто": bool(grad < 0.01),
+                }
+            )
+    return out
+
+
 def motion(a: np.ndarray, b: np.ndarray) -> dict[str, Any]:
     """Что изменилось между двумя кадрами — по разнице яркости.
 
@@ -268,6 +378,20 @@ def describe(measures: dict[str, Any]) -> str:
     rhy = measures.get("ритм") or {}
 
     parts: list[str] = []
+    what = measures.get("что_это") or {}
+    if what.get("тип"):
+        parts.append(f"Похоже на {what['тип']}.")
+    txt = measures.get("текст") or {}
+    if txt.get("есть_текст"):
+        parts.append(f"В кадре текст: примерно {txt.get('строк')} строк с шагом ~{txt.get('шаг_строк_px')} px.")
+    zs = measures.get("зоны") or []
+    if zs:
+        busy = sorted(zs, key=lambda z: z.get("детали") or 0, reverse=True)[:2]
+        empty = [z["зона"] for z in zs if z.get("пусто")]
+        if busy:
+            parts.append("Гуще всего: " + ", ".join(z["зона"] for z in busy) + ".")
+        if len(empty) >= 3:
+            parts.append(f"Пустых зон: {len(empty)} из 9.")
     if pal:
         top = ", ".join(f"{c['цвет']} ({int(c['доля'] * 100)}%)" for c in pal[:3])
         parts.append(f"Палитра: {top}.")
@@ -300,10 +424,13 @@ def measure(path: str | Path) -> dict[str, Any]:
     """Полный пиксельный разбор одного кадра."""
     rgb = _load(path)
     measures: dict[str, Any] = {
+        "что_это": kind(rgb),
         "палитра": palette(rgb),
         "свет": light(rgb),
         "композиция": composition(rgb),
         "детали": detail(rgb),
+        "текст": text_lines(rgb),
+        "зоны": zones(rgb),
         "ритм": rhythm(rgb),
         "размер": [int(rgb.shape[1]), int(rgb.shape[0])],
     }

@@ -1666,10 +1666,49 @@ def _handle_see(event: Event, stores: Mark17Stores) -> dict[str, Any]:
 
     neuro_text = str(seen.get("text") or "").strip()
     pixel_text = str(pixels.get("text") or "").strip()
-    if neuro_text and pixel_text:
-        text = f"{neuro_text}\n\nПо пикселям: {pixel_text}"
-    else:
-        text = neuro_text or pixel_text
+
+    # Ядро складывает из измерений картину. Само по себе «палитра: чёрный 96%,
+    # контраст 0.108» — показания прибора, а не зрение; понимание начинается,
+    # когда из чисел собирается связное представление о кадре. Модель здесь
+    # текстовая (зрячей на сервере нет и не будет), поэтому ей запрещено
+    # называть то, чего в измерениях не содержится: «кот» из гистограммы не
+    # выводится, а «тёмный интерфейс с текстом в верхней трети» — выводится.
+    imagined = ""
+    if pixels and not pixels.get("error") and gonka_is_enabled("chat"):
+        try:
+            facts = json.dumps(
+                {k: v for k, v in pixels.items() if k != "text"}, ensure_ascii=False
+            )[:2500]
+            res = gonka_chat(
+                [
+                    {
+                        "role": "system",
+                        "content": (
+                            "Ты MAX. Ты не смотришь на изображение глазами — у тебя есть точные "
+                            "измерения его пикселей. Собери из них представление о кадре: что это "
+                            "за изображение, как оно устроено, где что расположено, каким оно "
+                            "выглядит. Пиши живо, 2–4 предложения, по-русски, от первого лица.\n\n"
+                            "ЗАПРЕЩЕНО называть конкретные объекты, людей, животных, места и "
+                            "надписи: измерения этого не содержат, и любая такая догадка будет "
+                            "выдумкой. Говори о том, что следует из чисел: тип изображения, свет, "
+                            "палитра, композиция, плотность деталей, текст как факт наличия строк. "
+                            "Где данных не хватает — так и скажи, это честнее домысла."
+                        ),
+                    },
+                    {"role": "user", "content": f"Измерения кадра:\n{facts}"},
+                ],
+                role="chat",
+                max_tokens=320,
+                temperature=0.5,
+            )
+            imagined = (res.text or "").strip()
+        except Exception:  # noqa: BLE001 - без синтеза остаются сами измерения
+            imagined = ""
+
+    blocks = [b for b in (neuro_text, imagined) if b]
+    if pixel_text:
+        blocks.append(f"Замеры: {pixel_text}")
+    text = "\n\n".join(blocks)
     if not text:
         return {
             "ok": False,
