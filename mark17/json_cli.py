@@ -1638,19 +1638,45 @@ def _handle_see(event: Event, stores: Mark17Stores) -> dict[str, Any]:
     eye = str(event.payload.get("eye") or "auto").lower()
     depth = str(event.payload.get("depth") or "auto").lower()
 
+    # Сначала — свой счёт по пикселям. Он не требует ни модели, ни сети, идёт
+    # доли секунды и работает даже там, где нейро-глаз невозможен в принципе
+    # (на дроплете двести мегабайт памяти). Это база зрения, а не запасной путь.
+    pixels: dict[str, Any] = {}
+    if mode != "video":
+        try:
+            from mark17 import vision_pixels
+
+            pixels = vision_pixels.measure(path)
+        except Exception as exc:  # noqa: BLE001 - без numpy/Pillow остаётся нейро-слой
+            pixels = {"error": str(exc)}
+
+    # Нейро-слой — усиление сверху: он называет смысл («логотип», «человек у
+    # окна»), которого в числах нет. Если глаз нет, зрение всё равно состоится.
+    seen: dict[str, Any] = {}
+    neuro_error = ""
     try:
         if mode == "video":
-            seen = vision.perceive_video(path, count=int(event.payload.get("frames") or 6), prefer=eye)
+            seen = vision.perceive_video(path, count=int(event.payload.get("frames") or 4), prefer=eye)
         elif mode == "corners":
             seen = vision.perceive_corners(path, prefer=eye)
         else:
             seen = vision.perceive(path, depth=depth, prefer=eye)
     except Exception as exc:  # noqa: BLE001 - слепота не должна ронять ядро
-        return {"ok": False, "route": "see", "error": f"зрение не сработало: {exc}"}
+        neuro_error = str(exc)
 
-    text = str(seen.get("text") or "").strip()
+    neuro_text = str(seen.get("text") or "").strip()
+    pixel_text = str(pixels.get("text") or "").strip()
+    if neuro_text and pixel_text:
+        text = f"{neuro_text}\n\nПо пикселям: {pixel_text}"
+    else:
+        text = neuro_text or pixel_text
     if not text:
-        return {"ok": False, "route": "see", "error": "ничего не разглядел", "vision": seen}
+        return {
+            "ok": False,
+            "route": "see",
+            "error": f"ничего не разглядел: {neuro_error or 'нет ни пиксельного разбора, ни глаз'}",
+            "vision": seen,
+        }
 
     # Увиденное — такое же воспоминание, как услышанное. Пишем и в эпизодическую
     # память, и в векторную: первое даёт «когда», второе — «на что похоже».
@@ -1680,7 +1706,7 @@ def _handle_see(event: Event, stores: Mark17Stores) -> dict[str, Any]:
     result: dict[str, Any] = {
         "ok": True,
         "route": "see",
-        "vision": seen,
+        "vision": {**seen, "pixels": pixels, **({"neuro_error": neuro_error} if neuro_error else {})},
         "answer": {"text": text, "source": "vision", "confidence": 0.75},
         "memory": {"stored": True},
         "next_adaptation": "Увиденное записано в память ядра.",
