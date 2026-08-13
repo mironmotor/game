@@ -359,6 +359,185 @@ def zones(rgb: np.ndarray) -> list[dict[str, Any]]:
     return out
 
 
+def geometry(rgb: np.ndarray, grid: int = 48) -> dict[str, Any]:
+    """Направления линий и точка схода — грубое 3D без всякой нейросети.
+
+    Перспектива выдаёт себя тем, что параллельные в мире линии на картинке
+    сходятся в одну точку. Найти её можно голосованием: каждая кромка кадра
+    подсказывает, что точка схода лежит где-то вдоль её продолжения, и там,
+    где подсказки сходятся, накапливается максимум.
+
+    Голосование, а не подгонка методом наименьших квадратов, — принципиально.
+    МНК усредняет сигнал вместе с шумом и всегда возвращает какую-нибудь
+    точку, даже когда перспективы в кадре нет вовсе (первый прототип давал так
+    невязку в полсотни пикселей и не мог об этом сообщить). Голоса же дают
+    вместе с точкой её честность: если максимум едва выше медианы, значит
+    линии никуда не сходятся — и лучше сказать это прямо.
+    """
+    y = _luma(rgb)
+    h, w = y.shape
+    gy, gx = np.gradient(y)
+    mag = np.hypot(gx, gy)
+    if mag.max() <= 0:
+        return {"есть_перспектива": False, "почему": "кадр без перепадов"}
+
+    # Берём только заметные кромки: слабые перепады — это шум, и в голосовании
+    # они лишь размывают максимум.
+    thr = float(np.percentile(mag, 92))
+    ys, xs = np.nonzero(mag >= thr)
+    if ys.size < 40:
+        return {"есть_перспектива": False, "почему": "слишком мало кромок"}
+
+    # Направление самой линии перпендикулярно градиенту яркости.
+    ang = (np.degrees(np.arctan2(gy[ys, xs], gx[ys, xs])) + 90.0) % 180.0
+    weights = mag[ys, xs]
+
+    hist, _ = np.histogram(ang, bins=18, range=(0.0, 180.0), weights=weights)
+    hist = hist / (hist.sum() or 1.0)
+    order = np.argsort(hist)[::-1]
+    dominant = float(order[0] * 10 + 5)
+    # Вертикали и горизонтали (0°, 90°) — это архитектура и интерфейс, а не
+    # перспектива. Сходятся именно косые линии, их и считаем отдельно.
+    axis_share = float(hist[0] + hist[9] + hist[17] + hist[8])
+    peaks = int((hist > hist.mean() + hist.std()).sum())
+
+    diag = np.abs(np.sin(np.radians(2 * ang))) > 0.35
+    if diag.sum() < 30:
+        return {
+            "есть_перспектива": False,
+            "почему": "только вертикали и горизонтали",
+            "главное_направление": dominant,
+            "доля_осевых": round(axis_share, 3),
+            "пиков_направлений": peaks,
+        }
+
+    # Голосование. Чтобы не строить матрицу «все кромки × все кандидаты»,
+    # берём выборку самых сильных косых кромок — точность от этого не страдает,
+    # а память и время падают на порядок.
+    dys, dxs, dang, dmag = ys[diag], xs[diag], ang[diag], weights[diag]
+    if dys.size > 1200:
+        pick = np.argsort(dmag)[::-1][:1200]
+        dys, dxs, dang, dmag = dys[pick], dxs[pick], dang[pick], dmag[pick]
+
+    dir_x = np.cos(np.radians(dang))
+    dir_y = np.sin(np.radians(dang))
+    # Кандидаты ищем и за границами кадра: у дороги, уходящей вбок, точка схода
+    # часто лежит вне видимого поля.
+    cand_x = np.linspace(-0.5 * w, 1.5 * w, grid)
+    cand_y = np.linspace(-0.5 * h, 1.5 * h, max(8, grid * h // max(1, w)))
+    cx_grid, cy_grid = np.meshgrid(cand_x, cand_y)
+    cxf, cyf = cx_grid.reshape(-1), cy_grid.reshape(-1)
+
+    vx = cxf[None, :] - dxs[:, None]
+    vy = cyf[None, :] - dys[:, None]
+    norm = np.hypot(vx, vy) + 1e-6
+    align = np.abs(dir_x[:, None] * vx + dir_y[:, None] * vy) / norm
+    votes = (align ** 8 * dmag[:, None]).sum(axis=0)
+
+    best = int(np.argmax(votes))
+    peak, median = float(votes[best]), float(np.median(votes))
+    confidence = peak / (median or 1.0)
+    vx_best, vy_best = float(cxf[best]), float(cyf[best])
+
+    # Порог подобран по замерам на игровых кадрах: уверенный сход даёт
+    # превышение над медианой в разы, а ровный интерфейс — считанные проценты.
+    real = bool(confidence > 1.6)
+    return {
+        "есть_перспектива": real,
+        "точка_схода": [round(vx_best / w, 3), round(vy_best / h, 3)] if real else None,
+        "уверенность": round(confidence, 2),
+        "главное_направление": dominant,
+        "доля_осевых": round(axis_share, 3),
+        "пиков_направлений": peaks,
+        "кромок_в_голосовании": int(dys.size),
+    }
+
+
+def depth_cue(rgb: np.ndarray) -> dict[str, Any]:
+    """Порядковая глубина по фактуре: ближе — крупнее зерно, дальше — мельче.
+
+    Признак старый и надёжный: одна и та же поверхность вблизи даёт крупный
+    рисунок, а вдали — мелкий. Считается это тем же спектром, что уже стоит в
+    rhythm(), только по каждой из девяти зон: центроид спектра по радиусу и
+    есть «мелкость» зоны.
+
+    Метров тут не будет никогда — у игрового рендера нет ни оптики, ни
+    интринсик, любые «метры» были бы выдуманы. Порядок же — что ближе, что
+    дальше — измерим честно.
+    """
+    y = _luma(rgb)
+    h, w = y.shape
+    fine = np.full((3, 3), np.nan, dtype=np.float32)
+    energy = np.zeros((3, 3), dtype=np.float32)
+    for gy in range(3):
+        for gx in range(3):
+            cell = y[h * gy // 3 : h * (gy + 1) // 3, w * gx // 3 : w * (gx + 1) // 3]
+            if cell.size < 64:
+                continue
+            c = cell - cell.mean()
+            energy[gy, gx] = float(np.abs(np.diff(c, axis=1)).mean()) if c.shape[1] > 1 else 0.0
+            spec = np.abs(np.fft.fftshift(np.fft.fft2(c)))
+            ch, cw = spec.shape
+            yy, xx = np.ogrid[:ch, :cw]
+            radius = np.sqrt((yy - ch // 2) ** 2 + (xx - cw // 2) ** 2)
+            total = float(spec.sum()) or 1.0
+            # Центроид по радиусу: чем он дальше от центра, тем мельче фактура.
+            fine[gy, gx] = float((spec * radius).sum() / total / (radius.max() or 1.0))
+
+    # Гладкая зона — это не «близкая», это зона без фактуры: небо, стена, туман.
+    # Первый замер этого не учитывал, и небо вверху кадра уверенно объявлялось
+    # ближайшим планом. Судить о глубине можно только там, где есть по чему
+    # судить, поэтому пустые зоны выпадают из сравнения, а не притворяются
+    # передним планом.
+    weak = energy < max(0.004, float(np.median(energy)) * 0.35)
+    fine[weak] = np.nan
+    blank = int(weak.sum())
+
+    with np.errstate(invalid="ignore"):
+        rows = np.nanmean(fine, axis=1)
+    if np.isnan(rows).all():
+        return {"глубина_определима": False, "почему": "в кадре нет фактуры", "пустых_зон": blank}
+    rows = np.where(np.isnan(rows), float(np.nanmean(rows)), rows)
+    # Растёт ли мелкость снизу вверх — то есть уходит ли сцена вдаль.
+    recedes = bool(rows[0] > rows[1] > rows[2]) or bool(rows[0] > rows[2] and rows[0] - rows[2] > 0.02)
+    # Горизонт ищем как самый резкий перелом между рядами: там кончается земля.
+    jumps = np.abs(np.diff(rows))
+    horizon_row = int(np.argmax(jumps)) if jumps.size else 0
+    # nanmax/nanmin, а не max/min: пустые зоны помечены как nan, и обычные
+    # max/min из-за них возвращали nan в самом ответе.
+    spread = float(np.nanmax(fine) - np.nanmin(fine))
+
+    names = ["верх", "середина", "низ"]
+    order = sorted(range(3), key=lambda i: rows[i], reverse=True)
+
+    # Вывод о глубине делается ТОЛЬКО при согласованной картине: фактура должна
+    # убывать сверху вниз, как у сцены, уходящей к горизонту. Замер показал,
+    # почему это важно: на игровых кадрах с интерфейсом, зданиями и небом ряды
+    # часто идут вразнобой, и признак уверенно называл ближним планом верх
+    # кадра — то есть небо. Само измерение остаётся в ответе всегда, а
+    # «ближе-дальше» появляется, только когда есть чему верить.
+    monotone = bool(rows[0] > rows[1] > rows[2])
+    decisive = bool(monotone and spread > 0.012)
+    out: dict[str, Any] = {
+        "глубина_определима": decisive,
+        "мелкость_рядов": [round(float(v), 4) for v in rows],
+        "разброс": round(float(spread), 4),
+        "пустых_зон": blank,
+    }
+    if decisive:
+        out.update(
+            {
+                "дальше_всего": names[order[0]],
+                "ближе_всего": names[order[-1]],
+                "сцена_уходит_вдаль": True,
+                "горизонт_между": f"{names[horizon_row]} и {names[horizon_row + 1]}" if spread > 0.015 else None,
+            }
+        )
+    else:
+        out["почему"] = "фактура рядов идёт вразнобой — глубина по ней не читается"
+    return out
+
+
 def motion(a: np.ndarray, b: np.ndarray) -> dict[str, Any]:
     """Что изменилось между двумя кадрами — по разнице яркости.
 
