@@ -548,16 +548,32 @@ def motion(a: np.ndarray, b: np.ndarray) -> dict[str, Any]:
     if ya.shape != yb.shape:
         side = (min(ya.shape[0], yb.shape[0]), min(ya.shape[1], yb.shape[1]))
         ya, yb = ya[: side[0], : side[1]], yb[: side[0], : side[1]]
-    diff = np.abs(yb - ya)
+    signed = yb - ya
+    diff = np.abs(signed)
     changed = float((diff > 0.08).mean())
     h, w = diff.shape
     total = float(diff.sum()) or 1.0
     mx = float((diff.sum(axis=0) * np.arange(w)).sum() / total / w)
     my = float((diff.sum(axis=1) * np.arange(h)).sum() / total / h)
+
+    # Знак разности несёт больше, чем её модуль. Загоревшееся — это рождение,
+    # погасшее — смерть, и раньше и то и другое схлопывалось в одно «изменилось
+    # 12% кадра». Разделив, получаем пары и аннигиляции, из которых ядро
+    # считает барионную асимметрию: перевес выживших над исчезнувшими. Та же
+    # формула, что отвечает в genesis, почему во вселенной вообще что-то
+    # остаётся, — только теперь её кормит увиденное.
+    born = int((signed > 0.08).sum())
+    died = int((signed < -0.08).sum())
+    pixels = int(diff.size) or 1
     return {
         "доля_изменений": round(changed, 3),
         "сила": round(float(diff.mean()), 4),
         "очаг": [round(mx, 3), round(my, 3)],
+        "родилось": born,
+        "погасло": died,
+        "перевес": round((born - died) / max(1, born + died), 4),
+        "доля_рождений": round(born / pixels, 4),
+        "доля_смертей": round(died / pixels, 4),
         "вердикт": "почти статично" if changed < 0.02 else ("сменилась сцена" if changed > 0.5 else "есть движение"),
     }
 
@@ -616,6 +632,82 @@ def describe(measures: dict[str, Any]) -> str:
         mo = measures["движение"]
         parts.append(f"Движение: {mo.get('вердикт')}, изменилось {int(float(mo.get('доля_изменений') or 0) * 100)}% кадра.")
     return " ".join(parts)
+
+
+def _hue_deg(r: float, g: float, b: float) -> float:
+    """Тон в градусах — то же вычисление, что в `_hue_name`, но без имени.
+
+    Физике нужен угол, а не слово: миру всё равно, называем мы оттенок
+    «бирюзовым» или «синим», ему важно, куда повёрнут цвет.
+    """
+    mx, mn = max(r, g, b), min(r, g, b)
+    span = mx - mn
+    if span < 1e-6:
+        return 0.0
+    if mx == r:
+        return float((60 * ((g - b) / span)) % 360)
+    if mx == g:
+        return float(60 * ((b - r) / span) + 120)
+    return float(60 * ((r - g) / span) + 240)
+
+
+def as_census(measures: dict[str, Any], dt: float = 1.0) -> dict[str, Any]:
+    """Кадр как перепись мира — те самые 11 чисел, которых ждёт world_model.
+
+    Здесь увиденное перестаёт быть описанием и становится состоянием вселенной:
+    сколько в ней всего живого, сколько родилось и умерло за такт, насколько
+    она плотная, симметричная, закрученная и горячая. Ни одного слова в петле —
+    кадр, числа, физика, поле.
+
+    Прообраз у каждого поля измеряемый, ничего не выдумано:
+    плотность — доля контуров, энергия — контраст (а не яркость: яркость это
+    постоянная составляющая, она не про энергию), закрутка — перевес крупных
+    форм над фактурой, лучи — число направлений, держащих кадр.
+    """
+    det = measures.get("детали") or {}
+    lig = measures.get("свет") or {}
+    comp = measures.get("композиция") or {}
+    rhy = measures.get("ритм") or {}
+    pal = measures.get("палитра") or []
+    mot = measures.get("движение") or {}
+    geo = measures.get("геометрия") or {}
+
+    density = float(det.get("доля_контуров") or 0.0)
+    # Живое — это то, что в кадре вообще есть: контуры на рабочей сетке.
+    alive = int(density * 65536)
+
+    # Рождения и смерти приводим к тому же масштабу, что и alive: сырые
+    # счётчики пикселей зависят от размера рабочей копии, и мир, где «живых
+    # тысяча, а родилось четырнадцать тысяч», физике не объяснить.
+    born = int(float(mot.get("доля_рождений") or 0.0) * 65536)
+    died = int(float(mot.get("доля_смертей") or 0.0) * 65536)
+
+    center = comp.get("центр_масс") or [0.5, 0.5]
+    # Радиус мира — насколько масса разбежалась от центра кадра.
+    radius = float(min(1.0, (abs(float(center[0]) - 0.5) + abs(float(center[1]) - 0.5)) * 2 + density))
+
+    big = float(rhy.get("крупные_формы") or 0.0)
+    fine = float(rhy.get("фактура") or 0.0)
+    spiral_b = float(0.15 + max(0.0, min(1.0, (big - fine + 1.0) / 2.0)) * 0.45)
+
+    arms = int(geo.get("пиков_направлений") or 0) or 2
+
+    rgb = (pal[0]["rgb"] if pal else [128, 128, 128])
+    hue = _hue_deg(rgb[0] / 255.0, rgb[1] / 255.0, rgb[2] / 255.0)
+
+    return {
+        "alive": max(0, alive),
+        "born": born,
+        "died": died,
+        "radius": round(radius, 4),
+        "density": round(density, 4),
+        "spiral_b": round(spiral_b, 4),
+        "arms": max(1, min(8, arms)),
+        "hue": round(hue, 1),
+        "symmetry": round(float(comp.get("симметрия_лево_право") or 0.0), 4),
+        "energy": round(min(1.0, float(lig.get("контраст") or 0.0) * 2.0), 4),
+        "dt": float(dt),
+    }
 
 
 VECTOR_FIELDS = 40

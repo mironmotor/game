@@ -1752,6 +1752,46 @@ def _handle_see(event: Event, stores: Mark17Stores) -> dict[str, Any]:
         "self_evaluation": {**evaluation, "store_memory": True},
     }
 
+    # Кадр как состояние вселенной. Мир ядра ждёт перепись из одиннадцати
+    # чисел, и у каждого есть измеряемый прообраз, так что увиденное входит в
+    # физику напрямую, без единого слова по дороге.
+    #
+    # Движение считается против ПРОШЛОГО увиденного кадра: его уменьшенная
+    # копия лежит в состоянии ядра. Иначе рождений и смертей взяться неоткуда —
+    # присланный файл живёт в temp-папке ровно один запрос, и сравнивать было
+    # бы не с чем.
+    if pixels and not pixels.get("error") and mode != "video":
+        try:
+            from mark17 import vision_pixels as _vp
+            from mark17.world_model import WorldCensus, WorldModel
+
+            last_frame = _Path(stores.state_dir) / "last_sight.jpg"
+            if last_frame.exists():
+                try:
+                    pixels["движение"] = _vp.motion(_vp._load(last_frame), _vp._load(path))
+                except Exception:  # noqa: BLE001 - прошлый кадр может быть битым
+                    pass
+            pixels["геометрия"] = _vp.geometry(_vp._load(path, side=384))
+
+            census = _vp.as_census(pixels, dt=1.0)
+            world = WorldModel(last_frame.parent)
+            wid = world.ensure_world(seed=17, title="то, что видит MAX")["id"]
+            observed = world.observe(wid, WorldCensus(**census), tension=0.3)
+            result["world"] = {"census": census, **{k: observed[k] for k in ("laws",) if k in observed}}
+
+            # Кадр сохраняем последним действием: следующий взгляд будет
+            # сравнивать себя именно с ним.
+            try:
+                from PIL import Image
+
+                img = Image.open(path).convert("RGB")
+                img.thumbnail((256, 256))
+                img.save(last_frame, format="JPEG", quality=80)
+            except Exception:  # noqa: BLE001
+                pass
+        except Exception:  # noqa: BLE001 - физика необязательна, зрение важнее
+            pass
+
     # Зрительная память: подпись кадра из его же измерений. Сначала ищем, не
     # видели ли похожее — и только потом запоминаем, иначе кадр найдёт сам
     # себя и любое узнавание станет бессмысленным.
@@ -2785,6 +2825,9 @@ def normalize(result: dict[str, Any]) -> dict[str, Any]:
     seen_before = result.get("seen_before")
     if isinstance(seen_before, dict):
         normalized["seen_before"] = seen_before
+    world = result.get("world")
+    if isinstance(world, dict):
+        normalized["world"] = world
     consolidation = result.get("consolidation")
     if isinstance(consolidation, dict):
         normalized["consolidation"] = consolidation
