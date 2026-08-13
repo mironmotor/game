@@ -719,6 +719,79 @@ class VectorMemory:
             c.execute(
                 "CREATE INDEX IF NOT EXISTS idx_vector_importance ON vector_memories(importance)"
             )
+            # Зрительная память живёт отдельно от текстовой намеренно. Вектор
+            # кадра — это измеренные пиксели, вектор текста — хэш по словам;
+            # косинус между ними не значит ничего, и держать их в одной таблице
+            # означало бы искать похожие картинки среди фраз.
+            c.execute(
+                """
+                CREATE TABLE IF NOT EXISTS sight_vectors (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    timestamp REAL NOT NULL,
+                    source TEXT NOT NULL,
+                    label TEXT NOT NULL DEFAULT '',
+                    summary TEXT NOT NULL DEFAULT '',
+                    vector TEXT NOT NULL
+                )
+                """
+            )
+            c.execute("CREATE INDEX IF NOT EXISTS idx_sight_label ON sight_vectors(label)")
+
+    def remember_sight(
+        self,
+        source: str,
+        vector: list[float],
+        *,
+        label: str = "",
+        summary: str = "",
+    ) -> int | None:
+        """Запомнить кадр по его пиксельной подписи."""
+        if not vector or not any(vector):
+            return None
+        with self._conn() as c:
+            cur = c.execute(
+                "INSERT INTO sight_vectors (timestamp, source, label, summary, vector) VALUES (?,?,?,?,?)",
+                (time.time(), str(source)[:400], str(label)[:120], str(summary)[:600], json.dumps(vector)),
+            )
+            return int(cur.lastrowid or 0)
+
+    def similar_sights(self, vector: list[float], limit: int = 5) -> list[dict[str, Any]]:
+        """Ближайшие виденные кадры.
+
+        Перебор полный и это осознанно: сотни кадров по сорок чисел — это
+        десятки килобайт, скалярное произведение по ним считается мгновенно, а
+        приближённый поиск здесь только добавил бы неточности без выигрыша.
+        """
+        if not vector or not any(vector):
+            return []
+        with self._conn() as c:
+            rows = c.execute(
+                "SELECT id, source, label, summary, vector FROM sight_vectors ORDER BY id DESC LIMIT 4000"
+            ).fetchall()
+        if not rows:
+            return []
+        query = np.asarray(vector, dtype=np.float32)
+        qn = float(np.linalg.norm(query)) or 1.0
+        out: list[dict[str, Any]] = []
+        for row in rows:
+            try:
+                other = np.asarray(json.loads(row["vector"]), dtype=np.float32)
+            except Exception:  # noqa: BLE001 - битую запись просто пропускаем
+                continue
+            if other.shape != query.shape:
+                continue  # вектор старого формата — сравнивать нельзя
+            score = float(query @ other / (qn * (float(np.linalg.norm(other)) or 1.0)))
+            out.append(
+                {
+                    "id": int(row["id"]),
+                    "source": row["source"],
+                    "label": row["label"],
+                    "summary": row["summary"],
+                    "близость": round(score, 4),
+                }
+            )
+        out.sort(key=lambda x: x["близость"], reverse=True)
+        return out[: max(1, limit)]
 
     def remember(self, event: Event, evaluation: dict[str, Any] | None = None) -> int | None:
         text = text_from_event(event, evaluation)

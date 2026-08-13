@@ -618,6 +618,87 @@ def describe(measures: dict[str, Any]) -> str:
     return " ".join(parts)
 
 
+VECTOR_FIELDS = 40
+
+
+def as_vector(measures: dict[str, Any]) -> list[float]:
+    """Кадр как 40 чисел — подпись, по которой его можно узнать.
+
+    Сейчас в память кладётся ТЕКСТ описания, а он хэшируется по словам. Значит
+    два визуально одинаковых кадра, описанных разными словами, лежат в памяти
+    далеко друг от друга, и «MAX узнаёт эту игру» невозможно в принципе: он
+    сравнивает формулировки, а не картинки.
+
+    Здесь подпись собирается из того, что уже посчитано: доли палитры, свет по
+    девяти зонам, плотность деталей по ним же, общий свет, ритм, композиция,
+    тип кадра, текст. Семантики в ней нет — это не CLIP, «кот» отсюда не
+    выводится. Зато она детерминирована, считается на дроплете и различает
+    ночную езду по неону и дневные пустоши, потому что различаются сами числа.
+
+    Порядок полей фиксирован: вектор из старой записи должен сравниваться с
+    новым, иначе память рассыплется при первом же изменении формата.
+    """
+    v: list[float] = []
+
+    pal = measures.get("палитра") or []
+    for i in range(4):
+        v.append(float(pal[i]["доля"]) if i < len(pal) else 0.0)
+
+    zs = measures.get("зоны") or []
+    for i in range(9):
+        z = zs[i] if i < len(zs) else {}
+        v.append(float(z.get("яркость") or 0.0))
+    for i in range(9):
+        z = zs[i] if i < len(zs) else {}
+        # Плотность деталей мельче остальных величин на порядок — поднимаем в
+        # тот же масштаб, иначе в косинусе она просто не будет слышна.
+        v.append(min(1.0, float(z.get("детали") or 0.0) * 20.0))
+
+    lig = measures.get("свет") or {}
+    v += [
+        float(lig.get("яркость") or 0.0),
+        float(lig.get("контраст") or 0.0),
+        float(lig.get("тени_в_ноль") or 0.0),
+        float(lig.get("света_в_белое") or 0.0),
+    ]
+
+    rhy = measures.get("ритм") or {}
+    v += [
+        float(rhy.get("крупные_формы") or 0.0),
+        float(rhy.get("средние") or 0.0),
+        float(rhy.get("фактура") or 0.0),
+        min(1.0, float(rhy.get("периодичность") or 0.0) / 30.0),
+        1.0 if rhy.get("узор") else 0.0,
+    ]
+
+    comp = measures.get("композиция") or {}
+    center = comp.get("центр_масс") or [0.5, 0.5]
+    v += [
+        float(center[0]),
+        float(center[1]),
+        float(comp.get("симметрия_лево_право") or 0.0),
+        float(comp.get("симметрия_верх_низ") or 0.0),
+    ]
+
+    what = measures.get("что_это") or {}
+    v += [
+        min(1.0, float(what.get("уникальных_оттенков") or 0.0) * 15.0),
+        float(what.get("ровный_фон") or 0.0),
+        float(what.get("прямых_границ") or 0.0),
+    ]
+
+    txt = measures.get("текст") or {}
+    v += [
+        min(1.0, float(txt.get("строк") or 0) / 20.0),
+        1.0 if txt.get("есть_текст") else 0.0,
+    ]
+
+    v = v[:VECTOR_FIELDS] + [0.0] * max(0, VECTOR_FIELDS - len(v))
+    arr = np.asarray(v, dtype=np.float32)
+    norm = float(np.linalg.norm(arr)) or 1.0
+    return [round(float(x), 5) for x in (arr / norm)]
+
+
 def measure(path: str | Path) -> dict[str, Any]:
     """Полный пиксельный разбор одного кадра."""
     rgb = _load(path)

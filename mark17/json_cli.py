@@ -1752,6 +1752,42 @@ def _handle_see(event: Event, stores: Mark17Stores) -> dict[str, Any]:
         "self_evaluation": {**evaluation, "store_memory": True},
     }
 
+    # Зрительная память: подпись кадра из его же измерений. Сначала ищем, не
+    # видели ли похожее — и только потом запоминаем, иначе кадр найдёт сам
+    # себя и любое узнавание станет бессмысленным.
+    if pixels and not pixels.get("error"):
+        try:
+            from mark17 import vision_pixels as _vp
+
+            sight_vector = _vp.as_vector(pixels)
+            seen_before = stores.vector_memory.similar_sights(sight_vector, limit=5)
+            stores.vector_memory.remember_sight(
+                path.name,
+                sight_vector,
+                label=str((pixels.get("что_это") or {}).get("тип") or ""),
+                summary=note[:300],
+            )
+            if seen_before:
+                result["recognized"] = seen_before
+                # Порог 0.97 — по замеру: кадры одной сцены дают 0.99–1.00,
+                # разные сцены не поднимаются выше 0.81. Между ними пусто,
+                # поэтому «уже видел» говорится только при настоящем совпадении.
+                close = [s for s in seen_before if s["близость"] >= 0.97]
+                if close:
+                    result["seen_before"] = close[0]
+                    # Узнавание должно быть слышно, а не лежать в данных.
+                    # И оно называет расстояние: MAX не «догадался», а измерил.
+                    hit = close[0]
+                    answer = result.get("answer")
+                    if isinstance(answer, dict):
+                        answer["text"] = (
+                            f"Это я уже видел — «{hit['source']}», совпадение {hit['близость']}.\n\n"
+                            + str(answer.get("text") or "")
+                        )
+        except Exception:  # noqa: BLE001 - память не должна ронять зрение
+            pass
+
+
     # Ветки: увиденное — это состояние мира, из которого есть продолжения.
     # Считаем их только по просьбе: каждая ветка стоит отдельного запроса.
     if event.payload.get("branches"):
@@ -2741,6 +2777,14 @@ def normalize(result: dict[str, Any]) -> dict[str, Any]:
     vision = result.get("vision")
     if isinstance(vision, dict):
         normalized["vision"] = vision
+    # Узнавание кадра: ближайшие виденные и — отдельно — точное совпадение.
+    # Без этого проброса «уже видел» вычислялось и молча терялось по дороге.
+    recognized = result.get("recognized")
+    if isinstance(recognized, list):
+        normalized["recognized"] = recognized
+    seen_before = result.get("seen_before")
+    if isinstance(seen_before, dict):
+        normalized["seen_before"] = seen_before
     consolidation = result.get("consolidation")
     if isinstance(consolidation, dict):
         normalized["consolidation"] = consolidation
