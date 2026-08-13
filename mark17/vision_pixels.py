@@ -51,12 +51,16 @@ HUE_NAMES: list[tuple[float, str]] = [
 ]
 
 
-def _load(path: str | Path) -> np.ndarray:
-    """Кадр как массив float 0..1, ужатый до рабочего размера."""
+def _load(path: str | Path, side: int = WORK_SIDE) -> np.ndarray:
+    """Кадр как массив float 0..1, ужатый до рабочего размера.
+
+    Размер параметром, потому что разным измерениям нужна разная детальность:
+    свету и палитре хватает мелкой копии, а строки текста на ней исчезают.
+    """
     from PIL import Image
 
     img = Image.open(path).convert("RGB")
-    img.thumbnail((WORK_SIDE, WORK_SIDE))
+    img.thumbnail((side, side))
     return np.asarray(img, dtype=np.float32) / 255.0
 
 
@@ -294,12 +298,20 @@ def text_lines(rgb: np.ndarray) -> dict[str, Any]:
             last_end = i
         prev = bool(active)
     step = float(np.median(gaps)) if gaps else 0.0
-    regular = bool(len(gaps) >= 2 and np.std(gaps) < max(2.0, step * 0.5))
+    # Равномерность — признак сплошного абзаца, а не условие существования
+    # текста. Настоящий экран состоит из заголовков, кнопок и списков с
+    # разными интервалами, и строгая проверка «шаг всюду одинаковый» браковала
+    # очевидные скриншоты интерфейса. Оставляем её как отдельное наблюдение.
+    regular = bool(len(gaps) >= 2 and np.std(gaps) < max(2.0, step))
+    # Текст считаем найденным по факту: несколько строк с человеческим
+    # межстрочным интервалом. Слишком частые полосы — это фактура или узор,
+    # слишком редкие — просто крупные объекты, а не строки.
+    plausible_step = bool(step and 2.0 <= step <= 40.0)
     return {
         "строк": int(count),
         "шаг_строк_px": round(step, 1) if step else None,
         "равномерные": regular,
-        "есть_текст": bool(count >= 3 and regular),
+        "есть_текст": bool(count >= 3 and plausible_step),
     }
 
 
@@ -429,7 +441,10 @@ def measure(path: str | Path) -> dict[str, Any]:
         "свет": light(rgb),
         "композиция": composition(rgb),
         "детали": detail(rgb),
-        "текст": text_lines(rgb),
+        # Текст ищем на копии покрупнее: на 256 px строки интерфейса
+        # схлопываются в ровную заливку, и текста «не оказывается» там,
+        # где он занимает пол-экрана.
+        "текст": text_lines(_load(path, side=512)),
         "зоны": zones(rgb),
         "ритм": rhythm(rgb),
         "размер": [int(rgb.shape[1]), int(rgb.shape[0])],
