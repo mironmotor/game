@@ -13,6 +13,19 @@ import { appBasePath } from '@/lib/base-path';
 
 const TOKEN_KEY = 'mir_admin_token';
 
+interface ApiKeyRow {
+  id: string;
+  prefix: string;
+  email: string;
+  name: string;
+  calls: number;
+  tokens_in: number;
+  tokens_out: number;
+  spent: number;
+  balance: number;
+  revoked_at?: string;
+}
+
 type AdminData = {
   ok: boolean;
   via?: string;
@@ -60,6 +73,11 @@ export default function AdminPanel() {
   const [mcAmt, setMcAmt] = useState('');
   // Выписанные premium-коды: продажа доступа без правки env и редеплоя.
   const [issued, setIssued] = useState<IssuedCode[] | null>(null);
+  // Ключи MAX API: продажа доступа снаружи, отдельно от премиум-кодов на сайт.
+  const [keys, setKeys] = useState<ApiKeyRow[] | null>(null);
+  const [keyEmail, setKeyEmail] = useState('');
+  const [keyCoins, setKeyCoins] = useState('5000');
+  const [lastKey, setLastKey] = useState('');
   const [codeNote, setCodeNote] = useState('');
   const [codeDays, setCodeDays] = useState('30');
   const [lastCode, setLastCode] = useState('');
@@ -119,6 +137,62 @@ export default function AdminPanel() {
     }
   }, []);
 
+  const loadKeys = useCallback(async () => {
+    try {
+      const res = await fetch(`${appBasePath}/api/admin/api-keys`, {
+        headers: { 'x-admin-token': readToken() },
+      });
+      const d = (await res.json()) as { keys?: ApiKeyRow[] };
+      setKeys(d.keys ?? []);
+    } catch {
+      setKeys([]);
+    }
+  }, []);
+
+  const issueApiKey = useCallback(async () => {
+    const email = keyEmail.trim().toLowerCase();
+    if (!email) {
+      setNote('нужен email покупателя');
+      return;
+    }
+    setBusy(true);
+    try {
+      const res = await fetch(`${appBasePath}/api/admin/api-keys`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-admin-token': readToken() },
+        body: JSON.stringify({ email, mircoin: Number(keyCoins) || 0 }),
+      });
+      const d = (await res.json()) as { ok?: boolean; key?: string; error?: string };
+      if (d.ok && d.key) {
+        // Ключ показывается ЕДИНСТВЕННЫЙ раз: в хранилище только его хэш.
+        setLastKey(d.key);
+        setNote('ключ выпущен — скопируй сейчас, второй раз его не увидеть');
+        await loadKeys();
+      } else {
+        setNote(d.error || 'не вышло выпустить ключ');
+      }
+    } finally {
+      setBusy(false);
+    }
+  }, [keyEmail, keyCoins, loadKeys]);
+
+  const revokeApiKey = useCallback(
+    async (id: string) => {
+      setBusy(true);
+      try {
+        await fetch(`${appBasePath}/api/admin/api-keys`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'x-admin-token': readToken() },
+          body: JSON.stringify({ action: 'revoke', id }),
+        });
+        await loadKeys();
+      } finally {
+        setBusy(false);
+      }
+    },
+    [loadKeys],
+  );
+
   const issueCode = useCallback(async () => {
     setBusy(true);
     setNote('');
@@ -141,6 +215,7 @@ export default function AdminPanel() {
     } finally {
       setBusy(false);
       void loadCodes();
+      void loadKeys();
     }
   }, [codeNote, codeDays, loadCodes]);
 
@@ -339,6 +414,75 @@ export default function AdminPanel() {
                     ))}
                   </div>
                 </div>
+              </div>
+            </div>
+
+            {/* Продажа доступа снаружи: ключ к MAX API + предоплаченные монеты. */}
+            <div className="mt-2 rounded-xl border border-sky-400/25 bg-sky-400/[0.05] p-3">
+              <div className="flex items-center gap-1.5 text-[10px] uppercase tracking-widest text-sky-200/70">
+                <Zap className="h-3 w-3" /> MAX API · выпустить ключ
+              </div>
+
+              <div className="mt-2 flex flex-wrap gap-1.5">
+                <input
+                  value={keyEmail}
+                  onChange={(e) => setKeyEmail(e.target.value)}
+                  placeholder="email покупателя"
+                  className="min-w-0 flex-1 rounded-lg border border-white/10 bg-black/40 px-2 py-1.5 text-[12px] text-white/85 outline-none placeholder:text-white/25"
+                />
+                <input
+                  value={keyCoins}
+                  onChange={(e) => setKeyCoins(e.target.value)}
+                  placeholder="Ⓜ"
+                  title="Сколько MIRCOIN зачислить сразу. Ключ без баланса не работает."
+                  className="w-20 rounded-lg border border-white/10 bg-black/40 px-2 py-1.5 text-[12px] text-white/85 outline-none placeholder:text-white/25"
+                />
+                <button
+                  onClick={() => void issueApiKey()}
+                  disabled={busy}
+                  className="rounded-lg bg-sky-400/90 px-3 py-1.5 text-[12px] font-semibold text-sky-950 transition hover:bg-sky-300 disabled:opacity-50"
+                >
+                  Выпустить
+                </button>
+              </div>
+
+              {lastKey && (
+                <div className="mt-2 rounded-lg border border-sky-300/30 bg-black/40 px-2 py-1.5">
+                  <div className="flex items-center gap-2">
+                    <code className="min-w-0 flex-1 truncate text-[12px] font-bold text-sky-200">{lastKey}</code>
+                    <button
+                      onClick={() => void navigator.clipboard?.writeText(lastKey)}
+                      className="flex-none rounded bg-white/10 px-2 py-1 text-[11px] text-white/70 transition hover:bg-white/20"
+                    >
+                      копировать
+                    </button>
+                  </div>
+                  <div className="mt-1 text-[10px] text-amber-200/70">
+                    Показан один раз — в хранилище только хэш. Потеряется — выпускай новый.
+                  </div>
+                </div>
+              )}
+
+              <div className="mt-2 max-h-36 space-y-1 overflow-y-auto">
+                {(keys ?? []).length === 0 && (
+                  <div className="text-[11px] text-white/35">ключей пока нет — выпусти первый и продай доступ к ядру</div>
+                )}
+                {(keys ?? []).map((k) => (
+                  <div key={k.id} className="flex items-center gap-2 text-[11px]">
+                    <code className={k.revoked_at ? 'text-white/30 line-through' : 'text-sky-200'}>{k.prefix}…</code>
+                    <span className="min-w-0 flex-1 truncate text-white/45">{k.email}</span>
+                    <span className="text-white/35" title="вызовов">×{k.calls}</span>
+                    <span className="font-mono text-amber-200/80" title="баланс владельца">Ⓜ{k.balance}</span>
+                    {!k.revoked_at && (
+                      <button
+                        onClick={() => void revokeApiKey(k.id)}
+                        className="flex-none rounded bg-rose-400/15 px-1.5 py-0.5 text-[10px] text-rose-200 transition hover:bg-rose-400/30"
+                      >
+                        отозвать
+                      </button>
+                    )}
+                  </div>
+                ))}
               </div>
             </div>
 
