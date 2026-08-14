@@ -11,6 +11,30 @@ service cloud.firestore {
       return isAuthenticated() && request.auth.uid == userId;
     }
 
+    // Leaderboard Collection
+    // Публичная витрина прогресса: одна запись на игрока, id документа = uid.
+    // Читать может кто угодно (в том числе неавторизованный) — это и есть смысл
+    // лидерборда. Писать можно ТОЛЬКО свою запись и только валидные поля:
+    // uid подделать нельзя, xp — неотрицательное число в разумных пределах,
+    // имя ограничено по длине. Тайминг ставит сервер, а не клиент.
+    match /leaderboard/{userId} {
+      allow read: if true;
+
+      allow create, update: if isOwner(userId)
+        && request.resource.data.uid == userId
+        && request.resource.data.xp is int
+        && request.resource.data.xp >= 0
+        && request.resource.data.xp <= 10000000
+        && request.resource.data.level is int
+        && request.resource.data.level >= 1
+        && request.resource.data.displayName is string
+        && request.resource.data.displayName.size() <= 40
+        && request.resource.data.updatedAt == request.time;
+
+      // Игрок может стереть себя с доски — но не соседа.
+      allow delete: if isOwner(userId);
+    }
+
     // Users Collection
     match /users/{userId} {
       allow read: if isOwner(userId);
