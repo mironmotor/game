@@ -255,26 +255,35 @@ export default function AdminPanel() {
 
   const doTransfer = useCallback(async () => {
     const amt = Math.round(Number(mcAmt) || 0);
-    if (!mcTo || amt <= 0) {
-      setNote('укажи получателя и сумму');
+    const list = mcTo.split(/[\s,;]+/).map((v) => v.trim()).filter(Boolean);
+    if (!list.length || amt <= 0) {
+      setNote('нужны почта и сумма');
       return;
     }
     setBusy(true);
-    setNote('');
     try {
       const res = await fetch(`${appBasePath}/api/mircoin`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', ...(readToken() ? { 'x-admin-token': readToken() } : {}) },
-        body: JSON.stringify({ action: 'transfer', to: mcTo, amount: amt }),
+        headers: { 'Content-Type': 'application/json', 'x-admin-token': readToken() },
+        body: JSON.stringify({ action: 'transfer_many', to: list, amount: amt, reason: 'перевод от Мирона' }),
       });
-      const d = (await res.json()) as { error?: string };
-      setNote(res.ok ? `переведено ${amt.toLocaleString('ru-RU')} MIR → ${mcTo}` : `перевод не прошёл: ${d.error || res.status}`);
-      if (res.ok) {
-        setMcAmt('');
-        void loadMircoin();
+      const d = (await res.json()) as {
+        ok?: boolean; sent?: number; delivered?: number; failed?: number;
+        results?: Array<{ email: string; ok: boolean; error?: string }>; error?: string;
+      };
+      if (!res.ok) {
+        setNote(`перевод не прошёл: ${d.error || res.status}`);
+      } else {
+        const bad = (d.results ?? []).filter((r) => !r.ok);
+        // Про неудачные адреса говорим поимённо: «отправлено 6 из 8» без
+        // списка оставляет гадать, кому именно не дошло.
+        setNote(
+          `отправлено ${d.delivered ?? 0} из ${list.length} по ${amt.toLocaleString('ru-RU')} MIR` +
+            (bad.length ? ` · не дошло: ${bad.map((r) => `${r.email} (${r.error})`).join(', ')}` : ''),
+        );
+        if (!bad.length) setMcTo('');
       }
-    } catch (e) {
-      setNote(e instanceof Error ? e.message : String(e));
+      await loadMircoin();
     } finally {
       setBusy(false);
     }
@@ -567,34 +576,34 @@ export default function AdminPanel() {
                 {mcUsers && mcUsers.length === 0 && <span className="text-white/35">пока нет счетов (появятся, когда люди войдут)</span>}
                 {!mcUsers && <span className="text-white/35">загрузка…</span>}
               </div>
-              <div className="mt-2 flex flex-wrap items-center gap-1.5">
-                <select
+              <div className="mt-2 space-y-1.5">
+                <textarea
                   value={mcTo}
                   onChange={(e) => setMcTo(e.target.value)}
-                  className="min-w-0 flex-1 rounded border border-white/15 bg-black/50 px-2 py-1.5 text-sm text-white outline-none"
-                >
-                  <option value="">— кому перевести —</option>
-                  {(mcUsers ?? []).map((u) => (
-                    <option key={u.email} value={u.email}>
-                      {u.name || u.email} ({num(u.balance)})
-                    </option>
-                  ))}
-                </select>
-                <input
-                  value={mcAmt}
-                  onChange={(e) => setMcAmt(e.target.value.replace(/[^0-9]/g, ''))}
-                  inputMode="numeric"
-                  placeholder="сколько"
-                  className="w-24 rounded border border-white/15 bg-black/50 px-2 py-1.5 text-sm text-white outline-none placeholder:text-white/30"
+                  rows={2}
+                  placeholder="почты через запятую или с новой строки — можно тем, кто ещё не заходил"
+                  className="w-full resize-y rounded border border-white/15 bg-black/50 px-2 py-1.5 text-sm text-white outline-none placeholder:text-white/30"
                 />
-                <button
-                  type="button"
-                  disabled={busy || !mcTo || !mcAmt}
-                  onClick={() => void doTransfer()}
-                  className="shrink-0 rounded bg-yellow-500/30 px-3 py-1.5 text-sm font-semibold text-yellow-50 hover:bg-yellow-400/40 disabled:opacity-40"
-                >
-                  Перевести
-                </button>
+                <div className="flex flex-wrap items-center gap-1.5">
+                  <input
+                    value={mcAmt}
+                    onChange={(e) => setMcAmt(e.target.value.replace(/[^0-9]/g, ''))}
+                    inputMode="numeric"
+                    placeholder="сколько каждому"
+                    className="w-36 rounded border border-white/15 bg-black/50 px-2 py-1.5 text-sm text-white outline-none placeholder:text-white/30"
+                  />
+                  <button
+                    type="button"
+                    disabled={busy || !mcTo.trim() || !mcAmt}
+                    onClick={() => void doTransfer()}
+                    className="shrink-0 rounded bg-yellow-500/30 px-3 py-1.5 text-sm font-semibold text-yellow-50 hover:bg-yellow-400/40 disabled:opacity-40"
+                  >
+                    Перевести
+                  </button>
+                  <span className="text-[11px] text-white/35">
+                    {mcTo.split(/[\s,;]+/).filter(Boolean).length || 0} адресов
+                  </span>
+                </div>
               </div>
             </div>
 

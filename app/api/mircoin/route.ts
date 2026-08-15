@@ -26,6 +26,35 @@ async function sessionEmail(): Promise<{ email: string; name?: string } | null> 
   }
 }
 
+/**
+ * Похоже ли это на почту.
+ *
+ * Проверка нарочно грубая — задача не отвергнуть экзотический адрес, а не дать
+ * монетам уйти в опечатку. Перевод создаёт счёт получателя сам, поэтому строка
+ * «ivan@gmial» тихо станет полноценным аккаунтом, и деньги окажутся у адреса,
+ * которого не существует.
+ */
+function looksLikeEmail(value: string): boolean {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(value.trim());
+}
+
+/**
+ * Чей счёт списывать при переводе.
+ *
+ * Обычно это вошедший через Google. Но владелец приходит и по админ-токену —
+ * из панели, без браузерной сессии, — и раньше упирался в
+ * authentication_required на собственных деньгах. По токену источником
+ * считается первый адрес из ADMIN_EMAILS: это тот же человек, просто зашедший
+ * другой дверью.
+ */
+async function payerEmail(request: Request, me: { email: string } | null): Promise<string | null> {
+  if (me) return me.email;
+  const token = (request.headers.get('x-admin-token') || '').trim();
+  const wanted = (process.env.ADMIN_TOKEN || '').trim();
+  if (wanted && token && token === wanted) return adminEmails()[0] || null;
+  return null;
+}
+
 async function isAdmin(request: Request, email?: string): Promise<boolean> {
   const token = (request.headers.get('x-admin-token') || '').trim();
   const wanted = (process.env.ADMIN_TOKEN || '').trim();
@@ -89,15 +118,58 @@ export async function POST(request: Request) {
   }
 
   if (action === 'transfer') {
-    if (!me) return NextResponse.json({ error: 'authentication_required' }, { status: 401 });
+    const payer = await payerEmail(request, me);
+    if (!payer) return NextResponse.json({ error: 'authentication_required' }, { status: 401 });
     const to = String(body.to || '').toLowerCase();
     if (!to) return NextResponse.json({ error: 'recipient_required' }, { status: 400 });
-    const res = await transfer(me.email, to, amount, String(body.reason || 'перевод'));
+    if (!looksLikeEmail(to)) return NextResponse.json({ error: 'bad_email' }, { status: 400 });
+    const res = await transfer(payer, to, amount, String(body.reason || 'перевод'));
     if (!res.ok) return NextResponse.json({ error: res.error }, { status: 400 });
     return NextResponse.json({
       ok: true,
       from: { email: res.from!.email, balance: res.from!.balance },
       to: { email: res.to!.email, balance: res.to!.balance },
+    });
+  }
+
+  // Раздача на несколько почт разом. Переводы идут по одному и независимо:
+  // если на седьмом адресе кончились монеты, первые шесть уже дошли и
+  // отменять их нечем — поэтому в ответе видно судьбу каждого адреса
+  // отдельно, а не общее «получилось / не получилось».
+  if (action === 'transfer_many') {
+    const payer = await payerEmail(request, me);
+    if (!payer) return NextResponse.json({ error: 'authentication_required' }, { status: 401 });
+    const raw = Array.isArray(body.to) ? body.to : String(body.to || '').split(/[\s,;]+/);
+    const targets = Array.from(
+      new Set(raw.map((v: unknown) => String(v || '').trim().toLowerCase()).filter(Boolean)),
+    );
+    if (!targets.length) return NextResponse.json({ error: 'recipient_required' }, { status: 400 });
+    if (targets.length > 200) return NextResponse.json({ error: 'too_many_recipients' }, { status: 400 });
+
+    const reason = String(body.reason || 'перевод').slice(0, 160);
+    const results: Array<{ email: string; ok: boolean; error?: string; balance?: number }> = [];
+    let sent = 0;
+    for (const to of targets) {
+      if (!looksLikeEmail(to)) {
+        results.push({ email: to, ok: false, error: 'bad_email' });
+        continue;
+      }
+      const res = await transfer(payer, to, amount, reason);
+      if (res.ok) {
+        sent += amount;
+        results.push({ email: to, ok: true, balance: res.to!.balance });
+      } else {
+        results.push({ email: to, ok: false, error: res.error });
+      }
+    }
+    const mine = await getAccount(payer);
+    return NextResponse.json({
+      ok: results.some((r) => r.ok),
+      sent,
+      delivered: results.filter((r) => r.ok).length,
+      failed: results.filter((r) => !r.ok).length,
+      results,
+      balance: mine?.balance ?? 0,
     });
   }
 
