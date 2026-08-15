@@ -3,10 +3,16 @@
 /**
  * Ведическая карта (джйотиш) вместо западной ZET9.
  *
- * Карта рисуется квадратом, а не колесом, и это не стилизация: в Индии карту
- * так и чертят. Взят южный стиль — знаки стоят на неподвижных местах, и
- * читается такая карта глазами сразу, без поиска, где начинается первый дом.
- * Лагна отмечена отдельно, дома считаются от неё цельными знаками.
+ * Карта рисуется квадратом, а не колесом, и это не стилизация: в Индии её так
+ * и чертят. Стилей два, и они переключаются, потому что читают по-разному.
+ *
+ * СЕВЕРНАЯ (по умолчанию) — ромбами. На местах стоят ДОМА: верхний ромб всегда
+ * первый, дальше против часовой стрелки. Знаки при этом переезжают, поэтому в
+ * каждой ячейке подписан их номер — без него карту не прочесть.
+ *
+ * ЮЖНАЯ — квадратами. Наоборот: знаки прибиты к своим местам, а дома считаются
+ * от лагны. Спор о том, какая правильнее, идёт веками; обе показывают одно и
+ * то же небо, и выбор — дело привычки, а не точности.
  *
  * Расчёт живёт в lib/jyotish-engine.ts и идёт целиком в браузере — дата
  * рождения никуда не отправляется, пока человек сам не нажмёт «записать в
@@ -104,6 +110,83 @@ function initialBirthData(): BirthData {
   };
 }
 
+/**
+ * Северная карта — ромбами. Здесь на местах стоят ДОМА, а знаки переезжают:
+ * верхний ромб всегда первый дом, дальше против часовой стрелки. Поэтому в
+ * каждой ячейке подписан номер знака — без него карту не прочесть, ведь
+ * геометрия про дома ничего о знаках не говорит.
+ *
+ * В южной наоборот: знаки прибиты к местам, а дома считаются от лагны. Обе
+ * читают одну и ту же карту, спор о том, какая правильнее, идёт веками, и
+ * выбор здесь — дело привычки, а не точности.
+ *
+ * Разметка классическая: квадрат, обе диагонали и ромб по серединам сторон.
+ * Двенадцать областей — четыре ромба по сторонам и восемь треугольников.
+ */
+const NORTH_CELLS: Array<{ house: number; points: string; label: [number, number] }> = [
+  { house: 1, points: '50,0 75,25 50,50 25,25', label: [50, 22] },
+  { house: 2, points: '50,0 25,25 0,0', label: [25, 11] },
+  { house: 3, points: '0,0 25,25 0,50', label: [10, 26] },
+  { house: 4, points: '0,50 25,25 50,50 25,75', label: [22, 50] },
+  { house: 5, points: '0,50 25,75 0,100', label: [10, 74] },
+  { house: 6, points: '0,100 25,75 50,100', label: [25, 89] },
+  { house: 7, points: '50,100 25,75 50,50 75,75', label: [50, 78] },
+  { house: 8, points: '50,100 75,75 100,100', label: [75, 89] },
+  { house: 9, points: '100,100 75,75 100,50', label: [90, 74] },
+  { house: 10, points: '100,50 75,75 50,50 75,25', label: [78, 50] },
+  { house: 11, points: '100,50 75,25 100,0', label: [90, 26] },
+  { house: 12, points: '100,0 75,25 50,0', label: [75, 11] },
+];
+
+function NorthChart({ chart }: { chart: JyotishChart }) {
+  const byHouse = useMemo(() => {
+    const map = new Map<number, JyotishChart['grahas']>();
+    for (const g of chart.grahas) {
+      const list = map.get(g.house) ?? [];
+      list.push(g);
+      map.set(g.house, list);
+    }
+    return map;
+  }, [chart]);
+
+  return (
+    <svg viewBox="-2 -2 104 104" className="aspect-square w-full rounded-2xl bg-[#0b0713]" role="img" aria-label="Ведическая карта, северный стиль">
+      <rect x="0" y="0" width="100" height="100" fill="none" stroke="rgba(251,191,36,0.35)" strokeWidth="0.6" />
+      <line x1="0" y1="0" x2="100" y2="100" stroke="rgba(251,191,36,0.25)" strokeWidth="0.4" />
+      <line x1="100" y1="0" x2="0" y2="100" stroke="rgba(251,191,36,0.25)" strokeWidth="0.4" />
+      <polygon points="50,0 100,50 50,100 0,50" fill="none" stroke="rgba(251,191,36,0.3)" strokeWidth="0.4" />
+
+      {NORTH_CELLS.map((cell) => {
+        // Знак в доме: от лагны по кругу — первый дом это знак лагны.
+        const rashiIndex = (chart.lagnaRashiIndex + cell.house - 1) % 12;
+        const here = byHouse.get(cell.house) ?? [];
+        const isLagna = cell.house === 1;
+        return (
+          <g key={cell.house}>
+            {isLagna && <polygon points={cell.points} fill="rgba(251,191,36,0.07)" />}
+            <text x={cell.label[0]} y={cell.label[1]} textAnchor="middle" fontSize="3.4" fill="rgba(255,255,255,0.32)">
+              {rashiIndex + 1}
+            </text>
+            {here.map((g, i) => (
+              <text
+                key={g.key}
+                x={cell.label[0]}
+                y={cell.label[1] + 4.6 + i * 4.2}
+                textAnchor="middle"
+                fontSize="3.9"
+                fill={g.retrograde ? '#fda4af' : '#fde68a'}
+              >
+                {g.glyph}
+                <tspan fontSize="2.6" fill="rgba(255,255,255,0.4)"> {g.degree}</tspan>
+              </text>
+            ))}
+          </g>
+        );
+      })}
+    </svg>
+  );
+}
+
 function RashiChart({ chart }: { chart: JyotishChart }) {
   const byRashi = useMemo(() => {
     const map = new Map<number, JyotishChart['grahas']>();
@@ -169,6 +252,7 @@ function RashiChart({ chart }: { chart: JyotishChart }) {
 export default function JyotishPanel() {
   const [birth, setBirth] = useState<BirthData>(initialBirthData);
   const [placeId, setPlaceId] = useState(PLACES[0].id);
+  const [style, setStyle] = useState<'north' | 'south'>('north');
   const [busy, setBusy] = useState(false);
   const [note, setNote] = useState('');
 
@@ -262,7 +346,24 @@ export default function JyotishPanel() {
 
       {chart.ok && (
         <>
-          <RashiChart chart={chart.value} />
+          <div className="flex gap-1">
+            {(['north', 'south'] as const).map((id) => (
+              <button
+                key={id}
+                type="button"
+                onClick={() => setStyle(id)}
+                className={`flex-1 rounded-lg border px-2 py-1 text-[11px] transition ${
+                  style === id
+                    ? 'border-amber-400/60 bg-amber-400/15 text-amber-100'
+                    : 'border-white/10 bg-white/[0.03] text-white/45 hover:bg-white/10'
+                }`}
+              >
+                {id === 'north' ? 'Северная · ромбы' : 'Южная · квадраты'}
+              </button>
+            ))}
+          </div>
+
+          {style === 'north' ? <NorthChart chart={chart.value} /> : <RashiChart chart={chart.value} />}
 
           <div className="rounded-lg border border-amber-400/25 bg-amber-400/[0.06] p-2">
             <div className="text-[10px] uppercase tracking-widest text-amber-300/60">Накшатра Луны</div>
