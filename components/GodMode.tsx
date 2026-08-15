@@ -35,7 +35,7 @@ import MusicStudio from '@/components/MusicStudio';
 import Mode777 from '@/components/Mode777';
 import DubbingStudio from '@/components/DubbingStudio';
 import VoicePicker from '@/components/VoicePicker';
-import Zet9Panel from '@/components/Zet9Panel';
+import JyotishPanel from '@/components/JyotishPanel';
 
 type GodModeAction =
   | 'chat'
@@ -272,8 +272,8 @@ export default function GodMode() {
           )}
 
           <div>
-            <div className="mb-1.5 text-[11px] uppercase tracking-widest text-violet-300/70">Программа · ZET9</div>
-            <Zet9Panel />
+            <div className="mb-1.5 text-[11px] uppercase tracking-widest text-amber-300/70">Джйотиш · ведическая карта</div>
+            <JyotishPanel />
           </div>
 
           <div>
@@ -300,7 +300,7 @@ export default function GodMode() {
 
           <p className="text-[10px] leading-relaxed text-white/30">
             Переключение мгновенное (без перезапуска): выбор пишется в файл, который читает мост на каждом вызове.
-            Если бэкенд недоступен — ядро автоматически идёт по лестнице резерва. ZET9 Core считает карту локально в браузере.
+            Если бэкенд недоступен — ядро автоматически идёт по лестнице резерва. Ведическая карта считается прямо в браузере.
           </p>
         </div>
       </div>

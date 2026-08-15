@@ -87,7 +87,7 @@ export const PLANETS: Record<PlanetKey, { name: string; glyph: string }> = {
 const DEG = Math.PI / 180;
 const RAD = 180 / Math.PI;
 
-function norm(value: number): number {
+export function norm(value: number): number {
   return ((value % 360) + 360) % 360;
 }
 
@@ -209,7 +209,7 @@ function moonLongitude(d: number, sun: ReturnType<typeof sunPosition>): number {
   return norm(longitude);
 }
 
-function longitudeAt(key: PlanetKey, julianDay: number): number {
+export function longitudeAt(key: PlanetKey, julianDay: number): number {
   const d = julianDay - 2451543.5;
   const sun = sunPosition(d);
   if (key === 'sun') return sun.longitude;
@@ -222,7 +222,7 @@ function signedDelta(to: number, from: number): number {
   return ((to - from + 540) % 360) - 180;
 }
 
-function julianFromBirth(input: BirthData): { julianDay: number; utcIso: string } {
+export function julianFromBirth(input: BirthData): { julianDay: number; utcIso: string } {
   const [year, month, day] = input.date.split('-').map(Number);
   const [hour = 0, minute = 0] = input.time.split(':').map(Number);
   if (![year, month, day, hour, minute].every(Number.isFinite)) throw new Error('Нужны корректные дата и время');
@@ -232,7 +232,7 @@ function julianFromBirth(input: BirthData): { julianDay: number; utcIso: string 
   return { julianDay: utcMs / 86_400_000 + 2440587.5, utcIso: utc.toISOString() };
 }
 
-function anglesFor(julianDay: number, latitude: number, longitude: number): { ascendant: number; midheaven: number } {
+export function anglesFor(julianDay: number, latitude: number, longitude: number): { ascendant: number; midheaven: number } {
   const T = (julianDay - 2451545) / 36525;
   const gmst = norm(280.46061837 + 360.98564736629 * (julianDay - 2451545) + 0.000387933 * T ** 2 - T ** 3 / 38710000);
   const sidereal = norm(gmst + longitude);
