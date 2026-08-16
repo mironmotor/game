@@ -92,6 +92,17 @@ export interface Max17Plan {
   mode?: string;
   goal?: string;
   actions?: Max17PlanAction[];
+  ok?: boolean;
+  domain?: string;
+  horizon_days?: number;
+  tasks?: Max17PlanTask[];
+  total_xp?: number;
+  first_move?: string;
+  summary?: string;
+  principle?: string;
+  path?: string;
+  action?: number;
+  paths?: Max17PlanPath[];
 }
 
 export interface Max17Outcome {
@@ -218,6 +229,15 @@ export interface Max17Response {
   dispatch?: { route?: string; instruction?: string };
   error?: string;
   details?: unknown;
+  // Поля режимов, перенесённых из main: мир, граф, физика и прочее,
+  // чего ответ боевого ядра пока не содержит — все опциональные.
+  voice?: Max17VoiceState;
+  world?: Max17World;
+  graph?: Max17Graph;
+  physics?: Max17Physics;
+  flow?: Max17Flow;
+  attention?: Max17Attention;
+  genesis?: Max17Genesis;
 }
 
 export function getApiPath(endpoint: string) {
@@ -490,4 +510,370 @@ export async function setLlmModel(id: string, role?: string): Promise<LlmConfig>
   });
   const { value, error } = await parseJsonBody<LlmConfig>(response);
   return value ?? { ok: false, error: error || 'Empty response from llm-config' };
+}
+
+// ── Типы режимов, перенесённых из ветки main ─────────────────────────────────
+// Клиенты ядра в двух ветках разошлись: main знает про мир, физику, граф и
+// голосовое состояние, ultra — нет. Здесь недостающие описания дописаны, а не
+// заменены: ни одно существующее не тронуто, поэтому боевой код продолжает
+// собираться ровно как собирался.
+export interface Max17AntiEvaluation {
+  route?: string;
+  score?: number;
+  reason?: string;
+  charge?: number;
+  annihilates?: boolean;
+  energy_released?: number;
+  correction?: string;
+}
+
+export interface Max17Cosmology {
+  scale_factor?: number;
+  hubble?: number;
+  density?: number;
+  critical_density?: number;
+  curvature?: number;
+  omega_matter?: number;
+  omega_lambda?: number;
+  omega_curvature?: number;
+  omega_total?: number;
+  lambda?: number;
+  dilution?: number;
+  fate?: 'expanding' | 'flat' | 'collapsing';
+  note?: string;
+  equation?: string;
+}
+
+export interface Max17VoiceState {
+  user_id?: string;
+  note?: string;
+  arousal?: number;
+  valence?: number;
+  tension?: number;
+  label?: string;
+  deviation?: Record<string, number>;
+  baseline_obs?: number;
+  context?: string;
+  acoustics?: {
+    f0?: number;
+    register?: number;
+    brightness?: number;
+    jitter?: number;
+    energy?: number;
+    voiced?: boolean;
+  };
+  baseline?: { obs?: number; f0?: number; note?: string; warming_up?: boolean };
+  recent?: Array<{
+    ts?: number;
+    arousal?: number;
+    valence?: number;
+    tension?: number;
+    label?: string;
+    context?: string;
+    f0?: number;
+  }>;
+}
+
+export interface Max17WorldCensus {
+  alive: number;
+  born: number;
+  died: number;
+  radius: number;
+  density: number;
+  spiral_b: number;
+  arms: number;
+  hue: number;
+  symmetry: number;
+  energy: number;
+  dt: number;
+}
+
+export interface Max17WorldLaws {
+  emission_scale?: number;
+  lifetime_scale?: number;
+  propagation?: number;
+  impedance?: number;
+  can_condense?: boolean;
+  epoch?: string;
+  epoch_title?: string;
+  temperature?: number | null;
+  bottleneck?: string;
+  bound_fraction?: number;
+  law?: string;
+}
+
+export interface Max17Body {
+  index: number;
+  mass: number;
+  x: number;
+  y: number;
+  z: number;
+  hue: number;
+  epoch?: string;
+  born_at?: number;
+  label?: string;
+}
+
+export interface Max17World {
+  world_id?: string;
+  seed?: number;
+  census?: Max17WorldCensus;
+  cosmos?: {
+    age_human?: string;
+    epoch?: string;
+    epoch_title?: string;
+    epoch_note?: string;
+    temperature?: number | null;
+    ether?: Record<string, unknown>;
+    matter?: Record<string, number | string>;
+  };
+  laws?: Max17WorldLaws;
+  condensate?: number;
+  new_bodies?: Max17Body[];
+  body_count?: number;
+  bodies?: Max17Body[];
+  hint?: string;
+  world?: {
+    id?: string;
+    seed?: number;
+    title?: string;
+    created_at?: number;
+    census_count?: number;
+    peak_alive?: number;
+  };
+}
+
+export interface Max17PlanTask {
+  id: string;
+  desc: string;
+  mgr: 'MGR-1' | 'MGR-2' | 'MGR-3';
+  xp: number;
+  status?: string;
+  scheduledTime?: string;
+  deadline?: string;
+  reality_check?: string;
+  /** Position along the chosen trajectory, 1-based. */
+  step?: number;
+}
+
+export interface Max17PlanPath {
+  path?: string;
+  label?: string;
+  order?: number[];
+  action?: number;
+  amplitude?: number;
+  probability?: number;
+  classical?: boolean;
+}
+
+export interface Max17GraphNode {
+  id: string;
+  type: string;
+  label: string;
+  degree: number;
+}
+
+export interface Max17GraphEdge {
+  source: string;
+  target: string;
+  relation: string;
+  weight: number;
+  evidence: number;
+  summary?: string;
+}
+
+export interface Max17Graph {
+  nodes?: Max17GraphNode[];
+  edges?: Max17GraphEdge[];
+  stats?: { total_synapses?: number; shown_synapses?: number; nodes?: number };
+}
+
+export interface Max17Superposition {
+  amplitudes?: Record<string, number>;
+  probabilities?: Record<string, number>;
+  phases?: Record<string, number>;
+  entropy?: number;
+  coherence?: number;
+  collapsed?: string;
+  runner_up?: string;
+  margin?: number;
+  equation?: string;
+}
+
+export interface Max17Quantum {
+  qid?: string;
+  family?: 'quark' | 'lepton';
+  generation?: number;
+  flavor?: string;
+  charge?: number;
+  spin?: number;
+  mass?: number;
+  lifetime?: number;
+  boson?: string;
+  confined?: boolean;
+  force?: string;
+}
+
+export interface Max17Maxwell {
+  field?: { plasticity?: number; memory?: number; llm?: number };
+  next_field?: { plasticity?: number; memory?: number; llm?: number };
+  gauss_e?: number;
+  gauss_b?: number;
+  monopole_free?: boolean;
+  faraday_curl_e?: number;
+  ampere_curl_b?: number;
+  displacement_current?: number;
+  emf?: number;
+  energy_density?: number;
+  poynting?: number;
+  dominant_core?: string;
+  blocking?: boolean;
+  law?: string;
+}
+
+export interface Max17YangMills {
+  colour?: { red?: number; green?: number; blue?: number };
+  residual_colour?: number;
+  white?: boolean;
+  alpha_s?: number;
+  asymptotically_free?: boolean;
+  excitation?: number;
+  mass_gap?: number;
+  free?: boolean;
+  verdict?: 'emit' | 'confined' | 'virtual';
+  note?: string;
+}
+
+export interface Max17Holography {
+  area?: number;
+  volume?: number;
+  edges?: number;
+  mass?: number;
+  entropy?: number;
+  temperature?: number;
+  information_bits?: number;
+  compression?: number;
+  equation?: string;
+}
+
+export interface Max17Physics {
+  standard_model?: Max17Quantum;
+  maxwell?: Max17Maxwell;
+  yang_mills?: Max17YangMills;
+  holography?: Max17Holography;
+  bosons?: Record<string, { force?: string; carrier?: string; mass?: number; range?: string }>;
+  /** Present on a `physics` probe carrying a query. */
+  einstein?: {
+    query?: string;
+    curved?: Max17RecalledMemory[];
+    flat?: Max17RecalledMemory[];
+    reordered?: boolean;
+    equation?: string;
+  };
+  /** Present on a `physics` probe. */
+  friedmann?: Max17Cosmology;
+  /** Present on a `physics` probe carrying a goal. */
+  feynman?: {
+    goal?: string;
+    classical_path?: string;
+    action?: number;
+    paths?: Max17PlanPath[];
+    equation?: string;
+  };
+}
+
+export interface Max17Flow {
+  state?: {
+    density?: number;
+    velocity?: number;
+    breadth?: number;
+    confidence?: number;
+    forcing?: number;
+    viscosity?: number;
+  };
+  reynolds?: number;
+  regime?: 'laminar' | 'transitional' | 'turbulent';
+  thresholds?: { laminar?: number; turbulent?: number };
+  pressure_gradient?: number;
+  viscous_term?: number;
+  convective_term?: number;
+  acceleration?: number;
+  velocity_next?: number;
+  vorticity?: number;
+  friction_factor?: number;
+  stability?: number;
+  /** Velocity across the pipe — draw this as the HUD streamlines. */
+  stream?: number[];
+  advice?: string;
+  equation?: string;
+}
+
+export interface Max17Attention {
+  a?: number;
+  b?: number;
+  /** Текущая точка орбиты. */
+  x?: number;
+  y?: number;
+  /** Показатель Ляпунова в точке. null — орбита схлопнулась в точку. */
+  lyapunov?: number | null;
+  /** Средний показатель по окрестности 3×3 в пространстве (a, b). */
+  basin?: number;
+  /** Доля соседей с другим режимом: риск, что сдвиг параметров его переключит. */
+  fragility?: number;
+  regime?: 'locked' | 'cyclic' | 'marginal' | 'scattered';
+  /** Период цикла, если орбита в него села. */
+  period?: number | null;
+  /** Доля обойденных клеток плоскости состояний, 0..1. */
+  coverage?: number;
+  radius?: number;
+  dispersion?: number;
+  /** Устойчивый отпечаток узора внимания. */
+  signature?: string;
+  note?: string;
+  /** Было ли моргание — скачок в новую точку параметров. */
+  blinked?: boolean;
+  equation?: string;
+}
+
+export interface Max17Genesis {
+  /** Unix-время начала отсчёта. */
+  t_zero?: number;
+  age_seconds?: number;
+  age_human?: string;
+  scale_factor?: number;
+  /** null — время ещё не началось (планковская эпоха). */
+  temperature?: number | null;
+  epoch?:
+    | 'planck'
+    | 'inflation'
+    | 'quark_plasma'
+    | 'hadronisation'
+    | 'nucleosynthesis'
+    | 'recombination'
+    | 'structure';
+  epoch_title?: string;
+  epoch_note?: string;
+  /** Среда обмена между тремя ядрами. */
+  ether?: {
+    /** Сопротивление вниманию: растёт от неуверенности. */
+    permittivity?: number;
+    /** Сопротивление циркуляции памяти: растёт от нагрузки. */
+    permeability?: number;
+    /** c = 1/√(εμ) — скорость обмена между ядрами. */
+    speed?: number;
+    /** Z = √(μ/ε): >1 упирается память, <1 упирается внимание. */
+    impedance?: number;
+    bottleneck?: 'memory' | 'attention' | 'balanced';
+    law?: string;
+  };
+  /** Вещество, пережившее аннигиляцию пар из слоя Дирака. */
+  matter?: {
+    quanta?: number;
+    asymmetry?: number;
+    matter?: number;
+    bound_fraction?: number;
+    bound_matter?: number;
+    law?: string;
+  };
+  equation?: string;
 }
