@@ -12,6 +12,7 @@ import json
 import os
 import re
 import sys
+import time
 import tempfile
 import traceback
 from dataclasses import dataclass
@@ -127,6 +128,10 @@ ALLOWED_EVENTS = frozenset(
         "reality",
         # MAX VISION: фото и видео как отдельная способность, а не поток с камеры.
         "see",
+        # Режимы, перенесённые из main: витрина графа, автоплан, эфир.
+        "synapse_graph",
+        "auto_plan",
+        "world_state",
         # Визуальные режимы GAME (Воронка, Симуляция, Инбокс, ДЕКОДЕР).
         "big_idea",
         "simulation",
@@ -2598,6 +2603,184 @@ def _detect_locale(text: str, fallback: str = "ru") -> str:
     return "en"
 
 
+def _handle_synapse_graph(event: Event, synapse_graph: SynapseGraph) -> dict[str, Any]:
+    """Read-only export of the real Max synapse graph for visualization."""
+    try:
+        limit = int(event.payload.get("limit", 400))
+    except (TypeError, ValueError):
+        limit = 400
+    graph = synapse_graph.get_graph(limit=max(1, min(2000, limit)))
+    stats = graph.get("stats", {})
+    return {
+        "ok": True,
+        "event_type": event.type,
+        "route": "synapse_graph",
+        "graph": graph,
+        "memory": {"hint": f"synapse graph: {stats.get('shown_synapses', 0)}/{stats.get('total_synapses', 0)} synapses, {stats.get('nodes', 0)} nodes"},
+        "plasticity": {"confidence": 1.0 if stats.get("total_synapses") else 0.0, "action": "synapse_graph_read", "learned": False},
+        "llm": {"status": "skipped", "text": "Синапс-граф прочитан из ядра Max, без LLM.", "latency_ms": 0.0},
+        "decision": {"reason": "synapse graph export", "confidence": 1.0},
+        "next_adaptation": "Реальные синапсы ядра Max растут по мере использования системы.",
+        "self_evaluation": {"score": 1.0, "reason": "synapse graph export", "store_memory": False, "reinforce": "synapse_graph"},
+    }
+
+
+def _handle_auto_plan(
+    event: Event,
+    brain: Mark17Brain,
+    vector_memory: VectorMemory,
+    synapse_graph: SynapseGraph,
+) -> dict[str, Any]:
+    """Deterministically decompose a goal into an MGR plan on the Max core."""
+    from mark17.planner import build_plan
+    goal = str(event.payload.get("goal") or "").strip()
+    try:
+        horizon = int(event.payload.get("horizon_days", 0))
+    except (TypeError, ValueError):
+        horizon = 0
+
+    plan = build_plan(goal, horizon_days=horizon)
+
+    # Pull any related past experience for this goal.
+    recalled = [
+        {
+            "id": hit.id,
+            "event_type": hit.event_type,
+            "importance": round(hit.importance, 3),
+            "score": round(hit.score, 3),
+            "summary": hit.content.get("hint") or hit.signature[:120],
+        }
+        for hit in (brain.memory.recall(goal, limit=3) if goal else [])
+    ]
+    semantic = [hit.to_dict() for hit in (vector_memory.recall(goal, limit=3) if goal else [])]
+
+    confidence = round(min(1.0, 0.5 + 0.1 * len(plan.get("tasks", []))), 3) if plan.get("ok") else 0.0
+    result: dict[str, Any] = {
+        "ok": bool(plan.get("ok")),
+        "event_type": event.type,
+        "route": "auto_plan",
+        "plan": plan,
+        "memory": {"recalled": recalled, "semantic": semantic, "hint": plan.get("summary")},
+        "plasticity": {
+            "confidence": confidence,
+            "action": "auto_plan",
+            "learned": bool(plan.get("ok")),
+        },
+        "llm": {"status": "skipped", "text": "Автоплан собран детерминированно ядром Max, без LLM.", "latency_ms": 0.0},
+        "decision": {"reason": plan.get("summary", ""), "confidence": confidence},
+        "next_adaptation": plan.get("first_move") and f"Начни с малого: {plan['first_move']}." or plan.get("summary", ""),
+        "self_evaluation": {
+            "score": confidence,
+            "reason": f"auto_plan built {len(plan.get('tasks', []))} tasks for goal",
+            "store_memory": bool(plan.get("ok")),
+            "reinforce": "auto_plan",
+        },
+    }
+    result["synapses"] = synapse_graph.update_from_event(event, result, result["self_evaluation"])
+
+    # Remember that this goal was planned, so future recall can connect to it.
+    if plan.get("ok"):
+        brain.memory.remember(
+            Event(
+                type="remember",
+                payload={
+                    "note": plan.get("summary", ""),
+                    "goal": goal,
+                    "domain": plan.get("domain"),
+                    "total_xp": plan.get("total_xp"),
+                    "reinforce": "auto_plan",
+                },
+                source="planner",
+            ),
+            hint=plan.get("summary", ""),
+            action="auto_plan",
+        )
+        vector_memory.remember(event, result["self_evaluation"])
+    brain.plasticity.save()
+    return result
+
+
+def _clamp_unit(value: Any) -> float:
+    """Загнать число в 0..1. Перенесено вместе с обработчиком мира."""
+    try:
+        return max(0.0, min(1.0, float(value)))
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def _handle_world_state(
+    event: Event,
+    brain: Mark17Brain,
+    synapse_graph: SynapseGraph,
+    state_dir: Path,
+) -> dict[str, Any]:
+    """Перепись 3D-мира: ядро видит мир, сгущает вещество и выдаёт законы.
+
+    Это единственное место, где Max17 получает информацию о том, что рисуется
+    в браузере. Раньше поток был односторонним, и мир умирал вместе с вкладкой.
+    """
+    from mark17.world_model import WorldModel, process_world_event
+    model = WorldModel(state_dir)
+    tension = 0.0
+    voice_payload = event.payload.get("voice")
+    if isinstance(voice_payload, dict):
+        try:
+            tension = float(voice_payload.get("tension", 0.0) or 0.0)
+        except (TypeError, ValueError):
+            tension = 0.0
+
+    world = process_world_event(event.payload, model, tension=tension)
+    hint = f"{world['world']['id']}: {world['hint']}"
+    bodies_born = len(world["new_bodies"])
+
+    result: dict[str, Any] = {
+        "ok": True,
+        "event_type": event.type,
+        "route": "world_state",
+        "world": world,
+        "memory": {"hint": hint},
+        "plasticity": {
+            "confidence": round(_clamp_unit(world["census"]["density"]), 3),
+            "action": "world_observed",
+            "learned": bodies_born > 0,
+        },
+        "llm": {"status": "skipped", "text": "Мир прочитан ядром Max, без LLM.", "latency_ms": 0.0},
+        "decision": {"reason": hint, "confidence": round(_clamp_unit(world["census"]["density"]), 3)},
+        "next_adaptation": world["hint"],
+        "self_evaluation": {
+            "score": round(_clamp_unit(world["census"]["density"]), 3),
+            "reason": hint,
+            # Помним только рождение вещества: переписи идут раз в секунду и
+            # засорили бы память, а сгустившееся вещество — событие.
+            "store_memory": bodies_born > 0,
+            "reinforce": "world_matter" if bodies_born else "world_census",
+        },
+    }
+
+    if bodies_born:
+        brain.memory.remember(
+            Event(
+                type="remember",
+                payload={
+                    "note": world["hint"],
+                    "world_id": world["world"]["id"],
+                    "seed": world["world"]["seed"],
+                    "bodies": bodies_born,
+                    "epoch": world["laws"]["epoch"],
+                },
+                source="world",
+            ),
+            hint=hint,
+            action="world_matter",
+        )
+
+    result["synapses"] = synapse_graph.update_from_event(
+        event, result, result["self_evaluation"]
+    )
+    brain.plasticity.save()
+    return result
+
+
 def _vision_answer_ok(text: str, question: str) -> bool:
     """Справилось ли мировоззрение MAX VISION с ролью системного промпта.
 
@@ -3369,6 +3552,12 @@ def _handle_event(event: Event, args: argparse.Namespace, stores: Mark17Stores) 
         return _handle_introspect(stores)
     if event.type == "see":
         return _handle_see(event, stores)
+    if event.type == "synapse_graph":
+        return _handle_synapse_graph(event, stores.synapse_graph)
+    if event.type == "auto_plan":
+        return _handle_auto_plan(event, stores.brain, stores.vector_memory, stores.synapse_graph)
+    if event.type == "world_state":
+        return _handle_world_state(event, stores.brain, stores.synapse_graph, stores.state_dir)
     if event.type in OUTCOME_EVENT_TYPES:
         res = _handle_outcome_event(event, brain, vector_memory, synapse_graph, working_memory)
         _succ = {

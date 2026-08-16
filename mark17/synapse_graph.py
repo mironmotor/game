@@ -847,6 +847,62 @@ class SynapseGraph:
             "summary": _compact(metadata.get("summary")),
         }
 
+    # Экспорт графа для витрины /maxgraph: узлы и рёбра как есть.
+    # Перенесено из ветки main — читает ту же таблицу synapses и ничего
+    # в ней не меняет.
+    def get_graph(self, limit: int = 400) -> dict[str, Any]:
+        """Export the real synapse graph as nodes + edges for visualization."""
+        with self._conn() as c:
+            rows = c.execute(
+                """
+                SELECT *
+                FROM synapses
+                ORDER BY weight DESC, evidence_count DESC, updated_at DESC
+                LIMIT ?
+                """,
+                (limit,),
+            ).fetchall()
+            total = c.execute("SELECT COUNT(*) AS n FROM synapses").fetchone()["n"]
+
+        nodes: dict[str, dict[str, Any]] = {}
+        edges: list[dict[str, Any]] = []
+
+        def node(ntype: str, nid: str) -> str:
+            key = f"{ntype}:{nid}"
+            n = nodes.get(key)
+            if n is None:
+                nodes[key] = {"id": key, "type": ntype, "label": nid[:16], "degree": 1}
+            else:
+                n["degree"] += 1
+            return key
+
+        for row in rows:
+            d = self._row_to_dict(row)
+            src = node(d["source_type"], d["source_id"])
+            dst = node(d["target_type"], d["target_id"])
+            edges.append(
+                {
+                    "source": src,
+                    "target": dst,
+                    "relation": d["relation_type"],
+                    "weight": d["weight"],
+                    "evidence": d["evidence_count"],
+                    "summary": d["summary"],
+                }
+            )
+
+        return {
+            "nodes": list(nodes.values()),
+            "edges": edges,
+            "stats": {
+                "total_synapses": int(total),
+                "shown_synapses": len(edges),
+                "nodes": len(nodes),
+            },
+        }
+
+    # -- Holography ---------------------------------------------------------
+
 
 # ——— Опыт агентов → граф ———
 # Успешное действие агента укрепляет связи (концепт→агент routed_to, концепт↔концепт

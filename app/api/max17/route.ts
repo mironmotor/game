@@ -17,6 +17,13 @@ export const runtime = 'nodejs';
 
 const ALLOWED_EVENTS = new Set([
   'see',
+  // Режимы, перенесённые из main: витрина графа (/maxgraph), автоплан
+  // (/autoplan), эфир (/efir). Без этих строк роут отвечал бы
+  // «Unsupported event type», и страницы открывались бы пустыми.
+  'synapse_graph',
+  'auto_plan',
+  'world_state',
+  'bridge_health',
   'user_message',
   'task_created',
   'task_completed',
