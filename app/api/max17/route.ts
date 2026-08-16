@@ -152,6 +152,49 @@ function stageMedia(body: Record<string, unknown>): { dir: string; file: string 
   return { dir, file };
 }
 
+
+/**
+ * Диагностика моста: жив ли путь до ядра.
+ *
+ * Витрина /modes спрашивает это перед тем, как показывать команды, и раньше
+ * получала «unsupported event type» — потому что событие уходило в Python, а
+ * там такого нет. Отвечать должен сам роут: он один знает, каким путём ядро
+ * вообще вызывается.
+ *
+ * Здесь ядро локальное — python3 рядом с сайтом, поэтому проверка честная:
+ * отправляем ему настоящее событие health и смотрим, ответил ли. Проверять
+ * наличие файла было бы враньём: файл на месте, а интерпретатор может не
+ * запуститься.
+ */
+async function bridgeHealth() {
+  const started = Date.now();
+  try {
+    const result = await runMax17Bridge({ type: 'health' }, 12_000);
+    const alive = result?.ok !== false;
+    return NextResponse.json({
+      ok: alive,
+      bridge: 'local-python',
+      configured: true,
+      source: 'local-python',
+      environment: process.env.NODE_ENV || 'production',
+      latency_ms: Date.now() - started,
+      hint: alive
+        ? 'Ядро рядом с сайтом и отвечает.'
+        : 'Ядро запустилось, но вернуло ошибку — смотри логи pm2.',
+    });
+  } catch (error) {
+    return NextResponse.json({
+      ok: false,
+      bridge: 'local-python',
+      configured: true,
+      source: 'local-python',
+      environment: process.env.NODE_ENV || 'production',
+      latency_ms: Date.now() - started,
+      hint: `Ядро не ответило: ${error instanceof Error ? error.message : String(error)}`,
+    });
+  }
+}
+
 function errorResponse(message: string, status = 400, details?: unknown) {
   return NextResponse.json(
     {
@@ -713,6 +756,12 @@ export async function POST(request: Request) {
   }
 
   const eventType = String(body.type || body.event || '');
+
+  // Обслуживается роутом, а не ядром: в Python такого события нет.
+  if (eventType === 'bridge_health') {
+    return bridgeHealth();
+  }
+
   if (!ALLOWED_EVENTS.has(eventType)) {
     return errorResponse(`Unsupported event type: ${eventType || '(missing)'}`, 400, {
       allowed: Array.from(ALLOWED_EVENTS),
