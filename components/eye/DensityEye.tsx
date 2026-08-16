@@ -226,7 +226,7 @@ export default function DensityEye() {
       const now = performance.now();
       if (!(e.pointerActive && now - e.lastMove < 650)) {
         e.pointerActive = false;
-        reticleRef.current?.classList.remove('on');
+        if (reticleRef.current) reticleRef.current.style.opacity = '0';
         if (e.reduceMotion) {
           e.offA *= 0.94; e.offB *= 0.94;
         } else {
@@ -328,7 +328,7 @@ export default function DensityEye() {
     e.pointerActive = true;
     e.lastMove = performance.now();
     if (reticle) {
-      reticle.classList.add('on');
+      reticle.style.opacity = '1';
       reticle.style.left = `${ev.clientX - r.left}px`;
       reticle.style.top = `${ev.clientY - r.top}px`;
     }
@@ -359,7 +359,7 @@ export default function DensityEye() {
       <div
         ref={stageRef}
         onPointerMove={onPointerMove}
-        onPointerLeave={() => { engine.current.pointerActive = false; reticleRef.current?.classList.remove('on'); }}
+        onPointerLeave={() => { engine.current.pointerActive = false; if (reticleRef.current) reticleRef.current.style.opacity = '0'; }}
         className={`relative min-h-0 flex-1 overflow-hidden touch-none ${gaze ? 'cursor-crosshair' : ''}`}
       >
         <canvas ref={canvasRef} className="absolute inset-0 block h-full w-full" />
@@ -371,7 +371,12 @@ export default function DensityEye() {
         <div
           ref={reticleRef}
           className="reticle pointer-events-none absolute left-0 top-0 h-[52px] w-[52px] -translate-x-1/2 -translate-y-1/2 rounded-full border border-[rgba(255,154,77,0.75)] opacity-0 mix-blend-screen transition-opacity duration-200"
-        />
+        >
+          {/* Перекрестие обычными элементами, а не псевдоэлементами styled-jsx:
+              тот ломал production-сборку страницы при пререндере. */}
+          <span className="absolute left-1/2 -top-[9px] -bottom-[9px] w-px -translate-x-1/2 bg-[rgba(255,154,77,0.7)]" />
+          <span className="absolute top-1/2 -left-[9px] -right-[9px] h-px -translate-y-1/2 bg-[rgba(255,154,77,0.7)]" />
+        </div>
 
         <div className="pointer-events-none absolute left-[30px] top-[26px] text-[11px] leading-[1.55] text-[#8b83c9]">
           <div>x<sub>n+1</sub> = sin(x² − y² + a)</div>
@@ -470,13 +475,7 @@ export default function DensityEye() {
         </div>
       </div>
 
-      <style jsx>{`
-        .reticle::before,
-        .reticle::after { content: ''; position: absolute; background: rgba(255, 154, 77, 0.7); }
-        .reticle::before { left: 50%; top: -9px; bottom: -9px; width: 1px; transform: translateX(-0.5px); }
-        .reticle::after { top: 50%; left: -9px; right: -9px; height: 1px; transform: translateY(-0.5px); }
-        .reticle.on { opacity: 1; }
-      `}</style>
+
     </div>
   );
 }
