@@ -109,7 +109,7 @@ export default async function RootLayout({children}: {children: React.ReactNode}
                 должна быть доступна с сайта. Держим ненавязчиво, поверх HUD. */}
             <a
               href="/privacy"
-              className="fixed bottom-1 left-1/2 z-[51] -translate-x-1/2 whitespace-nowrap text-[9px] text-white/25 transition hover:text-white/60"
+              className="fixed bottom-1 left-1/2 z-[51] hidden -translate-x-1/2 whitespace-nowrap text-[9px] text-white/25 transition hover:text-white/60 sm:block"
             >
               Политика конфиденциальности
             </a>

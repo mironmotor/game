@@ -15,7 +15,6 @@ import GameBuddy from '@/components/GameBuddy';
 import MaxBrain from '@/components/MaxBrain';
 import MirCoinPanel from '@/components/MirCoinPanel';
 import SleepMode from '@/components/SleepMode';
-import MirWallet from '@/components/MirWallet';
 import ResonanceCore from '@/components/hud/ResonanceCore';
 import SkillInventory from '@/components/SkillInventory';
 import AttractorViz from '@/components/AttractorViz';
@@ -51,7 +50,6 @@ export default function Home() {
       <MaxBrain />
       <MirCoinPanel />
       <SleepMode />
-      <MirWallet />
       <ResonanceCore />
       <SkillInventory />
       <AttractorViz />

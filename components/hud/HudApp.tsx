@@ -1823,6 +1823,25 @@ function HudContent() {
 
       // Orchestrator: a code/desktop/music task is routed to its real engine
       // automatically — the chat LLM only talks, the engine actually does it.
+      // Ядро может не только сказать, но и ПОКАЗАТЬ: панель с кодом, картинкой
+      // или разбором открывается окном рядом со штатными. Поле ui добавлено
+      // рядом с dispatch, а не вместо — маршрутизация задач осталась прежней.
+      const panels = (max17 as { ui?: { panels?: unknown } } | undefined)?.ui?.panels;
+      if (Array.isArray(panels)) {
+        for (const raw of panels.slice(0, 4)) {
+          const panel = raw as { id?: string; title?: string; kind?: string; body?: string; lang?: string };
+          const body = String(panel?.body || '');
+          if (!body) continue;
+          wm.openPanel({
+            id: String(panel.id || `p${Date.now().toString(36)}`),
+            title: String(panel.title || 'MAX показывает'),
+            kind: panel.kind === 'image' || panel.kind === 'code' ? panel.kind : 'text',
+            body: body.slice(0, 40_000),
+            lang: panel.lang ? String(panel.lang) : undefined,
+          });
+        }
+      }
+
       const dispatch = max17?.dispatch;
       if (dispatch?.instruction && (dispatch.route === 'code' || dispatch.route === 'desktop' || dispatch.route === 'music')) {
         const note = max17?.answer?.text || 'Передаю задачу агенту…';
@@ -2125,6 +2144,16 @@ function HudContent() {
         const text = String(seen?.answer?.text || '').trim();
         if (text) {
           seeSay(`MAX17: ${text}`);
+          // Взгляд обязан осесть в истории беседы. Раньше описание жило только
+          // в ленте статуса, и на вопрос «а что там слева?» ядру нечего было
+          // вспомнить: в диалоге картинки как будто не было.
+          try {
+            const sid = sessionId ?? undefined;
+            await saveMessage('user', `[прислал файл: ${file.name}]`, sid);
+            await saveMessage('model', text, sid);
+          } catch {
+            /* история не критична для показа ответа */
+          }
         } else {
           const why = String((seen as { error?: unknown })?.error || 'ничего не разглядел');
           seeSay(`MAX17: не увидел «${file.name}» — ${why}`);
@@ -2145,6 +2174,15 @@ function HudContent() {
     }
     try {
       const text = await file.text();
+      // Признак двоичного файла: управляющие символы и «замены» от декодера.
+      const damaged = (text.slice(0, 4000).match(/[\uFFFD\u0000-\u0008\u000E-\u001F]/g) || []).length;
+      if (damaged > 40 || text.startsWith('%PDF')) {
+        setAgiMessage(
+          `MAX17: «${file.name}» — это не текст, а двоичный файл. Читать его как текст бессмысленно: ` +
+          `пришли картинкой, если это скан, или выгрузи содержимое в .txt/.md.`,
+        );
+        return;
+      }
       const trimmed = text.slice(0, 20_000);
       setAttached({ name: file.name, text: trimmed });
       setAgiMessage(

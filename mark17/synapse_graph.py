@@ -167,6 +167,9 @@ class BulkRecord:
     relation_type: str
     weight: float
     metadata: dict[str, Any] | None = None
+    # «derived» — значение по умолчанию намеренно: не назвался, значит связь
+    # вычислена, а не заработана, и в дорогу к цели не идёт.
+    origin: str = "derived"
 
 
 class SynapseGraph:
@@ -220,6 +223,17 @@ class SynapseGraph:
             c.execute(
                 "CREATE INDEX IF NOT EXISTS idx_synapse_relation ON synapses(relation_type)"
             )
+            # ОТКУДА взялась связь. Без этого признака отличить вычисленное
+            # сходство от выученного опыта можно только эвристикой по
+            # metadata_json и типам концов — а `memory:<id>` вдобавок означает
+            # разные вещи для гиппокампа и векторной памяти (одно пространство
+            # имён на две базы). ADD COLUMN с константным DEFAULT таблицу не
+            # переписывает: на 72 МБ это миллисекунды.
+            try:
+                c.execute("ALTER TABLE synapses ADD COLUMN origin TEXT NOT NULL DEFAULT 'derived'")
+            except sqlite3.OperationalError:
+                pass  # колонка уже есть
+            c.execute("CREATE INDEX IF NOT EXISTS idx_synapse_origin ON synapses(origin)")
             c.execute(
                 "CREATE INDEX IF NOT EXISTS idx_synapse_evidence ON synapses(evidence_count)"
             )
@@ -234,6 +248,7 @@ class SynapseGraph:
         relation_type: str,
         weight: float,
         metadata: dict[str, Any] | None = None,
+        origin: str = "derived",
     ) -> int:
         if relation_type not in RELATION_TYPES:
             relation_type = "related_to"
@@ -285,8 +300,8 @@ class SynapseGraph:
                 """
                 INSERT INTO synapses
                 (source_type, source_id, target_type, target_id, relation_type, weight,
-                 evidence_count, last_used, created_at, updated_at, metadata_json)
-                VALUES (?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?)
+                 evidence_count, last_used, created_at, updated_at, metadata_json, origin)
+                VALUES (?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?)
                 """,
                 (
                     source_type,
@@ -299,6 +314,7 @@ class SynapseGraph:
                     now,
                     now,
                     metadata_json,
+                    str(origin or "derived"),
                 ),
             )
             return int(cur.lastrowid)
@@ -345,7 +361,7 @@ class SynapseGraph:
         # pre-fetched evidence_count. Keep the strongest observation per key.
         normalized_by_key: dict[
             tuple[str, str, str, str, str],
-            tuple[str, str, str, str, str, float, str],
+            tuple[str, str, str, str, str, float, str, str],
         ] = {}
         for rec in records:
             rt = rec.relation_type if rec.relation_type in RELATION_TYPES else "related_to"
@@ -354,6 +370,7 @@ class SynapseGraph:
                 rec.source_type, rec.source_id, rec.target_type, rec.target_id,
                 rt, _clamp(rec.weight),
                 json.dumps(rec.metadata or {}, ensure_ascii=False, sort_keys=True),
+                str(getattr(rec, "origin", "derived") or "derived"),
             )
             previous = normalized_by_key.get(key)
             if previous is None or normalized[5] > previous[5]:
@@ -381,10 +398,10 @@ class SynapseGraph:
                     existing[ekey] = (int(row[0]), float(row[6]), int(row[7]))
 
             # 2. Split into inserts and updates
-            inserts: list[tuple[str, str, str, str, str, float, int, float, float, float, str]] = []
+            inserts: list[tuple[str, str, str, str, str, float, int, float, float, float, str, str]] = []
             updates: list[tuple[float, int, float, float, str, int]] = []
 
-            for st, si, tt, ti, rt, w, mj in norm_records:
+            for st, si, tt, ti, rt, w, mj, rec_origin in norm_records:
                 key = (st, si, tt, ti, rt)
                 if key in existing:
                     old_id, old_weight, old_evidence = existing[key]
@@ -401,7 +418,7 @@ class SynapseGraph:
                 else:
                     inserts.append((
                         st, si, tt, ti, rt, w,
-                        1, now, now, now, mj,
+                        1, now, now, now, mj, rec_origin,
                     ))
 
             # 3. executemany in single transaction
@@ -409,8 +426,8 @@ class SynapseGraph:
                 c.executemany(
                     """INSERT INTO synapses
                        (source_type, source_id, target_type, target_id, relation_type, weight,
-                        evidence_count, last_used, created_at, updated_at, metadata_json)
-                       VALUES (?,?,?,?,?,?,?,?,?,?,?)""",
+                        evidence_count, last_used, created_at, updated_at, metadata_json, origin)
+                       VALUES (?,?,?,?,?,?,?,?,?,?,?,?)""",
                     inserts,
                 )
             if updates:
@@ -850,6 +867,79 @@ class SynapseGraph:
     # Экспорт графа для витрины /maxgraph: узлы и рёбра как есть.
     # Перенесено из ветки main — читает ту же таблицу synapses и ничего
     # в ней не меняет.
+    def expand_concept(
+        self,
+        concept_id: str,
+        *,
+        limit: int = 8,
+        depth: int = 1,
+        _seen: set[str] | None = None,
+    ) -> list[dict[str, Any]]:
+        """Развернуть сжатый концепт обратно в его источники.
+
+        Сжатие било в одну сторону: события и воспоминания сворачивались в
+        короткий концепт, а обратного хода не было — хотя путь назад всё это
+        время писался. В графе 3999 связей ведут в compressed_concept, у одного
+        «core» — 1935 источников; не хватало ровно функции, которая по концепту
+        поднимает то, из чего он собран.
+
+        Порядок — по весу × числу свидетельств: сначала то, что подтверждено
+        опытом чаще, а не просто попало первым. depth разворачивает сжатое
+        сжатого (в графе таких связей 54), но не глубже, иначе один концепт
+        вытянет за собой пол-памяти.
+        """
+        concept_id = str(concept_id or "").strip()
+        if not concept_id or limit <= 0:
+            return []
+        seen = _seen if _seen is not None else set()
+        if concept_id in seen:
+            return []  # концепты ссылаются друг на друга — не ходим по кругу
+        seen.add(concept_id)
+
+        with self._conn() as c:
+            rows = c.execute(
+                """
+                SELECT source_type, source_id, weight, evidence_count, metadata_json
+                FROM synapses
+                WHERE target_type = 'compressed_concept' AND target_id = ?
+                ORDER BY weight * evidence_count DESC, updated_at DESC
+                LIMIT ?
+                """,
+                (concept_id, limit),
+            ).fetchall()
+
+        out: list[dict[str, Any]] = []
+        for row in rows:
+            meta: dict[str, Any] = {}
+            try:
+                meta = json.loads(row["metadata_json"] or "{}")
+            except (json.JSONDecodeError, TypeError):
+                meta = {}
+            item = {
+                "source_type": str(row["source_type"]),
+                "source_id": str(row["source_id"]),
+                "weight": float(row["weight"]),
+                "evidence": int(row["evidence_count"]),
+                "summary": str(meta.get("summary") or meta.get("note") or "")[:200],
+            }
+            # Сжатое сжатого: разворачиваем ещё на уровень, чтобы за ярлыком
+            # оказался живой след, а не другой ярлык.
+            if depth > 0 and item["source_type"] == "compressed_concept":
+                item["sources"] = self.expand_concept(
+                    item["source_id"], limit=max(2, limit // 2), depth=depth - 1, _seen=seen
+                )
+            out.append(item)
+        return out
+
+    def concept_sources_count(self, concept_id: str) -> int:
+        """Сколько всего источников стоит за концептом (без выборки самих связей)."""
+        with self._conn() as c:
+            row = c.execute(
+                "SELECT COUNT(*) AS n FROM synapses WHERE target_type = 'compressed_concept' AND target_id = ?",
+                (str(concept_id or ""),),
+            ).fetchone()
+        return int(row["n"] if row else 0)
+
     def get_graph(self, limit: int = 400) -> dict[str, Any]:
         """Export the real synapse graph as nodes + edges for visualization."""
         with self._conn() as c:

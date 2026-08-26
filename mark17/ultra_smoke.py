@@ -62,9 +62,9 @@ def main() -> int:
         if "executed" not in u1:
             _fail("nothing executed")
 
-        # MAX Ultimate v0.7 constitution must be in Ultra's state snapshot…
+        # Конституция v1.77 обязана быть в снимке состояния исполнителя…
         ult = (u1.get("state") or {}).get("ultimate") or {}
-        if ult.get("version") != "max_ultimate_v0.7":
+        if ult.get("version") != "max_ultra_v1.77":
             _fail(f"ultimate version not in state: {ult.get('version')}")
         if int(ult.get("target_synapses") or 0) != 1_000_000:
             _fail(f"ultimate target wrong: {ult.get('target_synapses')}")
@@ -73,13 +73,18 @@ def main() -> int:
                 _fail(f"ultimate state missing {key}")
         # …and the decision must declare which constitution it acted under.
         con = u1.get("constitution") or {}
-        if con.get("version") != "max_ultimate_v0.7":
+        if con.get("version") != "max_ultra_v1.77":
             _fail(f"constitution version missing: {con}")
         if not con.get("applied_constraints"):
             _fail("no applied_constraints on the decision")
 
         # The decision must be remembered…
-        hits = stores.vector_memory.recall("ultra decision решение оркестратора", limit=2)
+        # include_plumbing=True обязателен: ultra_decision входит в PLUMBING_TYPES и
+        # из обычной выдачи исключён намеренно. Тест проверяет, что решение ЗАПИСАНО,
+        # а не что оно всплывает в ответах пользователю.
+        hits = stores.vector_memory.recall(
+            "ultra decision решение оркестратора", limit=2, include_plumbing=True
+        )
         if not hits or hits[0].event_type != "ultra_decision":
             _fail(f"decision not recorded: {[(h.event_type, h.summary[:40]) for h in hits]}")
 

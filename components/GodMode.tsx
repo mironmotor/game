@@ -197,9 +197,11 @@ export default function GodMode() {
     </button>
   );
 
+  // items-start + dvh: на телефоне адресная строка меняет высоту вьюпорта,
+  // и центрирование по vh заставляло окно прыгать при каждом скролле.
   return (
-    <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/70 backdrop-blur-sm p-4">
-      <div className="w-[min(960px,100%)] max-h-[92vh] overflow-y-auto rounded-2xl border border-amber-400/30 bg-[#0a0818]/95 shadow-[0_0_40px_rgba(186,117,23,0.18)]">
+    <div className="fixed inset-0 z-[60] flex items-start justify-center overflow-y-auto overscroll-contain bg-black/70 p-3 backdrop-blur-sm sm:items-center sm:p-4">
+      <div className="w-[min(960px,100%)] max-h-[calc(100dvh-24px)] sm:max-h-[92dvh] overflow-y-auto rounded-2xl border border-amber-400/30 bg-[#0a0818]/95 shadow-[0_0_40px_rgba(186,117,23,0.18)]">
         <div className="flex items-center gap-2 border-b border-amber-400/20 px-4 py-3">
           <Terminal className="h-4 w-4 text-amber-300" />
           <span className="text-sm font-semibold tracking-[0.2em] text-amber-200">☉ СОЛНЦЕ-ИНТЕРФЕЙС · ЯДРО</span>

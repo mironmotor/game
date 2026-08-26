@@ -3,6 +3,7 @@
 import type { ReactNode, KeyboardEvent } from 'react';
 import {
   BookOpen,
+  Boxes,
   Briefcase,
   AudioLines,
   CalendarClock,
@@ -42,6 +43,7 @@ import {
   type WindowId,
 } from './window-manager';
 import { getBackground } from './backgrounds';
+import { HudGround } from './HudGround';
 import { SolarSystem } from './SolarSystem';
 import type { Task } from '@/hooks/use-game-state';
 import { useI18n } from '@/components/I18nProvider';
@@ -252,6 +254,15 @@ function HudDock({ onOpenAppearance }: { onOpenAppearance?: () => void }) {
         <button
           type="button"
           className="hud-dock-tool"
+          onClick={() => window.dispatchEvent(new CustomEvent('world:toggle'))}
+          title="Мир 3D — земля меты под интерфейсом: ядро, концепты графа, миссии, MirCoin"
+        >
+          <Boxes size={13} />
+          <span>Мир 3D</span>
+        </button>
+        <button
+          type="button"
+          className="hud-dock-tool"
           onClick={() => window.dispatchEvent(new CustomEvent('phase:toggle'))}
           title={t('dock.phase')}
         >
@@ -353,6 +364,14 @@ export function GameHud(props: GameHudProps) {
       <div className="hud-bg" style={{ background: bg.css }} />
       {bg.scrim ? <div className="hud-bg-scrim" style={{ opacity: bg.scrim }} /> : null}
       <SolarSystem className="hud-synapse-field" />
+      <HudGround
+        coreStatus={coreStatus}
+        missions={missions}
+        balance={balance}
+        isCameraActive={isCameraActive}
+        onToggleCamera={onToggleCamera}
+        onOpenMissions={() => wm.openWindow('missions')}
+      />
       <div className="hud-scanlines" />
 
       {/* Fixed identity core — the GAME synaptic nucleus, always centred. */}
@@ -655,6 +674,27 @@ export function GameHud(props: GameHudProps) {
           </div>
         </div>
       </HudWindow>
+
+      {/* Панели, показанные ядром: результат работы, а не пересказ о нём.
+          Живут рядом со штатными окнами — двигаются, сворачиваются, закрываются. */}
+      {Object.values(wm.panels).map((panel) => (
+        <HudWindow key={panel.id} id={panel.id} title={panel.title} accent="cyan">
+          <div className="hud-window-pad">
+            {panel.kind === 'image' ? (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img src={panel.body} alt={panel.title} className="max-h-full w-full rounded object-contain" />
+            ) : panel.kind === 'code' ? (
+              <pre className="hud-mono overflow-auto whitespace-pre text-[11px] leading-relaxed text-cyan-50/90">
+                {panel.body}
+              </pre>
+            ) : (
+              <div className="overflow-auto whitespace-pre-wrap text-[12px] leading-relaxed text-white/85">
+                {panel.body}
+              </div>
+            )}
+          </div>
+        </HudWindow>
+      ))}
       </div>
 
       <nav className="hud-nav">

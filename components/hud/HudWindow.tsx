@@ -34,17 +34,20 @@ export function HudWindow({
   id,
   accent = 'cyan',
   bodyClassName = '',
+  title: ownTitle,
   children,
 }: {
   id: WindowId;
   accent?: Accent;
   bodyClassName?: string;
+  /** Заголовок панели, созданной ядром: у неё нет ключа в словаре переводов. */
+  title?: string;
   children: ReactNode;
 }) {
   const wm = useWindowManager();
   const win = wm.windows[id];
   const { t } = useI18n();
-  const title = t(WINDOW_TITLE_KEYS[id]);
+  const title = ownTitle ?? t(WINDOW_TITLE_KEYS[id as keyof typeof WINDOW_TITLE_KEYS]);
   const drag = useRef<DragState | null>(null);
 
   if (!wm.hydrated || !win || !win.open) return null;

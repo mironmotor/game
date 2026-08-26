@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import json
 import os
+import socket
 import sys
 import time
 import urllib.request
@@ -24,7 +25,25 @@ _ROOT = Path(__file__).resolve().parent.parent
 _STATE = _ROOT / "mark17" / "state" / "llm_active.json"
 
 DEFAULT_BASE_URL = "https://proxy.gonkabroker.com/v1"
-DEFAULT_MODEL = "MiniMaxAI/MiniMax-M2.7"
+DEFAULT_MODEL = "deepseek-ai/DeepSeek-V4-Flash-0731"
+
+
+def _openai_base(env_name: str, default: str) -> str:
+    """Base URL локального бэкенда с /v1 на конце.
+
+    Адрес берётся из env, поэтому одну и ту же сборку можно запустить и на
+    маке (127.0.0.1), и на другой машине локалки / на дроплете через обратный
+    SSH-туннель — достаточно выставить MAX17_OLLAMA_HOST=http://192.168.1.103:11434.
+    """
+    base = (os.environ.get(env_name) or default).strip().rstrip("/")
+    return base if base.endswith("/v1") else base + "/v1"
+
+
+# Ollama держит мелкие модели, llama-server — Bonsai-27B, LM Studio — Qwen3.
+OLLAMA_BASE = _openai_base("MAX17_OLLAMA_HOST", "http://127.0.0.1:11434")
+BONSAI_BASE = _openai_base("MAX17_BONSAI_HOST", "http://127.0.0.1:8127")
+LMSTUDIO_BASE = _openai_base("MAX17_LMSTUDIO_HOST", "http://127.0.0.1:1234")
+
 ROLES = ("chat", "code", "architect", "desktop", "bulk", "ultra")
 ROLE_LABELS = {
     "chat": "Чат",
@@ -38,18 +57,20 @@ ROLE_DEFAULTS = {
     # On Air 2015 local Ollama can be slow; prefer the selected/global cloud
     # preset for chat unless the user explicitly sets a local override.
     "chat": None,
-    # gonka-qwen3's model (Qwen3-235B-…-FP8) is NOT served by the broker (404) —
-    # it only serves MiniMax-M2.7 and Kimi-K2.6. MiniMax is fast + real, so it is
-    # the primary; using the 404 model caused every call to fall through to Gemini.
-    "code": "gonka-minimax",
-    "architect": "gonka-minimax",
-    "desktop": "gonka-minimax",
+    # Брокер отдаёт четыре модели: DeepSeek-V4-Flash, MiniMax-M2.7, Kimi-K2.6 и
+    # эмбеддер BGE-M3 (Qwen3-235B он больше НЕ отдаёт — оттуда 404 и провал в
+    # Gemini). Основной теперь DeepSeek-V4-Flash: 400k контекста против 205k у
+    # MiniMax, $0.25/млн против $0.30, tools поддерживает. MiniMax остаётся
+    # первым в лестнице отката, так что ошибка DeepSeek ничего не гасит.
+    "code": "gonka-deepseek",
+    "architect": "gonka-deepseek",
+    "desktop": "gonka-deepseek",
     # Bulk graph growth should be cheap. If Ollama is not running, it will fail
     # soft and the deterministic pipeline remains the fallback.
     "bulk": "ollama-0.5b",
     # Ultra decides the core's OWN next action — needs judgment, calls are rare
     # (idle cadence) and tiny, so the smart model is worth it.
-    "ultra": "gonka-minimax",
+    "ultra": "gonka-deepseek",
 }
 
 # Resilience ladder per role: if the resolved primary backend fails (provider
@@ -58,42 +79,53 @@ ROLE_DEFAULTS = {
 # provider dying (Gonka 401, Gemini 429) no longer takes every feature dark.
 # Order = preference; unavailable presets (no key / Ollama down) are skipped.
 FALLBACK_CHAINS = {
-    # lmstudio-qwen3 sits BEFORE gemini so a local sovereign model (no rate limits)
-    # is preferred over Gemini's free-tier 429s whenever LM Studio (:1234) is up.
-    "chat": ["gonka-minimax", "gonka-kimi", "lmstudio-qwen3", "gemini", "groq", "ollama-3b"],
-    "code": ["gonka-minimax", "gonka-kimi", "lmstudio-qwen3", "gemini", "groq"],
-    "architect": ["gonka-minimax", "gonka-kimi", "lmstudio-qwen3", "gemini"],
-    "desktop": ["gonka-minimax", "gonka-kimi", "lmstudio-qwen3", "gemini", "groq"],
-    "bulk": ["ollama-0.5b", "ollama-3b", "lmstudio-qwen3", "gemini"],
-    "ultra": ["gonka-minimax", "gonka-kimi", "lmstudio-qwen3", "gemini"],
+    # Локальные модели (LM Studio :1234, Bonsai :8127) стоят ПЕРЕД Gemini: свой
+    # сервер без лимитов лучше, чем 429 на бесплатном тарифе Gemini.
+    "chat": ["gonka-deepseek", "gonka-minimax", "gonka-kimi", "lmstudio-qwen3", "bonsai-27b", "gemini", "groq", "ollama-3b"],
+    "code": ["gonka-deepseek", "gonka-minimax", "gonka-kimi", "lmstudio-qwen3", "bonsai-27b", "gemini", "groq"],
+    "architect": ["gonka-deepseek", "gonka-minimax", "gonka-kimi", "bonsai-27b", "lmstudio-qwen3", "gemini"],
+    "desktop": ["gonka-deepseek", "gonka-minimax", "gonka-kimi", "lmstudio-qwen3", "gemini", "groq"],
+    # Bulk растит граф пачками: сначала дешёвая локальная мелочь, потом Bonsai
+    # (27 млрд параметров без счётчика токенов), и только затем облако.
+    "bulk": ["ollama-0.5b", "ollama-3b", "bonsai-27b", "lmstudio-qwen3", "gonka-deepseek", "gemini"],
+    "ultra": ["gonka-deepseek", "gonka-minimax", "gonka-kimi", "lmstudio-qwen3", "bonsai-27b", "gemini"],
 }
 
 # id -> preset. `key` = literal API key; `key_env` = env var holding the key.
 PRESETS: dict[str, dict[str, Any]] = {
     "ollama-0.5b": {
         "label": "Ollama qwen2.5:0.5b — локально, быстро/слабо",
-        "base": "http://127.0.0.1:11434/v1",
+        "base": OLLAMA_BASE,
         "key": "ollama",
         "model": "qwen2.5:0.5b",
         "local": True,
     },
     "ollama-3b": {
         "label": "Ollama qwen2.5:3b — локально, умнее/медленнее",
-        "base": "http://127.0.0.1:11434/v1",
+        "base": OLLAMA_BASE,
         "key": "ollama",
         "model": "qwen2.5:3b",
         "local": True,
     },
     "ollama-qwen3": {
-        "label": "Ollama Qwen3 4B — локально, суверенно (8 ГБ-friendly)",
-        "base": "http://127.0.0.1:11434/v1",
+        # Тег был `qwen3:4b` — такой модели в Ollama нет, и каждый вызов
+        # возвращал 404. Реально скачан `qwen3-vl:4b` (он же и текст умеет).
+        "label": "Ollama Qwen3-VL 4B — локально, суверенно (8 ГБ-friendly)",
+        "base": OLLAMA_BASE,
         "key": "ollama",
-        "model": "qwen3:4b",
+        "model": "qwen3-vl:4b",
+        "local": True,
+    },
+    "bonsai-27b": {
+        "label": "Bonsai-27B — локально, 27 млрд параметров (~1.13 бита/пар.)",
+        "base": BONSAI_BASE,
+        "key": "llama-cpp",
+        "model": "bonsai-27b",
         "local": True,
     },
     "lmstudio-qwen3": {
         "label": "LM Studio · Qwen3 4B — локально, сервер :1234",
-        "base": "http://127.0.0.1:1234/v1",
+        "base": LMSTUDIO_BASE,
         "key": "lm-studio",
         "model": "qwen3-4b",
         "local": True,
@@ -116,6 +148,29 @@ PRESETS: dict[str, dict[str, Any]] = {
         "key_env": "GONKA_API_KEY",
         "model": "Qwen/Qwen3-235B-A22B-Instruct-2507-FP8",
     },
+    "gonka-deepseek": {
+        "label": "Gonka · DeepSeek-V4-Flash — 400k контекст, самый дешёвый",
+        "base": "https://proxy.gonkabroker.com/v1",
+        "key_env": "GONKA_API_KEY",
+        "model": "deepseek-ai/DeepSeek-V4-Flash-0731",
+    },
+    # ── Anthropic. Единственный бэкенд не по OpenAI-протоколу: мост узнаёт его
+    # по адресу и переключается на Messages API (mark17/gonka_bridge.py).
+    # Цена честно вынесена в подпись: у Fable выход стоит в 200 раз дороже, чем
+    # у DeepSeek, поэтому в лестницы отката он НЕ добавлен — только ручной выбор
+    # или назначение на роль, где решений мало, а цена ошибки высока.
+    "claude-fable": {
+        "label": "Claude Fable 5 — самый сильный, $10/$50 за млн (дорого)",
+        "base": "https://api.anthropic.com/v1",
+        "key_env": "ANTHROPIC_API_KEY",
+        "model": "claude-fable-5",
+    },
+    "claude-opus": {
+        "label": "Claude Opus 5 — сильный, $5/$25 за млн",
+        "base": "https://api.anthropic.com/v1",
+        "key_env": "ANTHROPIC_API_KEY",
+        "model": "claude-opus-5",
+    },
     "gonka-kimi": {
         "label": "Gonka · Kimi-K2.6 — большой ризонер",
         "base": "https://proxy.gonkabroker.com/v1",
@@ -130,8 +185,13 @@ PRESETS: dict[str, dict[str, Any]] = {
     },
 }
 
-_LOCAL_PROBE_TTL_SEC = 10.0
+_LOCAL_PROBE_TTL_SEC = 30.0  # было 10: перепроверять туннель каждые 10 с — дорого
+# Кэш проб держим НА ДИСКЕ, а не только в памяти. Каждый вызов панели — новый
+# python-процесс (Next спавнит его на запрос), поэтому кэш в памяти умирал, не
+# дожив до второго запроса, и каждый раз заново платился полный обход туннеля.
+_PROBE_CACHE_FILE = _ROOT / "mark17" / "state" / "local_probe_cache.json"
 _LOCAL_PROBE_CACHE: dict[str, tuple[float, bool, str]] = {}
+_probe_cache_loaded = False
 
 
 def _preset_key(preset: dict[str, Any]) -> str:
@@ -141,12 +201,24 @@ def _preset_key(preset: dict[str, Any]) -> str:
     return os.environ.get(str(env_name), "") if env_name else ""
 
 
+# Второй, длинный шанс для бэкендов за туннелем.
+_TUNNEL_PROBE_SEC = 2.5
+
+
 def _local_models_url(base: str) -> str:
     return base.rstrip("/") + "/models"
 
 
 def _local_status(preset_id: str, preset: dict[str, Any], *, timeout: float = 0.35) -> tuple[bool, str]:
-    """Fast cached health check for local OpenAI-compatible backends."""
+    """Fast cached health check for local OpenAI-compatible backends.
+
+    Две попытки, и это не перестраховка. «Локальный» бэкенд теперь не всегда
+    localhost: дроплет ходит к моделям мака через обратный SSH-туннель
+    (127.0.0.1:7127 → 8127), и путь дроплет → интернет → мак в 350 мс не
+    укладывается — Bonsai и Ollama показывались красными, хотя отвечали. Закрытый
+    порт при этом даёт мгновенный отказ соединения, а не таймаут, поэтому вторую
+    попытку получают только те, кто именно НЕ УСПЕЛ ответить.
+    """
     if not preset.get("local"):
         return bool(_preset_key(preset)), "key" if _preset_key(preset) else "missing_key"
     now = time.time()
@@ -154,16 +226,78 @@ def _local_status(preset_id: str, preset: dict[str, Any], *, timeout: float = 0.
     if cached and now - cached[0] < _LOCAL_PROBE_TTL_SEC:
         return cached[1], cached[2]
     url = _local_models_url(str(preset.get("base") or ""))
-    try:
-        req = urllib.request.Request(url, method="GET")
-        with urllib.request.urlopen(req, timeout=timeout) as resp:  # noqa: S310 - localhost only
-            ok = 200 <= int(getattr(resp, "status", 0)) < 300
-        reason = "local_online" if ok else "local_unhealthy"
-    except Exception as exc:  # noqa: BLE001 - offline local backend is expected.
-        ok = False
-        reason = f"local_offline:{type(exc).__name__}"
+    ok = False
+    reason = "local_offline:unknown"
+    for attempt_timeout in (timeout, _TUNNEL_PROBE_SEC):
+        try:
+            req = urllib.request.Request(url, method="GET")
+            with urllib.request.urlopen(req, timeout=attempt_timeout) as resp:  # noqa: S310 - localhost/tunnel
+                ok = 200 <= int(getattr(resp, "status", 0)) < 300
+            reason = "local_online" if ok else "local_unhealthy"
+            break
+        except socket.timeout:
+            reason = "local_offline:timeout"
+            continue  # медленный путь (туннель) — даём второй, длинный шанс
+        except Exception as exc:  # noqa: BLE001 - offline local backend is expected.
+            ok = False
+            reason = f"local_offline:{type(exc).__name__}"
+            break
     _LOCAL_PROBE_CACHE[preset_id] = (now, ok, reason)
     return ok, reason
+
+
+def _load_probe_cache() -> None:
+    """Поднимает кэш проб с диска — один раз на процесс."""
+    global _probe_cache_loaded
+    if _probe_cache_loaded:
+        return
+    _probe_cache_loaded = True
+    try:
+        raw = json.loads(_PROBE_CACHE_FILE.read_text(encoding="utf-8"))
+        now = time.time()
+        for pid, row in (raw or {}).items():
+            ts, ok, reason = float(row[0]), bool(row[1]), str(row[2])
+            if now - ts < _LOCAL_PROBE_TTL_SEC:
+                _LOCAL_PROBE_CACHE[pid] = (ts, ok, reason)
+    except Exception:  # noqa: BLE001 - нет кэша или он битый: просто прозондируем заново
+        pass
+
+
+def _save_probe_cache() -> None:
+    try:
+        _PROBE_CACHE_FILE.parent.mkdir(parents=True, exist_ok=True)
+        tmp = _PROBE_CACHE_FILE.with_suffix(".tmp")
+        tmp.write_text(
+            json.dumps({pid: [ts, ok, reason] for pid, (ts, ok, reason) in _LOCAL_PROBE_CACHE.items()}),
+            encoding="utf-8",
+        )
+        tmp.replace(_PROBE_CACHE_FILE)
+    except Exception:  # noqa: BLE001 - кэш не критичен
+        pass
+
+
+def _warm_local_probes() -> None:
+    """Опрашивает все локальные бэкенды разом и раскладывает ответы по кэшу."""
+    _load_probe_cache()
+    now = time.time()
+    stale = [
+        (pid, preset)
+        for pid, preset in PRESETS.items()
+        if preset.get("local")
+        and not (
+            (cached := _LOCAL_PROBE_CACHE.get(pid)) and now - cached[0] < _LOCAL_PROBE_TTL_SEC
+        )
+    ]
+    if len(stale) < 2:
+        return  # одну пробу распараллеливать незачем
+    try:
+        from concurrent.futures import ThreadPoolExecutor
+
+        with ThreadPoolExecutor(max_workers=min(6, len(stale))) as pool:
+            list(pool.map(lambda item: _local_status(item[0], item[1]), stale))
+    except Exception:  # noqa: BLE001 - без пула просто вернёмся к последовательным пробам
+        pass
+    _save_probe_cache()
 
 
 def _preset_available(preset_id: str, preset: dict[str, Any]) -> bool:
@@ -315,6 +449,10 @@ _VOICE_MAX = {
     "ollama-3b": 240,
     "gemini": 700,
     "groq": 700,
+    "bonsai-27b": 220,
+    "claude-fable": 900,
+    "claude-opus": 900,
+    "gonka-deepseek": 900,
     "gonka-qwen3": 800,
     "gonka-kimi": 800,
     "gonka-minimax": 800,
@@ -338,6 +476,11 @@ def list_presets() -> dict[str, Any]:
     active = get_active()
     role_active = _role_state()
     items = []
+    # Прогреваем кэш проб ПАРАЛЛЕЛЬНО: пять локальных бэкендов, каждый со своим
+    # таймаутом, последовательно давали 11 с на /api/llm-config. Пробы независимы,
+    # поэтому общее время должно равняться самой медленной, а не их сумме.
+    _warm_local_probes()
+
     for pid, p in PRESETS.items():
         available, reason = _local_status(pid, p) if p.get("local") else (bool(_preset_key(p)), "key" if _preset_key(p) else "missing_key")
         items.append(

@@ -89,6 +89,7 @@ ALLOWED_EVENTS = frozenset(
         "compile_semantic",
         "meaning_tree",
         "ultra_think",
+        "concept_explain",
         "music_observation",
         "music_taste",
         "dream_mood",
@@ -1634,6 +1635,26 @@ def _handle_see(event: Event, stores: Mark17Stores) -> dict[str, Any]:
     if not raw_path:
         return {"ok": False, "route": "see", "error": "нечего смотреть: нет path"}
     path = _Path(raw_path).expanduser()
+    # Смотреть можно только на то, что лежит в песочнице ядра. Роут /api/max17
+    # открыт без авторизации, и без этой проверки любой прохожий мог заставить
+    # сервер открыть и вслух описать произвольный файл — хоть .env.local.
+    # Роут /api/max17 кладёт присланный кадр во временный каталог процесса и
+    # передаёт сюда путь — без него зрение видит только собственную песочницу и
+    # отказывает всему, что прислал человек.
+    import tempfile as _tempfile
+
+    allowed_roots = [_Path(stores.state_dir).resolve(), _Path(_tempfile.gettempdir()).resolve()]
+    extra_root = os.environ.get("MAX17_UPLOADS_ROOT")
+    if extra_root:
+        allowed_roots.append(_Path(extra_root).expanduser().resolve())
+    try:
+        resolved = path.resolve()
+        inside = any(resolved == root or root in resolved.parents for root in allowed_roots)
+    except (OSError, RuntimeError):
+        inside = False
+    if not inside:
+        return {"ok": False, "route": "see", "error": "смотреть можно только на файлы ядра"}
+    path = resolved
     if not path.exists():
         return {"ok": False, "route": "see", "error": f"файл не найден: {path}"}
 
@@ -1659,8 +1680,38 @@ def _handle_see(event: Event, stores: Mark17Stores) -> dict[str, Any]:
     # окна»), которого в числах нет. Если глаз нет, зрение всё равно состоится.
     seen: dict[str, Any] = {}
     neuro_error = ""
+
+    # Кто смотрит. Своя модель зрения весит 3.2 ГБ и живёт в памяти МАКА: один
+    # взгляд отнимает у человека две трети оперативки, грузится дольше минуты и
+    # при этом додумывает (на трёхцветной картинке «увидела» текст). Рука
+    # смотрит точнее, мгновенно и не занимает ни байта чужой памяти — поэтому
+    # при свободной руке кадр уходит ей, а числа пиксельного разбора человек
+    # получает сразу, не дожидаясь ничьего взгляда.
+    handoff = None
+    hand_free = False
     try:
-        if mode == "video":
+        from mark17 import hands as hands_channel
+
+        hand_free = bool(hands_channel.stats(stores.state_dir).get("free"))
+    except Exception:  # noqa: BLE001
+        hand_free = False
+
+    if hand_free and mode != "video":
+        site = (os.environ.get("GAME_PUBLIC_URL") or "https://mir.care").rstrip("/")
+        try:
+            handoff = hands_channel.request(
+                f"посмотри на кадр {site}/api/media/{path.name} и опиши подробно: "
+                f"что на нём, есть ли текст, что важно",
+                "человек прислал кадр — нужен внимательный взгляд",
+                stores.state_dir,
+            )
+        except Exception:  # noqa: BLE001
+            handoff = None
+
+    try:
+        if handoff and handoff.get("ok"):
+            seen = {"summary": "", "handed": True}   # свои глаза не будим: смотрит рука
+        elif mode == "video":
             seen = vision.perceive_video(path, count=int(event.payload.get("frames") or 4), prefer=eye)
         elif mode == "corners":
             seen = vision.perceive_corners(path, prefer=eye)
@@ -1713,6 +1764,10 @@ def _handle_see(event: Event, stores: Mark17Stores) -> dict[str, Any]:
     blocks = [b for b in (neuro_text, imagined) if b]
     if pixel_text:
         blocks.append(f"Замеры: {pixel_text}")
+    # Кадр ушёл руке: человек получает числа сразу и знает, что подробный взгляд
+    # придёт следом. Молчать здесь нельзя — пустой ответ читается как поломка.
+    if seen.get("handed"):
+        blocks.insert(0, "Кадр вижу, смотрю внимательно — опишу отдельным сообщением.")
     text = "\n\n".join(blocks)
     if not text:
         return {
@@ -1747,9 +1802,30 @@ def _handle_see(event: Event, stores: Mark17Stores) -> dict[str, Any]:
     except Exception:  # noqa: BLE001
         pass
 
+    # Второй взгляд рукой. Свои глаза на маке съедают 5.6 ГБ из восьми и всё
+    # равно додумывают: на трёхцветной картинке qwen2.5vl «увидела» текст,
+    # которого нет. Рука смотрит точнее и не занимает ни байта памяти человека —
+    # поэтому её зовут, когда своими глазами вышло скудно или не вышло вовсе.
+    # Ответ придёт следом, отдельным сообщением: взгляд руки асинхронен.
+    handoff = None
+    if len(str(text or "").strip()) < 120 or neuro_error:
+        try:
+            from mark17 import hands as hands_channel
+
+            site = (os.environ.get("GAME_PUBLIC_URL") or "https://mir.care").rstrip("/")
+            handoff = hands_channel.request(
+                f"посмотри на кадр {site}/api/media/{path.name} и опиши подробно: "
+                f"что на нём, есть ли текст, что важно",
+                "свои глаза разглядели мало" if not neuro_error else f"свои глаза не сработали: {neuro_error}",
+                stores.state_dir,
+            )
+        except Exception:  # noqa: BLE001 - рука не должна ронять взгляд
+            handoff = None
+
     result: dict[str, Any] = {
         "ok": True,
         "route": "see",
+        "handoff": handoff,
         "vision": {**seen, "pixels": pixels, **({"neuro_error": neuro_error} if neuro_error else {})},
         "answer": {"text": text, "source": "vision", "confidence": 0.75},
         "memory": {"stored": True},
@@ -2059,21 +2135,161 @@ def _handle_dream_mood(event: Event, stores: Mark17Stores) -> dict[str, Any]:
     }
 
 
+CODE_BLOCK_RE = re.compile(r"```([a-zA-Z0-9_+-]*)\n(.+?)```", re.DOTALL)
+
+
+def _show_panels(result: dict[str, Any]) -> None:
+    """Показать сделанное окном, а не пересказывать его текстом.
+
+    Пока распознаётся один, самый частый случай: MAX написал код. Блок уезжает
+    в отдельную панель, а в самом ответе остаётся ссылка на неё — иначе длинная
+    портянка кода забивает чат и её невозможно ни свернуть, ни отложить.
+    Панель показывается только если код существенный: ради двух строк открывать
+    окно навязчиво.
+    """
+    answer = result.get("answer")
+    if not isinstance(answer, dict):
+        return
+    text = str(answer.get("text") or "")
+    blocks = CODE_BLOCK_RE.findall(text)
+    if not blocks:
+        return
+
+    panels = []
+    for index, (lang, body) in enumerate(blocks[:3], start=1):
+        code = body.strip()
+        if code.count("\n") < 2:
+            continue  # однострочник читается прямо в тексте
+        panels.append(
+            {
+                "id": f"code{index}",
+                "title": f"{(lang or 'код').strip()} · фрагмент {index}" if len(blocks) > 1 else (lang or "код").strip(),
+                "kind": "code",
+                "lang": (lang or "").strip(),
+                "body": code[:40000],
+            }
+        )
+    if not panels:
+        return
+
+    # Из текста ответа код убираем: он теперь в окне, и дублировать его незачем.
+    stripped = CODE_BLOCK_RE.sub("(показал окном ↗)", text).strip()
+    answer["text"] = stripped or text
+    ui = result.get("ui")
+    result["ui"] = {**(ui if isinstance(ui, dict) else {}), "panels": panels}
+
+
+def _handle_concept_explain(event: Event, stores: Mark17Stores) -> dict[str, Any]:
+    """Развернуть сжатый концепт обратно в живые следы.
+
+    Обратная сторона сжатия: ярлык вроде «core» собран из сотен событий, и до
+    сих пор посмотреть, ИЗ ЧЕГО он вырос, было нельзя. Теперь можно — и живое
+    (слова человека, исходы, наблюдения) поднимается выше машинерии.
+    """
+    payload = event.payload if isinstance(event.payload, dict) else {}
+    # CLI кладёт в payload весь верхний уровень события, а мост может прислать
+    # вложенный объект — принимаем обе формы, иначе концепт молча теряется.
+    inner = payload.get("payload") if isinstance(payload.get("payload"), dict) else {}
+    concept = str(payload.get("concept") or inner.get("concept") or payload.get("text") or "").strip()
+    try:
+        limit = int(payload.get("limit") or inner.get("limit") or 6)
+    except (TypeError, ValueError):
+        limit = 6
+    limit = max(1, min(limit, 20))
+    if not concept:
+        return {"ok": False, "error": "нужен concept", "event_type": event.type}
+
+    from mark17 import decompress
+
+    result = decompress.explain(stores.synapse_graph, stores.vector_memory, concept, limit=limit)
+    traces = result.get("traces") or []
+    if not traces:
+        text = f"За «{concept}» пока ничего не стоит: концепт не найден или у него нет источников."
+    else:
+        head = f"«{concept}» собран из {result.get('total_sources')} источников"
+        grounded = int(result.get("grounded_found") or 0)
+        head += f" ({grounded} из них — живой опыт)" if grounded else " (пока только внутренняя машинерия)"
+        lines = [f"— [{t['type']}] {t['text'][:160]}" for t in traces[:5]]
+        text = head + ":\n" + "\n".join(lines)
+
+    return {
+        "ok": True,
+        "event_type": event.type,
+        "route": "concept_explain",
+        "concept": result,
+        "answer": {"text": text, "source": "decompress", "confidence": 0.7},
+        "llm": {"status": "skipped", "text": text, "latency_ms": 0.0},
+    }
+
+
 def _handle_ultra_think(event: Event, args: argparse.Namespace, stores: Mark17Stores) -> dict[str, Any]:
     """Phase 8: the core's own agency. Snapshot self-state → ONE decision (LLM
     role=ultra, or the deterministic policy offline) → EXECUTE it from the safe
     action menu → record the decision so the next think sees it."""
+    # Сначала забираем ответы руки: исход прошлого намерения должен попасть в
+    # память ДО того, как ядро выберет следующее действие. Иначе круг
+    # «намерение → действие → исход» не замыкается и MAX просит одно и то же.
+    hands_seen: list[dict[str, Any]] = []
+    try:
+        from mark17 import hands as hands_channel
+
+        for answer in hands_channel.collect(stores.state_dir):
+            hands_seen.append(answer)
+            stores.vector_memory.remember(
+                Event(
+                    type="outcome_success" if answer.get("ok") else "outcome_failure",
+                    payload={"text": f"рука вернулась: {answer.get('summary') or ''}"},
+                    source="hands",
+                ),
+                {
+                    "score": 0.8 if answer.get("ok") else 0.45,
+                    "reason": "исход действия в реальности",
+                    "store_memory": True,
+                    "reinforce": "hands",
+                },
+            )
+    except Exception:  # noqa: BLE001 - рука не должна ронять такт мышления
+        hands_seen = []
+
     state = ultra_gather_state(stores)
+    if hands_seen:
+        state["hands_answers"] = [
+            {"ok": a.get("ok"), "summary": str(a.get("summary") or "")[:200]} for a in hands_seen[:3]
+        ]
     decision = ultra_decide(state)
     action = decision["action"]
 
     executed: dict[str, Any] = {}
     try:
-        if action == "research":
+        if action == "hands":
+            # Ядро не выполняет ничего само: оно формулирует намерение, а рука
+            # (agent/night.mjs на маке) решает КАК, предупреждает человека и
+            # отчитывается. Здесь — только заявка.
+            from mark17 import hands as hands_channel
+
+            executed = hands_channel.request(
+                str(decision.get("query") or ""),
+                str(decision.get("reason") or ""),
+                stores.state_dir,
+                kind=str(decision.get("kind") or "look"),
+            )
+        elif action == "research":
             query = decision.get("query") or ""
             if query:
                 stores.curiosity.record_gap(query, source="ultra")
             executed = _run_curiosity_pass(args, stores, limit=2).get("autonomous_research", {})
+            if not executed.get("network") and query:
+                # Веб закрыт: холостой такт превращаем в заявку руке — у неё поиск
+                # разрешён. Так пробел получает шанс закрыться, а не растёт до 2141.
+                from mark17 import hands as hands_channel
+
+                handed = hands_channel.request(
+                    f"узнай и перескажи коротко: {query}",
+                    "ядру закрыт автономный веб, а пробел горячий",
+                    stores.state_dir,
+                )
+                executed["handed_to_hands"] = handed.get("ok", False)
+                executed["hands_note"] = handed.get("reason") or handed.get("task")
         elif action == "compile":
             sem = SemanticCompiler(stores.state_dir)
             compiled = 0
@@ -2114,6 +2330,28 @@ def _handle_ultra_think(event: Event, args: argparse.Namespace, stores: Mark17St
     if action == "research" and isinstance(executed, dict) and int(executed.get("facts_learned") or 0) > 0:
         executed["insight"] = True
 
+    # Плодотворным считаем действие, которое дало ХОТЬ ЧТО-ТО измеримое. Это
+    # quality_gate конституции, применённый к собственным поступкам: ядро должно
+    # учиться на исходах своих действий так же, как на исходах связей.
+    try:
+        from mark17 import futility
+
+        fruitful = {
+            "research": bool(int(executed.get("facts_learned") or 0) > 0 or executed.get("handed_to_hands")),
+            "compile": bool(int(executed.get("compiled") or 0) > 0),
+            "consolidate": bool(
+                int(executed.get("patterns_created") or 0) > 0
+                or int((executed.get("bridges") or {}).get("bridges_created") or 0) > 0
+            ),
+            "tree": bool((executed.get("root") or {}).get("conspect")),
+            "compose": bool(executed.get("compose")),
+            "hands": bool(executed.get("ok")),
+            "none": True,  # осознанное бездействие — не неудача
+        }.get(action, True)
+        futility.record(stores.state_dir, action, fruitful=fruitful)
+    except Exception:  # noqa: BLE001 - счётчик не должен ронять такт
+        pass
+
     # Remember the decision: the next think (and chat recall) sees what Ultra did.
     try:
         stores.vector_memory.remember(
@@ -2131,8 +2369,17 @@ def _handle_ultra_think(event: Event, args: argparse.Namespace, stores: Mark17St
     ult_version = str(((state.get("ultimate") or {}).get("version")) or "")
     under = f" под конституцией {ult_version}" if ult_version else ""
     text = f"Ультра-режим{under}: выбрал «{action}»{' — ' + reason if reason else ''}."
-    if action == "research" and isinstance(executed, dict):
+    if action == "hands" and isinstance(executed, dict):
+        text += (
+            f" Заявка руке{' на ДЕЙСТВИЕ' if executed.get('kind') == 'do' else ''}: "
+            f"«{executed.get('task')}» (в очереди {executed.get('pending')})."
+            if executed.get("ok")
+            else f" Рука занята: {executed.get('reason')}."
+        )
+    elif action == "research" and isinstance(executed, dict):
         text += f" Выучено фактов: {executed.get('facts_learned', 0)}."
+        if executed.get("handed_to_hands"):
+            text += " Веб закрыт — вопрос передан руке."
     elif action == "compile":
         text += f" Скомпилировано: {executed.get('compiled', 0)}."
     elif action == "consolidate":
@@ -2148,6 +2395,7 @@ def _handle_ultra_think(event: Event, args: argparse.Namespace, stores: Mark17St
         "event_type": event.type,
         "route": "ultra_orchestrator",
         "memory": {},
+        "hands": {"answers": hands_seen[:3], "queued": executed if action == "hands" else None},
         "plasticity": {"confidence": 0.65, "action": f"ultra_{action}", "learned": action != "none"},
         "llm": {"status": "skipped", "text": "Ультра-оркестратор.", "latency_ms": 0.0},
         "next_adaptation": text,
@@ -2163,7 +2411,7 @@ def _handle_ultra_think(event: Event, args: argparse.Namespace, stores: Mark17St
             "decision": decision,
             "executed": executed,
             "constitution": {
-                "version": ult_version or "max_ultimate_v0.7",
+                "version": ult_version or "max_ultra_v1.77",
                 "applied_constraints": decision.get("applied_constraints") or [],
             },
         },
@@ -3538,6 +3786,8 @@ def _handle_event(event: Event, args: argparse.Namespace, stores: Mark17Stores) 
         return _handle_compile_semantic(event, stores)
     if event.type == "meaning_tree":
         return _handle_meaning_tree(event, stores)
+    if event.type == "concept_explain":
+        return _handle_concept_explain(event, stores)
     if event.type == "ultra_think":
         return _handle_ultra_think(event, args, stores)
     if event.type == "music_observation":
@@ -3647,6 +3897,7 @@ def _handle_event(event: Event, args: argparse.Namespace, stores: Mark17Stores) 
             }
     if event.type == "user_message":
         _synthesize_natural_answer(result, event, working_memory)
+        _show_panels(result)
         _enforce_crisis_safety(result, event)
     _apply_compression_synapses(synapse_graph, event, result)
     _apply_growth(synapse_graph, event, result, result["self_evaluation"])

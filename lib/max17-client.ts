@@ -161,6 +161,14 @@ export interface Max17GraphStats {
   remaining_to_target?: number;
   progress?: number;
   progress_percent?: number;
+  // Дорога к 1M считается по ЗАРАБОТАННЫМ связям (mark17/graph_stats.py): связь
+  // засчитывается, только если она не механическое сходство и подтверждена опытом.
+  useful_synapses?: number;
+  structural_synapses?: number;
+  earned_synapses?: number;
+  earned_progress?: number;
+  earned_percent?: number;
+  earned_remaining?: number;
   unique_nodes?: number;
   total_evidence?: number;
   avg_weight?: number;

@@ -117,14 +117,17 @@ export default function SupportPanel() {
     <>
       {/* вертикальная вкладка у правого края */}
       {/* На телефоне вкладку отодвигаем от края: у края её режет скругление
-          экрана/безопасная зона, и она наезжает на окно чата. Выше центра —
-          чтобы не пересекаться с чатом. На десктопе остаётся у самого края. */}
+          экрана/безопасная зона, и она наезжает на окно чата. На телефоне
+          привязка была к проценту высоты (top-38%) — а высота вьюпорта там
+          меняется, когда адресная строка сворачивается, и кнопка уезжала.
+          Теперь на мобильном это фиксированный отступ от низа, над нижней
+          навигацией HUD; на десктопе — по центру у самого края. */}
       <button
         type="button"
         onClick={() => setOpen(true)}
         title="Поддержать проект"
-        style={{ right: 'max(0.5rem, env(safe-area-inset-right))' }}
-        className="fixed top-[38%] z-[52] -translate-y-1/2 rounded-lg bg-gradient-to-b from-rose-600 to-rose-700 px-1.5 py-3.5 text-white shadow-[0_0_24px_rgba(225,29,72,0.35)] transition hover:from-rose-500 hover:to-rose-600 sm:top-1/2 sm:rounded-l-lg sm:rounded-r-none sm:py-4 sm:[right:0px]"
+        style={{ right: 'env(safe-area-inset-right, 0px)' }}
+        className="fixed bottom-[calc(env(safe-area-inset-bottom,0px)+188px)] z-[52] rounded-lg bg-gradient-to-b from-rose-600 to-rose-700 px-1 py-3.5 sm:px-1.5 text-white shadow-[0_0_24px_rgba(225,29,72,0.35)] transition hover:from-rose-500 hover:to-rose-600 sm:bottom-auto sm:top-1/2 sm:-translate-y-1/2 sm:rounded-l-lg sm:rounded-r-none sm:py-4 sm:[right:0px]"
       >
         <span
           className="flex items-center gap-1.5 text-[9px] font-semibold uppercase tracking-[0.2em] sm:text-[10px] sm:tracking-[0.22em]"

@@ -544,10 +544,10 @@ class VectorMemory:
             hdr = json.loads(self._mat_meta.read_text(encoding="utf-8"))
             if hdr.get("n") != n or hdr.get("max_id") != max_id or hdr.get("dim") != VECTOR_DIM:
                 return None
-            M = np.load(self._mat_cache)
+            M = np.load(self._mat_cache, mmap_mode="r")
             if int(M.shape[0]) != n or (n > 0 and int(M.shape[1]) != VECTOR_DIM):
                 return None
-            return M.astype(np.float32, copy=False)
+            return M
         except Exception:
             return None
 
@@ -559,25 +559,42 @@ class VectorMemory:
             pass
 
     def _rebuild_matrix(self, n: int, max_id: int) -> np.ndarray:
-        """Медленный путь (раз): парс векторов из БД + миграция размерности + кэш."""
-        vectors: list[list[float]] = []
+        """Медленный путь (раз): парс векторов из БД + миграция размерности + кэш.
+
+        Строки кладём СРАЗУ в предвыделенный float32-массив и идём по курсору без
+        fetchall. Иначе на каждый вектор рождается python-список из float-объектов
+        по 24 байта: на 33 тыс. записей × 1024 измерения это ~1,8 ГБ пика, и
+        дроплет с 961 МБ ОЗУ ловил OOM-killer ровно на первом же рекол-запросе
+        (на 256 измерениях пролезало, на BGE-M3 перестало). Теперь пик — сама
+        матрица, 137 МБ.
+        """
+        if n <= 0:
+            M = np.zeros((0, VECTOR_DIM), dtype=np.float32)
+            self._save_matrix_cache(M, n, max_id)
+            return M
+        M = np.empty((n, VECTOR_DIM), dtype=np.float32)
         stale: list[tuple[str, int]] = []
+        filled = 0
         with self._conn() as c:
-            rows = c.execute("SELECT id, vector, text FROM vector_memories ORDER BY id").fetchall()
-            for row in rows:
+            cur = c.execute("SELECT id, vector, text FROM vector_memories ORDER BY id")
+            for row in cur:
+                if filled >= n:  # кто-то дописал строку между COUNT и выборкой
+                    break
                 try:
                     parsed = json.loads(row["vector"])
                 except (json.JSONDecodeError, TypeError):
                     parsed = None
                 if isinstance(parsed, list) and len(parsed) == VECTOR_DIM:
-                    vectors.append([float(v) for v in parsed])
+                    M[filled] = parsed
                 else:
                     v = _hash_embed(str(row["text"]), VECTOR_DIM)
-                    vectors.append(v)
+                    M[filled] = v
                     stale.append((json.dumps(v), int(row["id"])))
+                filled += 1
             if stale:
                 c.executemany("UPDATE vector_memories SET vector = ? WHERE id = ?", stale)
-        M = np.asarray(vectors, dtype=np.float32) if vectors else np.zeros((0, VECTOR_DIM), dtype=np.float32)
+        if filled < n:  # строк оказалось меньше обещанного — не тащим пустой хвост
+            M = np.ascontiguousarray(M[:filled])
         self._save_matrix_cache(M, n, max_id)
         return M
 
@@ -755,6 +772,42 @@ class VectorMemory:
             )
             return int(cur.lastrowid or 0)
 
+    def _norm_key(self, text: str) -> str:
+        """Ключ тождества: пробелы, счётчики свидетельств и числа не различают."""
+        t = re.sub(r"\s+", " ", str(text or "").strip().lower())
+        t = re.sub(r"\(\d+\s+свидетельств\w*\)", "", t)
+        return re.sub(r"\d+", "#", t).strip()[:300]
+
+    def _find_twin(self, event_type: str, text: str) -> int | None:
+        """Есть ли уже такая же запись. Ищем среди свежих того же типа — полный
+        скан по 30 тысячам строк на каждую запись стоил бы дороже, чем дубль."""
+        key = self._norm_key(text)
+        if len(key) < 8:
+            return None
+        try:
+            with self._conn() as c:
+                rows = c.execute(
+                    "SELECT id, text FROM vector_memories WHERE event_type = ? ORDER BY id DESC LIMIT 400",
+                    (str(event_type),),
+                ).fetchall()
+        except Exception:  # noqa: BLE001 - тождество не должно ронять запись
+            return None
+        for row in rows:
+            if self._norm_key(str(row["text"])) == key:
+                return int(row["id"])
+        return None
+
+    def _reinforce_existing(self, memory_id: int, importance: float) -> None:
+        """Повтор поднимает важность существующей записи, а не плодит новую."""
+        try:
+            with self._conn() as c:
+                c.execute(
+                    "UPDATE vector_memories SET importance = MAX(importance, ?), timestamp = ? WHERE id = ?",
+                    (float(importance), time.time(), int(memory_id)),
+                )
+        except Exception:  # noqa: BLE001
+            pass
+
     def similar_sights(self, vector: list[float], limit: int = 5) -> list[dict[str, Any]]:
         """Ближайшие виденные кадры.
 
@@ -797,6 +850,16 @@ class VectorMemory:
         text = text_from_event(event, evaluation)
         if not text:
             return None
+
+        # Тождество на входе. Без него память принимала одну и ту же строку
+        # сколько угодно раз: замер до чистки — 10 053 копии одной записи и
+        # 301 дубль среди 640 фактов из веба. Повтор не отбрасывается молча:
+        # он усиливает уже лежащую запись (важность и время), потому что
+        # «узнал это снова» — тоже свидетельство, просто не новая память.
+        twin = self._find_twin(event.type, text)
+        if twin is not None:
+            self._reinforce_existing(twin, importance_for_event(event, evaluation))
+            return twin
 
         summary = summary_from_event(event, text, evaluation)
         reinforce = ""

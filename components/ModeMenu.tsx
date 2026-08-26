@@ -24,10 +24,7 @@ export default function ModeMenu() {
         />
       )}
 
-      <div
-        className="fixed right-4 z-50 flex flex-col items-end gap-2"
-        style={{ bottom: 'calc(env(safe-area-inset-bottom, 0px) + 16px)' }}
-      >
+      <div className="hud-mobile-floor fixed right-4 z-50 flex flex-col items-end gap-2">
         {open && (
           <div className="flex max-h-[70vh] flex-col items-end gap-2 overflow-y-auto pr-0.5">
             {/* Витрина первой: с неё видно и режимы, и команды ядра разом. */}
@@ -54,6 +51,15 @@ export default function ModeMenu() {
                 △∞ {m.label}
               </Link>
             ))}
+            {/* На телефоне fixed-ссылка внизу экрана ложилась поверх навбара и
+                была ненажимаемой; здесь она доступна и никому не мешает. */}
+            <Link
+              href="/privacy"
+              onClick={() => setOpen(false)}
+              className="rounded-full border border-white/15 px-4 py-2.5 text-[10px] font-medium uppercase tracking-wider text-white/45 backdrop-blur transition active:scale-95 sm:hidden"
+            >
+              Политика конфиденциальности
+            </Link>
           </div>
         )}
 

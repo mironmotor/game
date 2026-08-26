@@ -1207,7 +1207,7 @@ def _web_research_answer(response: dict[str, Any]) -> dict[str, Any]:
 def _ultimate_core_answer(response: dict[str, Any]) -> dict[str, Any]:
     ultimate = response.get("ultimate_core")
     ultimate = ultimate if isinstance(ultimate, dict) else {}
-    version = str(ultimate.get("version") or "max_ultimate_v0.7")
+    version = str(ultimate.get("version") or "max_ultra_v1.77")
     public_version = version.replace("max_ultimate_", "")
     target = int(ultimate.get("target_synapses") or 1_000_000)
     cached = int(ultimate.get("facts_cached") or 0)

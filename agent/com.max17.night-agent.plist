@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- Ночной обход mir.care в 03:30. Ставится так:
+       cp agent/com.max17.night-agent.plist ~/Library/LaunchAgents/
+       launchctl load ~/Library/LaunchAgents/com.max17.night-agent.plist
+     Снять: launchctl unload ~/Library/LaunchAgents/com.max17.night-agent.plist
+     Режим наблюдения намеренно: правки — только когда человек запускает --fix. -->
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.max17.night-agent</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/bin/bash</string>
+    <string>-lc</string>
+    <string>export PATH="$HOME/.local/nodejs/bin:$PATH"; cd "$HOME/game-ultra/agent" &amp;&amp; node night.mjs</string>
+  </array>
+  <key>StartCalendarInterval</key>
+  <dict>
+    <key>Hour</key><integer>3</integer>
+    <key>Minute</key><integer>30</integer>
+  </dict>
+  <key>StandardOutPath</key>
+  <string>/tmp/max-night-agent.log</string>
+  <key>StandardErrorPath</key>
+  <string>/tmp/max-night-agent.err</string>
+  <key>RunAtLoad</key>
+  <false/>
+</dict>
+</plist>

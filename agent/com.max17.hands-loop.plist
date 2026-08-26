@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- Рука MAX всегда на связи. Холостой тик = одна ssh-команда и ноль токенов,
+     модель просыпается только когда ядро о чём-то попросило.
+
+       cp agent/com.max17.hands-loop.plist ~/Library/LaunchAgents/
+       launchctl load ~/Library/LaunchAgents/com.max17.hands-loop.plist
+
+     Снять: launchctl unload ~/Library/LaunchAgents/com.max17.hands-loop.plist
+     KeepAlive поднимает цикл обратно после сна мака и после падения. -->
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.max17.hands-loop</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/bin/bash</string>
+    <string>-lc</string>
+    <string>export PATH="$HOME/.local/nodejs/bin:$PATH"; cd "$HOME/game-ultra/agent" &amp;&amp; exec node loop.mjs</string>
+  </array>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>MAX_LOOP_INTERVAL_SEC</key><string>90</string>
+    <key>MAX_LOOP_COOLDOWN_SEC</key><string>120</string>
+    <key>MAX_LOOP_DAILY_RUNS</key><string>40</string>
+    <key>MAX_AGENT_BUDGET_USD</key><string>1</string>
+    <key>MAX_AGENT_MAX_TURNS</key><string>12</string>
+    <!-- Рука думает Опусом: она отвечает ядру на вопросы о реальности, и цена
+         ошибки тут выше цены токенов. Идёт через подписку Claude Code на маке,
+         отдельный API-ключ не нужен. -->
+    <key>MAX_AGENT_MODEL</key><string>claude-opus-5</string>
+  </dict>
+  <key>RunAtLoad</key>
+  <true/>
+  <key>KeepAlive</key>
+  <true/>
+  <key>StandardOutPath</key>
+  <string>/tmp/max-hands-loop.log</string>
+  <key>StandardErrorPath</key>
+  <string>/tmp/max-hands-loop.err</string>
+</dict>
+</plist>

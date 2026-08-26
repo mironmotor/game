@@ -34,6 +34,7 @@ from __future__ import annotations  # `str | None` на Python 3.9 (систем
 import base64
 import json
 import os
+import sys
 import urllib.error
 import urllib.request
 from concurrent.futures import ThreadPoolExecutor
@@ -41,7 +42,17 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-OLLAMA_URL = (os.environ.get("MAX17_OLLAMA_URL") or "http://127.0.0.1:11434").rstrip("/")
+# ВАЖНО про имя переменной: весь остальной проект (embedder.py, llm_config.py,
+# deploy/lan_llm.sh) выставляет MAX17_OLLAMA_HOST, и на дроплете там стоит адрес
+# обратного туннеля к маку — 127.0.0.1:7434. Зрение же читало собственное имя
+# MAX17_OLLAMA_URL, которого нет НИГДЕ, и потому искало глаз на 127.0.0.1:11434
+# прямо на сервере, где Ollama нет вовсе. local_eye_ready() всегда давал false,
+# всё уходило в Gemini, а тот отвечает 403 — зрение было мертво целиком, молча.
+OLLAMA_URL = (
+    os.environ.get("MAX17_OLLAMA_HOST")
+    or os.environ.get("MAX17_OLLAMA_URL")
+    or "http://127.0.0.1:11434"
+).rstrip("/")
 OLLAMA_VLM = os.environ.get("MAX17_VLM_MODEL") or "qwen2.5vl:3b"
 GEMINI_MODEL = os.environ.get("MAX17_VISION_MODEL") or "gemini-2.5-flash"
 
@@ -54,7 +65,10 @@ CLOUD_TIMEOUT = 45.0
 # dev-сервер, Ollama выгружает VLM сразу после ответа и грузит заново на
 # следующий кадр — разбор видео из-за этого растягивался в разы и падал по
 # таймауту на последних кадрах.
-KEEP_ALIVE = os.environ.get("MAX17_VLM_KEEP_ALIVE") or "10m"
+KEEP_ALIVE = os.environ.get("MAX17_VLM_KEEP_ALIVE") or "30s"  # модель зрения весит 5.6 ГБ
+# из восьми на маке: держать её «на всякий случай» — значит забрать у человека
+# всю оперативку и загнать систему в своп. Полминуты хватает на серию кадров,
+# дальше веса отпускаются.
 
 
 def _workers(prefer: str, count: int) -> int:
@@ -142,14 +156,24 @@ def _post_json(url: str, payload: dict[str, Any], timeout: float, headers: dict[
 
 
 def local_eye_ready() -> bool:
-    """Подняты ли свои глаза и загружена ли в них зрячая модель."""
+    """Подняты ли свои глаза и загружена ли в них зрячая модель.
+
+    Путь до глаза может идти через туннель (мак за дроплетом), поэтому две
+    секунды — слишком мало: столько занимает только рукопожатие. И провал больше
+    не молчит: без строки в stderr отсутствие зрения выглядит как «ядро просто
+    не любит картинки».
+    """
     try:
-        with urllib.request.urlopen(f"{OLLAMA_URL}/api/tags", timeout=2) as resp:
+        with urllib.request.urlopen(f"{OLLAMA_URL}/api/tags", timeout=6) as resp:
             data = json.loads(resp.read())
-    except Exception:  # noqa: BLE001 - глаз просто нет, это не ошибка
+    except Exception as exc:  # noqa: BLE001 - глаз просто нет, это не ошибка
+        print(f"[vision] свой глаз недоступен на {OLLAMA_URL}: {type(exc).__name__}", file=sys.stderr)
         return False
     names = [str(m.get("name") or "") for m in data.get("models", [])]
-    return any(n.split(":")[0] == OLLAMA_VLM.split(":")[0] for n in names)
+    ready = any(n.split(":")[0] == OLLAMA_VLM.split(":")[0] for n in names)
+    if not ready:
+        print(f"[vision] на {OLLAMA_URL} нет модели {OLLAMA_VLM}; есть: {names[:6]}", file=sys.stderr)
+    return ready
 
 
 def _see_local(image_b64: str, prompt: str) -> str:

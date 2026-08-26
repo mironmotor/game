@@ -7,6 +7,7 @@ import { DREAM_STYLES, generateDream } from './dream-canvas';
 import { bufferToWav, generateDreamTrack, playBuffer, type DreamTaste } from './dream-music';
 import { sendMax17Event } from '@/lib/max17-client';
 import { HUD_THEMES, applyTheme, getTheme, loadThemeId } from './themes';
+import { SCENE_MODES, getSceneMode, setSceneMode, subscribeSceneMode, type SceneMode } from '@/lib/scene-mode';
 
 /**
  * «Вид» — themes, backgrounds and the subconscious wallpaper generator.
@@ -22,6 +23,13 @@ export function AppearancePanel({
   onSetBackground: (id: string) => void;
 }) {
   const [themeId, setThemeId] = useState(() => loadThemeId());
+  // Режим живёт вне React (его же читают слои и кнопка «Мир 3D» в доке), поэтому
+  // держим локальную копию и обновляем её на событие.
+  const [scene, setScene] = useState<SceneMode>('all');
+  useEffect(() => {
+    setScene(getSceneMode());
+    return subscribeSceneMode(() => setScene(getSceneMode()));
+  }, []);
   const [styleId, setStyleId] = useState(DREAM_STYLES[0].id);
   const [seed, setSeed] = useState('');
   const [busy, setBusy] = useState(false);
@@ -117,6 +125,31 @@ export function AppearancePanel({
       </div>
 
       <div className="flex-1 space-y-3 overflow-y-auto px-3 py-2.5 text-[11px] text-cyan-100/80">
+        <div>
+          <div className="mb-1.5 text-[9px] uppercase tracking-[0.18em] text-cyan-100/45">Сцена</div>
+          <div className="grid grid-cols-2 gap-1.5">
+            {SCENE_MODES.map((m) => (
+              <button
+                key={m.id}
+                type="button"
+                onClick={() => setSceneMode(m.id)}
+                className={`flex flex-col items-start gap-0.5 rounded-md border px-2 py-1.5 text-left transition ${
+                  m.id === scene
+                    ? 'border-cyan-300/60 bg-cyan-300/15'
+                    : 'border-cyan-300/12 bg-cyan-300/[0.03] hover:bg-cyan-300/10'
+                }`}
+                title={m.hint}
+              >
+                <span className="flex w-full items-center gap-1 text-[10px] text-cyan-100/85">
+                  {m.label}
+                  {m.id === scene && <Check size={9} className="ml-auto text-cyan-300" />}
+                </span>
+                <span className="text-[8.5px] leading-tight text-cyan-100/45">{m.hint}</span>
+              </button>
+            ))}
+          </div>
+        </div>
+
         <div>
           <div className="mb-1.5 text-[9px] uppercase tracking-[0.18em] text-cyan-100/45">Тема интерфейса</div>
           <div className="grid grid-cols-5 gap-1.5">

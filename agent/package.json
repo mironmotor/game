@@ -1,0 +1,17 @@
+{
+  "name": "max-night-agent",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Ночной обходчик mir.care на Claude Agent SDK: смотрит логи, докладывает в Telegram, правит код только с предупреждением",
+  "scripts": {
+    "loop": "node loop.mjs",
+    "hands": "node night.mjs --hands",
+    "watch": "node night.mjs",
+    "fix": "node night.mjs --fix",
+    "install-notifier": "node -e \"import('./notify.mjs').then(m=>m.installNotifier()).then(r=>console.log(r.out||r.err))\""
+  },
+  "dependencies": {
+    "@anthropic-ai/claude-agent-sdk": "^0.2.0"
+  }
+}

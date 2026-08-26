@@ -1,4 +1,4 @@
-"""Ultra orchestrator — Phase 8 (MAX ULTRA): the core decides its own next move.
+"""MAX ULTRA v1.77 — исполнитель: ядро само выбирает следующий шаг.
 
 Until now every LLM call was reactive (user asks → core answers). This module
 gives Max AGENCY inside his own environment: he reads his own state — the
@@ -9,6 +9,7 @@ core quietly orders its own mind — улучшает свою среду энт
 
 Safety contract:
   - decisions come ONLY from a fixed action menu (no shell, no files, no UI):
+      hands        — ask the human-side agent for ONE small act in reality
       research     — learn a topic on the web (Max picks the query himself)
       compile      — compile recent speech into IR-code memory
       consolidate  — sleep consolidation + cross-cluster bridges
@@ -22,20 +23,27 @@ Safety contract:
 from __future__ import annotations
 
 import json
+import os
 import re
 from typing import Any
 
 from mark17.gonka_bridge import chat as gonka_chat, is_enabled as gonka_is_enabled
 from mark17.ultimate_core import get_ultimate_state
 
-ALLOWED_ACTIONS = ("research", "compile", "consolidate", "tree", "compose", "none")
+ALLOWED_ACTIONS = ("hands", "research", "compile", "consolidate", "tree", "compose", "none")
 
-# MAX Ultimate v0.7 is the CONSTITUTION; Ultra is the executor. Every Ultra
-# decision operates under these laws of growth — listed per action so the
-# response can show which ones it respected.
-_BASE_CONSTRAINTS = ("bounded_growth", "human_override", "quality_gate")
+# С v1.77 конституция и исполнитель — одна система (mark17/ultimate_core.py).
+# Каждое решение действует под этими законами; они перечислены по действиям,
+# чтобы в ответе было видно, какие именно соблюдены.
+# learn_from_outcome в базе не случайно: теперь ЛЮБОЕ действие записывает свой
+# исход (mark17/futility.py), и это касается всех, а не отдельного пункта меню.
+_BASE_CONSTRAINTS = ("bounded_growth", "human_override", "quality_gate", "learn_from_outcome")
 _ACTION_CONSTRAINTS = {
-    "research": ("source_backed_learning", "reality_contact"),
+    # Рука — единственное действие, выходящее за пределы собственной головы,
+    # поэтому human_override у неё не подразумевается, а стоит явно: заявку
+    # исполняет агент на стороне человека и только после предупреждения.
+    "hands": ("reality_contact", "human_override", "ask_the_hand", "consent_for_change", "grounded_over_self"),
+    "research": ("source_backed_learning", "reality_contact", "ask_the_hand"),
     "compile": ("quality_gate",),
     "consolidate": ("quality_gate",),
     "tree": ("quality_gate",),
@@ -61,15 +69,25 @@ _DECIDER_PROMPT = (
     "  compose — сочинить трек под своё настроение (выбирай при инсайте, после "
     "выученных фактов или когда пользователю нужна поддержка по голосу);\n"
     "  none — ничего не делать (тоже решение).\n"
-    "Ты действуешь ПОД КОНСТИТУЦИЕЙ MAX Ultimate v0.7. Соблюдай её ограничения: "
+    "Ты действуешь ПОД КОНСТИТУЦИЕЙ MAX ULTRA v1.77. Соблюдай её ограничения: "
     "bounded_growth, source_backed_learning, reality_contact, no_fake_private_mythos, "
-    "human_override, quality_gate. Никогда не выбирай действие, нарушающее ограниченный "
+    "human_override, quality_gate, learn_from_outcome, ask_the_hand, consent_for_change, "
+    "grounded_over_self. Никогда не выбирай действие, нарушающее ограниченный "
     "рост или контроль человека. Предпочитай source-backed обучение догадкам. Предпочитай "
     "полезную сжатую память сырому объёму. Каждое действие должно двигать Max17 к 1 000 000 "
     "ПОЛЕЗНЫХ синапсов, а не просто к большему количеству данных.\n"
+    "ВАЖНО про поле web_access: если оно false — автономный веб тебе закрыт, и "
+    "research физически вернёт ноль фактов, сколько бы раз ты его ни выбрал. В этом "
+    "случае не выбирай research: то же самое любопытство отдай руке (action hands, "
+    "в query — что именно узнать), у неё поиск разрешён.\n"
+    "Поле futile_actions — сколько раз подряд действие давало пустой результат. "
+    "Три и больше означает стену: выбери другое, а не бей в неё снова.\n"
+    "Поле hands — состояние руки: pending это сколько твоих заявок ещё ждут. "
+    "Если их много, не ставь новых, дождись ответа.\n"
     "Критерии: закрывай пробелы знаний, не повторяй последнее действие без причины, "
     "research выбирай только с конкретным полезным query. Ответ — строго JSON: "
-    '{"action":"...","query":"...","reason":"одно предложение почему"}. Только JSON.'
+    '{"action":"...","query":"...","kind":"look|do","reason":"одно предложение почему"}. '
+    "Поле kind обязательно только для hands. Только JSON."
 )
 
 
@@ -125,7 +143,11 @@ def gather_state(stores: Any) -> dict[str, Any]:
     except Exception:  # noqa: BLE001
         pass
     try:
-        hits = stores.vector_memory.recall("ultra decision решение оркестратора", limit=1)
+        # include_plumbing=True критично: ultra_decision лежит в PLUMBING_TYPES, и без
+        # этого флага ядро НЕ ВИДИТ собственное прошлое решение. Именно поэтому не
+        # срабатывала защита «не два research подряд» в _fallback_policy: поле
+        # last_decision всегда приходило пустым.
+        hits = stores.vector_memory.recall("ultra decision решение оркестратора", limit=1, include_plumbing=True)
         if hits and hits[0].event_type == "ultra_decision":
             state["last_decision"] = hits[0].summary[:120]
     except Exception:  # noqa: BLE001
@@ -134,7 +156,27 @@ def gather_state(stores: Any) -> dict[str, Any]:
         state["has_music_taste"] = len(stores.working_memory.get_music_history(limit=1)) > 0
     except Exception:  # noqa: BLE001
         state["has_music_taste"] = False
-    # MAX Ultimate v0.7 constitution snapshot — the laws Ultra acts under.
+    # Снимок конституции v1.77 — законы, под которыми действует исполнитель.
+    # Открыт ли ядру автономный веб. Раньше этого в снимке не было, и ядро
+    # выбирало research «вслепую»: 3578 тактов подряд возвращали ноль фактов,
+    # потому что нужны ОБА флага, а на сервере нет ни одного.
+    state["web_access"] = bool(
+        os.environ.get("MAX17_WEB_ENABLED") == "true" and os.environ.get("MAX17_AUTO_WEB") == "true"
+    )
+    try:
+        from mark17 import futility
+
+        streaks = futility.streaks(stores.state_dir)
+        if streaks:
+            state["futile_actions"] = streaks  # действие → сколько пустых подряд
+    except Exception:  # noqa: BLE001
+        pass
+    try:
+        from mark17 import hands as hands_channel
+
+        state["hands"] = hands_channel.stats(stores.state_dir)
+    except Exception:  # noqa: BLE001
+        state["hands"] = {"pending": 0}
     try:
         state["ultimate"] = get_ultimate_state(stores)
     except Exception:  # noqa: BLE001 - constitution is read-only; never block agency
@@ -146,7 +188,7 @@ _TENSE_WORDS = ("напряж", "зажат", "устал", "подавлен", 
 
 
 def _fallback_policy(state: dict[str, Any]) -> dict[str, str]:
-    """No-LLM agency under MAX Ultimate v0.7: a deterministic, network-free
+    """No-LLM agency under MAX ULTRA v1.77: a deterministic, network-free
     ordering of needs that always moves toward 1M USEFUL synapses, never loops
     on research, and prefers compressed memory over raw volume."""
     ultimate = state.get("ultimate") or {}
@@ -204,9 +246,13 @@ def decide(state: dict[str, Any]) -> dict[str, Any]:
             if isinstance(parsed, dict):
                 action = str(parsed.get("action") or "").strip()
                 if action in ALLOWED_ACTIONS:
+                    kind = str(parsed.get("kind") or "look").strip().lower()
                     decision = {
                         "action": action,
                         "query": str(parsed.get("query") or "").strip()[:160],
+                        # Вид заявки решает ядро, но право сделать — за человеком:
+                        # «do» рука не исполняет сама, а отдаёт на подтверждение.
+                        "kind": "do" if kind == "do" else "look",
                         "reason": str(parsed.get("reason") or "").strip()[:200],
                     }
                     decider = res.model
@@ -215,6 +261,23 @@ def decide(state: dict[str, Any]) -> dict[str, Any]:
     if decision["action"] == "research" and not decision.get("query"):
         # research without a topic is noise — degrade to consolidation.
         decision = {"action": "consolidate", "query": "", "reason": "research без query — заменено консолидацией"}
+    # Дверь заперта: research без веба — это гарантированный ноль. Любопытство
+    # не гасим, а передаём руке: у неё поиск разрешён, у ядра нет.
+    if decision["action"] == "research" and state.get("web_access") is False:
+        decision = {
+            "action": "hands",
+            "query": decision.get("query") or "",
+            "reason": f"веб ядру закрыт — прошу руку: {decision.get('reason') or 'закрыть пробел'}"[:200],
+        }
+    # Стена, замеченная по исходам: три пустых подряд — выбираем другое.
+    futile = state.get("futile_actions") if isinstance(state.get("futile_actions"), dict) else {}
+    if int(futile.get(decision["action"]) or 0) >= 3:
+        fallback = "hands" if decision["action"] != "hands" else "consolidate"
+        decision = {
+            "action": fallback,
+            "query": decision.get("query") or "",
+            "reason": f"«{decision['action']}» дал пустой результат {futile.get(decision['action'])} раз подряд — меняю подход"[:200],
+        }
     decision["decider"] = decider
     # The MAX Ultimate constraints this decision operated under (the constitution).
     decision["applied_constraints"] = applied_constraints(decision["action"])

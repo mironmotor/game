@@ -2,6 +2,20 @@
 @import "../components/hud/hud.css";
 
 @layer utilities {
+  /* Плавающие кнопки (режимы, корпус) на телефоне встают НАД нижней навигацией
+     HUD: она fixed и высотой ~71px, поэтому кнопка на bottom:16px либо уезжает
+     под неё, либо съедает крайний пункт «Задания». На планшете и десктопе бар
+     другой, и кнопки возвращаются к нижнему краю. */
+  .hud-mobile-floor {
+    bottom: calc(env(safe-area-inset-bottom, 0px) + 92px);
+  }
+
+  @media (min-width: 701px) {
+    .hud-mobile-floor {
+      bottom: calc(env(safe-area-inset-bottom, 0px) + 16px);
+    }
+  }
+
   .scrollbar-thin::-webkit-scrollbar {
     width: 4px;
   }

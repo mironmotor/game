@@ -13,8 +13,9 @@
  * (работает с движущимися по орбитам телами). Микрофон даёт лёгкое дыхание.
  */
 
-import { useEffect, useRef, type MouseEvent } from 'react';
-import { sendMax17Event } from '@/lib/max17-client';
+import { useEffect, useRef, useSyncExternalStore, type MouseEvent } from 'react';
+import { subscribeGraphPulse } from '@/lib/graph-pulse';
+import { getSceneMode, hasSky, skyRecessed, subscribeSceneMode, type SceneMode } from '@/lib/scene-mode';
 import { ambientFrame } from '@/lib/ambient-audio';
 
 interface Body {
@@ -27,6 +28,10 @@ interface Body {
 
 export function SolarSystem({ className = '' }: { className?: string }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  // Небо рисуется не всегда: в режиме «Мир» его нет вовсе, в общем кадре оно
+  // уходит в задник, чтобы планеты не висели между монолитами земли.
+  const mode = useSyncExternalStore(subscribeSceneMode, getSceneMode, () => 'all' as SceneMode);
+  const visible = hasSky(mode);
   const labelsRef = useRef<string[]>([]);
   const focusRef = useRef<string | null>(null); // ключ сфокусированного тела
   const bodiesRef = useRef<Body[]>([]); // экранные позиции для кликов
@@ -43,30 +48,17 @@ export function SolarSystem({ className = '' }: { className?: string }) {
     return () => window.removeEventListener('max:thinking', onThink as EventListener);
   }, []);
 
-  useEffect(() => {
-    let alive = true;
-    const pull = async () => {
-      try {
-        const r = (await sendMax17Event({ type: 'graph_stats' })) as {
-          graph_stats?: { top_concepts?: Array<{ concept: string }>; top_node_types?: Array<{ node_type: string }> };
-        };
-        if (!alive) return;
-        const labels = [
-          ...(r.graph_stats?.top_concepts ?? []).map((c) => c.concept),
-          ...(r.graph_stats?.top_node_types ?? []).map((n) => n.node_type),
-        ].filter(Boolean);
-        if (labels.length) labelsRef.current = labels;
-      } catch {
-        /* мост холодный */
-      }
-    };
-    void pull();
-    const t = setInterval(pull, 30_000);
-    return () => {
-      alive = false;
-      clearInterval(t);
-    };
-  }, []);
+  // Подписи планет — из графа ядра. Опрос общий с землёй мира (lib/graph-pulse):
+  // мост поднимает Python на каждый вызов, второй таймер тут был бы лишним.
+  useEffect(() =>
+    subscribeGraphPulse((stats) => {
+      const labels = [
+        ...(stats.top_concepts ?? []).map((c) => String((c as { concept?: string }).concept ?? '')),
+        ...(stats.top_node_types ?? []).map((n) => String((n as { node_type?: string }).node_type ?? '')),
+      ].filter(Boolean);
+      if (labels.length) labelsRef.current = labels;
+    }),
+  []);
 
   // Закрыли GODMODE → камера и фокус назад ко всей системе.
   useEffect(() => {
@@ -79,6 +71,7 @@ export function SolarSystem({ className = '' }: { className?: string }) {
   }, []);
 
   useEffect(() => {
+    if (!visible) return;
     const canvas = canvasRef.current;
     const ctx = canvas?.getContext('2d');
     if (!canvas || !ctx) return;
@@ -450,7 +443,9 @@ export function SolarSystem({ className = '' }: { className?: string }) {
       cancelAnimationFrame(raf);
       ro.disconnect();
     };
-  }, []);
+    // visible — в зависимостях намеренно: смена режима сцены должна останавливать
+    // и заново поднимать цикл рисования, а не оставлять его крутиться вхолостую.
+  }, [visible]);
 
   const onClick = (e: MouseEvent<HTMLCanvasElement>) => {
     const canvas = canvasRef.current;
@@ -484,12 +479,24 @@ export function SolarSystem({ className = '' }: { className?: string }) {
     focusRef.current = hit.key; // планета/луна → фокус + slowed
   };
 
+  if (!visible) return null;
+
+  const recessed = skyRecessed(mode);
   return (
-    <div className={className}>
+    <div className={`${className}${recessed ? ' is-recessed' : ''}`}>
       <canvas
         ref={canvasRef}
-        onClick={onClick}
-        style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', pointerEvents: 'auto', cursor: 'pointer' }}
+        onClick={recessed ? undefined : onClick}
+        style={{
+          position: 'absolute',
+          inset: 0,
+          width: '100%',
+          height: '100%',
+          // В общем кадре небо — задник: клики по нему уводили фокус камеры
+          // прямо сквозь монолиты земли, поэтому там оно только фон.
+          pointerEvents: recessed ? 'none' : 'auto',
+          cursor: recessed ? 'default' : 'pointer',
+        }}
         aria-label="GAME Solar System"
       />
     </div>

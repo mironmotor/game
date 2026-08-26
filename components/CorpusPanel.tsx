@@ -130,7 +130,7 @@ export default function CorpusPanel() {
       <button
         type="button"
         onClick={() => setOpen(true)}
-        className="fixed bottom-4 right-4 z-40 flex items-center gap-1.5 rounded-full border border-teal-400/30 bg-[#0a0818]/85 px-3 py-2 text-xs font-semibold text-teal-200 shadow-lg shadow-teal-500/10 backdrop-blur-md transition hover:bg-teal-400/10"
+        className="hud-mobile-floor fixed left-3 z-40 flex items-center gap-1.5 rounded-full border border-teal-400/30 sm:left-4 bg-[#0a0818]/85 px-3 py-2 text-xs font-semibold text-teal-200 shadow-lg shadow-teal-500/10 backdrop-blur-md transition hover:bg-teal-400/10"
         title={t('corpus.title')}
       >
         <BookOpen className="h-4 w-4" />
@@ -140,7 +140,7 @@ export default function CorpusPanel() {
   }
 
   return (
-    <div className="fixed bottom-4 right-4 z-40 w-[min(440px,calc(100vw-32px))] rounded-2xl border border-teal-400/25 bg-[#0a0818]/92 p-3 shadow-2xl backdrop-blur-md">
+    <div className="hud-mobile-floor fixed left-3 sm:left-4 z-40 w-[min(440px,calc(100vw-32px))] rounded-2xl border border-teal-400/25 bg-[#0a0818]/92 p-3 shadow-2xl backdrop-blur-md">
       <div className="mb-2 flex items-center gap-2 text-[11px] uppercase tracking-widest text-teal-300/80">
         <BookOpen className="h-3.5 w-3.5" /> {t('corpus.title')} → MAX
         <button

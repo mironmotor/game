@@ -104,11 +104,18 @@ class GraphStats:
         useful_synapses = int(totals["useful_synapses"])
         structural_synapses = int(totals["structural_synapses"])
         earned_synapses = int(totals["earned_synapses"])
-        progress = min(1.0, useful_synapses / self.target_synapses)
-        remaining = max(0, self.target_synapses - useful_synapses)
         # Путь к 1M считаем по ЗАРАБОТАННЫМ: связь засчитывается, только если она
         # не механическое сходство и подтверждена опытом больше одного раза.
         earned_progress = min(1.0, earned_synapses / self.target_synapses)
+        # ГЛАВНЫЙ progress теперь тоже по заработанным. Раньше он считался по
+        # useful_synapses, куда входит similar_to, — а замер показал, что 90.5%
+        # этих связей натянуты между служебными записями ядра (дубликатами
+        # собственных паттернов). Прогресс к цели измерялся объёмом собственного
+        # шума. Прежняя величина осталась под именем useful_progress: она честно
+        # называется тем, что есть, и ничего не обещает.
+        progress = earned_progress
+        remaining = max(0, self.target_synapses - earned_synapses)
+        useful_progress = min(1.0, useful_synapses / self.target_synapses)
         return {
             "target_synapses": self.target_synapses,
             "total_synapses": total_synapses,
@@ -125,6 +132,8 @@ class GraphStats:
             "remaining_to_target": remaining,
             "progress": round(progress, 4),
             "progress_percent": round(progress * 100, 2),
+            "useful_progress": round(useful_progress, 4),
+            "useful_percent": round(useful_progress * 100, 2),
             "unique_nodes": int(unique_nodes),
             "total_evidence": int(totals["total_evidence"]),
             "avg_weight": _round(totals["avg_weight"]),

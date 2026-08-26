@@ -16,7 +16,15 @@ import {
   nextBackgroundId,
 } from './backgrounds';
 
-export type WindowId =
+/**
+ * Штатные окна интерфейса. Их девять, они прописаны в доке и в раскладке.
+ *
+ * Но список закрыт, и это ровно то, что мешало MAX показать сделанное: он умел
+ * только рассказать текстом. Поэтому WindowId открыт до строки — ядро может
+ * попросить «покажи это окном», и рядом со штатными появится панель с кодом,
+ * картинкой или разбором, которую так же можно двигать, свернуть и закрыть.
+ */
+export type StaticWindowId =
   | 'rank'
   | 'clock'
   | 'missions'
@@ -26,6 +34,18 @@ export type WindowId =
   | 'player'
   | 'chat'
   | 'output';
+
+/** Штатное окно или панель, созданная ядром на лету (id вида `panel:...`). */
+export type WindowId = StaticWindowId | (string & {});
+
+/** Панель, которую создало ядро: показанный результат, а не пересказ. */
+export interface CorePanel {
+  id: string;
+  title: string;
+  kind: 'code' | 'image' | 'text';
+  body: string;
+  lang?: string;
+}
 
 export interface WindowMeta {
   id: WindowId;
@@ -37,7 +57,7 @@ export interface WindowMeta {
   minH: number;
 }
 
-export const WINDOW_META: Record<WindowId, WindowMeta> = {
+export const WINDOW_META: Record<StaticWindowId, WindowMeta> = {
   rank: { id: 'rank', title: 'РАНГ В МИРЕ', minW: 180, minH: 96 },
   clock: { id: 'clock', title: 'ВРЕМЯ', minW: 180, minH: 120 },
   missions: { id: 'missions', title: 'МИССИИ', minW: 200, minH: 140 },
@@ -49,7 +69,7 @@ export const WINDOW_META: Record<WindowId, WindowMeta> = {
   output: { id: 'output', title: 'ВЫВОД MAX17', essential: true, minW: 280, minH: 130 },
 };
 
-export const WINDOW_ORDER: WindowId[] = [
+export const WINDOW_ORDER: StaticWindowId[] = [
   'rank',
   'clock',
   'missions',
@@ -146,8 +166,12 @@ function loadPersisted(): PersistShape | null {
 export interface WindowManager {
   hydrated: boolean;
   windows: WindowMap;
+  /** Панели, показанные ядром: код, картинка, разбор. */
+  panels: Record<string, CorePanel>;
   background: string;
   openWindow: (id: WindowId) => void;
+  openPanel: (panel: CorePanel) => void;
+  closePanel: (id: string) => void;
   closeWindow: (id: WindowId) => void;
   toggleWindow: (id: WindowId) => void;
   minimizeWindow: (id: WindowId, value?: boolean) => void;
@@ -301,7 +325,9 @@ export function WindowManagerProvider({ children }: { children: ReactNode }) {
 
   const resizeWindow = useCallback(
     (id: WindowId, w: number, h: number) => {
-      const meta = WINDOW_META[id];
+      // У панели, созданной ядром, штатных метаданных нет — берём разумный
+      // минимум, иначе окно с кодом можно было бы сжать в точку.
+      const meta = WINDOW_META[id as StaticWindowId] ?? { minW: 280, minH: 180 };
       patch(id, { w: Math.max(meta.minW, w), h: Math.max(meta.minH, h) });
     },
     [patch],
@@ -351,12 +377,50 @@ export function WindowManagerProvider({ children }: { children: ReactNode }) {
     setBackgroundState(DEFAULT_BACKGROUND_ID);
   }, []);
 
+  // Панели, созданные ядром. Живут только в текущей сессии: показанный код
+  // или картинка — часть разговора, а не часть раскладки интерфейса, и
+  // восстанавливать их при перезагрузке страницы незачем.
+  const [panels, setPanels] = useState<Record<string, CorePanel>>({});
+
+  const openPanel = useCallback((panel: CorePanel) => {
+    const id = panel.id.startsWith('panel:') ? panel.id : `panel:${panel.id}`;
+    setPanels((prev) => ({ ...prev, [id]: { ...panel, id } }));
+    setWindows((prev) => ({
+      ...prev,
+      [id]: {
+        x: 90 + (Object.keys(prev).length % 5) * 26,
+        y: 90 + (Object.keys(prev).length % 5) * 22,
+        w: panel.kind === 'image' ? 420 : 560,
+        h: panel.kind === 'image' ? 360 : 420,
+        open: true,
+        minimized: false,
+        z: (topZ.current += 1),
+      },
+    }));
+  }, []);
+
+  const closePanel = useCallback((id: string) => {
+    setPanels((prev) => {
+      const next = { ...prev };
+      delete next[id];
+      return next;
+    });
+    setWindows((prev) => {
+      const next = { ...prev };
+      delete next[id];
+      return next;
+    });
+  }, []);
+
   const value = useMemo<WindowManager>(
     () => ({
       hydrated,
       windows,
+      panels,
       background,
       openWindow,
+      openPanel,
+      closePanel,
       closeWindow,
       toggleWindow,
       minimizeWindow,
@@ -373,6 +437,7 @@ export function WindowManagerProvider({ children }: { children: ReactNode }) {
     [
       hydrated,
       windows,
+      panels,
       background,
       openWindow,
       closeWindow,

@@ -1,5 +1,5 @@
 import { spawn } from 'node:child_process';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { NextResponse } from 'next/server';
@@ -129,7 +129,7 @@ const MEDIA_EXT: Record<string, string> = {
 };
 
 /** Положить присланное фото/видео во временный файл. null — если ничего не прислали. */
-function stageMedia(body: Record<string, unknown>): { dir: string; file: string } | null {
+function stageMedia(body: Record<string, unknown>): { dir: string; file: string; keep: boolean } | null {
   const raw = String(body.image || body.media || '').trim();
   if (!raw) return null;
 
@@ -146,10 +146,23 @@ function stageMedia(body: Record<string, unknown>): { dir: string; file: string 
   const fromName = path.extname(String(body.name || '')).toLowerCase();
   const ext = MEDIA_EXT[mime] || (fromName && fromName.length <= 5 ? fromName : '.jpg');
 
-  const dir = mkdtempSync(path.join(tmpdir(), 'max17-see-'));
-  const file = path.join(dir, `media${ext}`);
+  // Кадр живёт дальше одного запроса: иначе показать человеку то, на что MAX
+  // смотрел, невозможно в принципе, и рука не может посмотреть на него сама.
+  // Имя — из времени и случайного хвоста: угадать чужой кадр по ссылке нельзя.
+  const stamp = new Date().toISOString().slice(0, 10);
+  const stem = `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 10)}`;
+  const uploads = process.env.MAX17_UPLOADS_ROOT || path.join(process.cwd(), 'mark17', 'state', 'uploads');
+  let dir = path.join(uploads, stamp);
+  let keep = true;
+  try {
+    mkdirSync(dir, { recursive: true });
+  } catch {
+    dir = mkdtempSync(path.join(tmpdir(), 'max17-see-'));  // не смогли — работаем как раньше
+    keep = false;
+  }
+  const file = path.join(dir, `${stem}${ext}`);
   writeFileSync(file, buf);
-  return { dir, file };
+  return { dir, file, keep };
 }
 
 
@@ -790,7 +803,7 @@ export async function POST(request: Request) {
   // треть и гоняется через stdin питона целиком. Кладём во временную папку,
   // отдаём ядру путь и обязательно убираем за собой — иначе каждый присланный
   // кадр остаётся на диске навсегда.
-  let staged: { dir: string; file: string } | null = null;
+  let staged: { dir: string; file: string; keep: boolean } | null = null;
   if (eventType === 'see') {
     try {
       staged = stageMedia(body);
@@ -830,6 +843,13 @@ export async function POST(request: Request) {
       result = await runMax17Bridge(body);
     }
     const status = result.ok === false ? 502 : 200;
+    // Ссылка на сохранённый кадр: по ней интерфейс показывает то, на что MAX
+    // смотрел, а рука скачивает файл, чтобы посмотреть своими глазами.
+    if (staged?.keep && eventType === 'see') {
+      (result as Record<string, unknown>).media_id = path.basename(staged.file);
+      (result as Record<string, unknown>).media_url =
+        `${process.env.GAME_BASE_PATH || ''}/api/media/${path.basename(staged.file)}`;
+    }
     return NextResponse.json(
       {
         ...DEFAULT_RESPONSE,
@@ -844,6 +864,8 @@ export async function POST(request: Request) {
     }
     return errorResponse('Max17 bridge failed', 502, error instanceof Error ? error.message : String(error));
   } finally {
-    if (staged) rmSync(staged.dir, { recursive: true, force: true });
+    // Постоянные загрузки не трогаем: там лежат кадры за весь день, и снос
+    // каталога стёр бы чужие. Убираем только временную папку запасного пути.
+    if (staged && !staged.keep) rmSync(staged.dir, { recursive: true, force: true });
   }
 }

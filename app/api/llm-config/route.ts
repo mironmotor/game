@@ -5,7 +5,7 @@ import { NextResponse } from 'next/server';
 export const runtime = 'nodejs';
 
 const IS_VERCEL = process.env.VERCEL === '1';
-const DEFAULT_GONKA_MODEL = 'MiniMaxAI/MiniMax-M2.7';
+const DEFAULT_GONKA_MODEL = 'deepseek-ai/DeepSeek-V4-Flash-0731';
 
 const CLOUD_ROLES = [
   { id: 'chat', label: 'Чат' },
@@ -16,7 +16,7 @@ const CLOUD_ROLES = [
   { id: 'ultra', label: 'Ультра-оркестратор' },
 ];
 
-function cloudConfig(active = 'gonka-minimax') {
+function cloudConfig(active = 'gonka-deepseek') {
   const configuredGonkaModel = process.env.GONKA_MODEL?.trim();
   const gonkaModel =
     configuredGonkaModel === 'Qwen/Qwen3-235B-A22B-Instruct-2507-FP8'
@@ -24,12 +24,22 @@ function cloudConfig(active = 'gonka-minimax') {
       : configuredGonkaModel || DEFAULT_GONKA_MODEL;
   const presets = [
     {
-      id: 'gonka-minimax',
-      label: 'Gonka · MiniMax-M2.7 — облако Vercel',
+      id: 'gonka-deepseek',
+      label: 'Gonka · DeepSeek-V4-Flash — 400k контекст, облако Vercel',
       model: gonkaModel,
       local: false,
       available: Boolean(process.env.GONKA_API_KEY),
-      active: active === 'gonka-qwen3',
+      active: active === 'gonka-deepseek',
+    },
+    {
+      id: 'gonka-minimax',
+      label: 'Gonka · MiniMax-M2.7 — облако Vercel',
+      model: 'MiniMaxAI/MiniMax-M2.7',
+      local: false,
+      available: Boolean(process.env.GONKA_API_KEY),
+      // Было `active === 'gonka-qwen3'` — сравнение с чужим id, пресет не мог
+      // подсветиться выбранным никогда.
+      active: active === 'gonka-minimax',
     },
     {
       id: 'gemini',
@@ -121,13 +131,13 @@ export async function POST(request: Request) {
     return NextResponse.json({ ok: false, error: 'Invalid JSON body' }, { status: 400 });
   }
   if (IS_VERCEL) {
-    return NextResponse.json(cloudConfig(id || 'gonka-minimax'));
+    return NextResponse.json(cloudConfig(id || 'gonka-deepseek'));
   }
   try {
     return NextResponse.json(await runLlmConfig({ action: 'set', id, role }));
   } catch (error) {
     if (String(error).includes('ENOENT') || String(error).includes('spawn python')) {
-      return NextResponse.json(cloudConfig(id || 'gonka-qwen3'));
+      return NextResponse.json(cloudConfig(id || 'gonka-deepseek'));
     }
     return NextResponse.json({ ok: false, error: String(error), presets: [] }, { status: 502 });
   }

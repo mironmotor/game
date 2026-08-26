@@ -1,4 +1,4 @@
-"""Neural embeddings for Max17 — Ollama (default) → Gemini (fallback) → None.
+"""Neural embeddings for Max17 — Gonka/Ollama → Gemini (fallback) → None.
 
 The caller (vector_memory.embed_text) falls back to local token-hashing when this
 returns None, so the core never hard-depends on a model being up. The active
@@ -7,9 +7,11 @@ switch spaces with a re-embed + daemon restart.
 
 Config (env, all optional):
   MAX17_EMBED_NEURAL   on|off            default on
-  MAX17_EMBED_PROVIDER ollama|gemini|off default ollama (other one is the fallback)
+  MAX17_EMBED_PROVIDER gonka|ollama|gemini|off default ollama (rest are the fallback)
   MAX17_EMBED_MODEL    Ollama model      default nomic-embed-text
   MAX17_OLLAMA_HOST    base url          default http://127.0.0.1:11434
+  MAX17_EMBED_GONKA_MODEL                default BAAI/bge-m3 (1024 dims, $0.01/1M)
+  GONKA_API_KEY / GONKA_BASE_URL         enable the broker path (works without Ollama)
   GEMINI_API_KEY       Google key        enables the Gemini path
   MAX17_EMBED_GEMINI_MODEL                default text-embedding-004
   MAX17_EMBED_TIMEOUT  seconds           default 6
@@ -32,6 +34,16 @@ _PROVIDER = os.environ.get("MAX17_EMBED_PROVIDER", "ollama").strip().lower()
 _OLLAMA_HOST = os.environ.get("MAX17_OLLAMA_HOST", "http://127.0.0.1:11434").rstrip("/")
 _OLLAMA_MODEL = os.environ.get("MAX17_EMBED_MODEL", "nomic-embed-text").strip()
 _GEMINI_KEY = os.environ.get("GEMINI_API_KEY", "").strip()
+# Брокер Gonka отдаёт BGE-M3 по OpenAI-совместимому /v1/embeddings за $0.01/млн.
+# Это единственный настоящий эмбеддер, доступный дроплету: своей Ollama там нет,
+# а Gemini на бесплатном тарифе отдаёт 429 ровно тогда, когда память растёт.
+_GONKA_KEY = os.environ.get("GONKA_API_KEY", "").strip()
+_GONKA_BASE = (os.environ.get("GONKA_BASE_URL") or "https://proxy.gonkabroker.com/v1").strip().rstrip("/")
+_GONKA_MODEL = os.environ.get("MAX17_EMBED_GONKA_MODEL", "BAAI/bge-m3").strip()
+try:
+    _GONKA_MAX_CHARS = int(os.environ.get("MAX17_EMBED_MAX_CHARS", "8000"))
+except ValueError:
+    _GONKA_MAX_CHARS = 8000
 _GEMINI_MODEL = os.environ.get("MAX17_EMBED_GEMINI_MODEL", "gemini-embedding-001").strip()
 try:
     _EMBED_DIM = int(os.environ.get("MAX17_EMBED_DIM", "768"))  # paritet с Ollama nomic (768)
@@ -45,13 +57,13 @@ except ValueError:
 _STATE = Path(os.environ.get("MAX17_STATE_DIR") or (Path(__file__).resolve().parent / "state"))
 
 
-def _post_json(url: str, payload: dict, headers: dict | None = None) -> dict:
+def _post_json(url: str, payload: dict, headers: dict | None = None, timeout: float | None = None) -> dict:
     data = json.dumps(payload).encode("utf-8")
     req = urllib.request.Request(url, data=data, method="POST")
     req.add_header("Content-Type", "application/json")
     for k, v in (headers or {}).items():
         req.add_header(k, v)
-    with urllib.request.urlopen(req, timeout=_TIMEOUT) as resp:
+    with urllib.request.urlopen(req, timeout=timeout or _TIMEOUT) as resp:
         return json.loads(resp.read().decode("utf-8"))
 
 
@@ -65,6 +77,48 @@ def _ollama_embed(text: str) -> list[float] | None:
         out = _post_json(f"{_OLLAMA_HOST}/api/embeddings", {"model": _OLLAMA_MODEL, "prompt": text})
         vec = out.get("embedding")
         return [float(x) for x in vec] if isinstance(vec, list) and vec else None
+    except Exception:
+        return None
+
+
+def _gonka_embed(text: str) -> list[float] | None:
+    if not _GONKA_KEY:
+        return None
+    vecs = _gonka_embed_batch([text])
+    return vecs[0] if vecs else None
+
+
+def _gonka_embed_batch(texts: list[str]) -> list[list[float]] | None:
+    """Пачка за один запрос — /v1/embeddings принимает массив input.
+
+    Нужно для переэмбеддинга: 33 тыс. записей по одной = часы, пачками по сотне
+    = минуты. Порядок ответа брокер помечает полем index, по нему и раскладываем,
+    а не по позиции в data.
+    """
+    if not _GONKA_KEY or not texts:
+        return None
+    # У BGE-M3 контекст 8192 токена; длинный лог памяти его перебивает и роняет
+    # ВСЮ пачку, а не одну запись. Режем по символам — смысл живёт в начале.
+    texts = [t[:_GONKA_MAX_CHARS] for t in texts]
+    try:
+        out = _post_json(
+            f"{_GONKA_BASE}/embeddings",
+            {"model": _GONKA_MODEL, "input": texts},
+            {"Authorization": f"Bearer {_GONKA_KEY}"},
+            # Пачка считается дольше одиночного вызова: 6-секундный дефолт её рубит.
+            timeout=max(_TIMEOUT, 15.0 + 0.5 * len(texts)),
+        )
+        data = out.get("data")
+        if not isinstance(data, list) or len(data) != len(texts):
+            return None
+        vecs: list[list[float]] = [[] for _ in texts]
+        for item in data:
+            idx = int(item.get("index", -1))
+            emb = item.get("embedding")
+            if not isinstance(emb, list) or not emb or not (0 <= idx < len(texts)):
+                return None
+            vecs[idx] = [float(x) for x in emb]
+        return vecs if all(vecs) else None
     except Exception:
         return None
 
@@ -91,7 +145,11 @@ def _gemini_embed(text: str) -> list[float] | None:
 def _chain() -> list:
     if not _NEURAL or _PROVIDER == "off":
         return []
-    return [_gemini_embed, _ollama_embed] if _PROVIDER == "gemini" else [_ollama_embed, _gemini_embed]
+    if _PROVIDER == "gonka":
+        return [_gonka_embed, _gemini_embed, _ollama_embed]
+    if _PROVIDER == "gemini":
+        return [_gemini_embed, _gonka_embed, _ollama_embed]
+    return [_ollama_embed, _gonka_embed, _gemini_embed]
 
 
 _cache_conn: sqlite3.Connection | None = None
@@ -110,7 +168,7 @@ def _cache() -> sqlite3.Connection | None:
 
 
 def _key(text: str) -> str:
-    return hashlib.sha256(f"{_PROVIDER}|{_OLLAMA_MODEL}|{_GEMINI_MODEL}|{text}".encode("utf-8")).hexdigest()
+    return hashlib.sha256(f"{_PROVIDER}|{_OLLAMA_MODEL}|{_GEMINI_MODEL}|{_GONKA_MODEL}|{text}".encode("utf-8")).hexdigest()
 
 
 def neural_embed(text: str) -> list[float] | None:
@@ -158,9 +216,11 @@ def _routing_chain() -> list:
     Gemini-ключа."""
     if _PROVIDER == "off":
         return []
+    if _PROVIDER == "gonka" and _GONKA_KEY:
+        return [_gonka_embed, _gemini_embed, _ollama_embed]
     if _GEMINI_KEY:
-        return [_gemini_embed, _ollama_embed]
-    return [_ollama_embed, _gemini_embed]
+        return [_gemini_embed, _gonka_embed, _ollama_embed]
+    return [_ollama_embed, _gonka_embed, _gemini_embed]
 
 
 def routing_embed(text: str) -> list[float] | None:
@@ -229,6 +289,7 @@ def info() -> dict:
         "provider": _PROVIDER,
         "ollama_model": _OLLAMA_MODEL,
         "gemini": bool(_GEMINI_KEY),
+        "gonka_model": _GONKA_MODEL if _GONKA_KEY else None,
         "active_dim": active_dim(),
         "neural_ok": _neural_ok,
     }

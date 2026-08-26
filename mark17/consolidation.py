@@ -8,6 +8,8 @@ from __future__ import annotations
 
 import hashlib
 import json
+import time
+from pathlib import Path
 import re
 from collections import defaultdict
 from typing import Any
@@ -107,6 +109,47 @@ def _stable_id(text: str) -> str:
     return hashlib.blake2b(text.encode("utf-8"), digest_size=8).hexdigest()
 
 
+# Собственный выхлоп ядра: в консолидацию он не возвращается.
+SELF_OUTPUT_TYPES = frozenset({
+    "consolidated_pattern",
+    "compressed_concept",
+    "ultra_decision",
+    "semantic_ir",
+    "system_state",
+})
+
+# Служебная лексика самого ядра. Она встречается в каждом втором тексте и
+# всплывала «повторяющимся паттерном» тысячи раз, не неся смысла: «повторяющийся
+# паттерн: goal (9 свидетельств)» — это не знание, это частота слова.
+MACHINE_THEMES = frozenset({
+    "goal", "action", "compress", "compressed", "concept", "pattern", "memory",
+    "consolidation", "consolidated", "supports", "reinforces", "relates",
+    "sleep", "ultra", "decision", "event", "state", "system", "core", "score",
+    "leads", "relates", "intent", "plan", "adapted", "evaluated", "similar",
+    "reinforce", "outcome", "synapse", "vector", "recall", "think",
+    "дня", "день", "цель", "действие", "память", "паттерн", "решение", "ядро",
+    "связь", "вектор", "опыт", "оценка",
+    # Имена типов записей вшиты в сами тексты («web fact When confidence is
+    # low…»), поэтому всплывают темами даже после вычитания event_type: одно
+    # живое свидетельство тянет за собой десятки таких же из графа.
+    "web fact", "user message", "voice observation", "environment observation",
+    "task created", "task completed", "outcome success", "outcome failure",
+    "memory store", "system state", "internal dream", "ultra decision",
+    "consolidated pattern", "compressed concept", "semantic ir",
+    # Разбитые на токены имена типов: тема «fact» приходила из каждой записи
+    # web_fact, набирая 79 «свидетельств» на пустом месте.
+    "web", "fact", "message", "observation", "usually", "также", "часто",
+})
+
+MIN_THEME_LEN = 4
+
+# Паттерн с тем же смыслом не пишется заново, пока не остынет. Без этого
+# консолидация складывала в память одну и ту же строку сотнями: «повторяющийся
+# паттерн: compress» — 816 раз, «action» — 731. Память росла, знание — нет.
+SEEN_FILE = "consolidation_seen.json"
+SEEN_TTL_SEC = 7 * 24 * 3600
+
+
 def _tokens(text: str) -> list[str]:
     tokens: list[str] = []
     for raw in TOKEN_RE.findall(text.casefold()):
@@ -153,13 +196,26 @@ class ConsolidationEngine:
 
     def consolidate_recent(self, limit: int = 50) -> dict[str, Any]:
         limit = max(5, min(int(limit or 50), 500))
-        memories = self.hippocampus.recent(limit=limit)
+        # Вход фильтруется по типу, и это главная правка v1.777. Раньше
+        # hippocampus.recent() возвращал ВСЁ подряд, включая собственные
+        # consolidated_pattern и compressed_concept, — консолидация жевала свой
+        # же выхлоп и усиливала его. Замер на боевом: 11 980 паттернов, из них
+        # уникальных 307; один «паттерн» записан 816 раз. Темы вроде «goal» и
+        # «compress» рождались именно из служебных записей.
+        memories = [
+            m for m in self.hippocampus.recent(limit=limit * 3)
+            if str(getattr(m, "event_type", "")) not in SELF_OUTPUT_TYPES
+        ][:limit]
         synapses = self.synapse_graph.get_top_synapses(limit=min(limit, 50))
 
         buckets: dict[str, list[dict[str, Any]]] = defaultdict(list)
         for memory in memories:
             text = _memory_text(memory)
-            for token in set(_tokens(text)):
+            # Тип записи попадает в её текст первым словом (_memory_text), и его
+            # токены всплывали «паттернами»: «web fact (79 свидетельств)»,
+            # «user message». Это метка, а не смысл, — из тем её вычитаем.
+            type_tokens = set(_tokens(str(getattr(memory, "event_type", "")).replace("_", " ")))
+            for token in set(_tokens(text)) - type_tokens:
                 buckets[token].append(
                     {
                         "source": "memory",
@@ -182,21 +238,50 @@ class ConsolidationEngine:
         patterns = [
             self._make_pattern(theme, evidence)
             for theme, evidence in buckets.items()
-            if len(evidence) >= 2
+            # Три свидетельства вместо двух, тема не короче четырёх букв и не из
+            # служебного словаря, а сами свидетельства — из РАЗНЫХ текстов:
+            # раньше один и тот же текст, попавший в выборку дважды, уже давал
+            # «повторяющийся паттерн».
+            if len(evidence) >= 3
+            and len(theme) >= MIN_THEME_LEN
+            # Сравниваем по нормализованному виду: токенизатор оставляет
+            # подчёркивания («web_fact»), а в тексте паттерна они превращаются в
+            # пробелы («web fact») — стоп-лист иначе промахивается мимо.
+            and theme.replace("_", " ") not in MACHINE_THEMES
+            and theme not in MACHINE_THEMES
+            and len({item["text"] for item in evidence}) >= 3
+            # За паттерном должен стоять ЖИВОЙ опыт, а не структура графа.
+            # Иначе темами становятся «leads to» и «compressed concept» — это
+            # типы связей и имена служебных записей, а не то, что с нами было.
+            and any(item["source"] == "memory" for item in evidence)
         ]
         patterns.sort(key=lambda item: (item["strength"], item["evidence_count"]), reverse=True)
         selected = patterns[:5]
 
+        seen = self._load_seen()
+        stored = []
         for pattern in selected:
+            pid = str(pattern.get("pattern_id") or "")
+            if pid and pid in seen:
+                continue  # такой паттерн уже лежит в памяти — второй раз не пишем
             self._store_pattern(pattern)
+            if pid:
+                self._mark_seen(seen, pid)
+            stored.append(pattern)
 
         return {
-            "patterns_created": len(selected),
-            "patterns": selected,
+            "patterns_created": len(stored),
+            "patterns_skipped_as_known": len(selected) - len(stored),
+            "patterns": stored,
         }
 
-    def bridge_distant(self, *, limit: int = 12, min_sim: float = 0.15, anchors: int = 40, k: int = 10) -> dict[str, Any]:
-        """Phase 5 — cross-cluster bridges. Wire associative "bridges" synapses
+    def bridge_distant(self, *, limit: int = 12, min_sim: float = 0.45, anchors: int = 40, k: int = 10) -> dict[str, Any]:
+        """Phase 5 — cross-cluster bridges.
+
+        Порог 0.45 вместо прежних 0.15: мост ищет НЕОЧЕВИДНОЕ сходство, поэтому
+        планка ниже основной (0.7 в кузнице), но 0.15 на BGE-M3 — это уровень
+        случайных пар, а такие связи попадают в ЗАРАБОТАННЫЕ и надувают дорогу к
+        цели сильнее, чем similar_to, который из неё честно исключён. Wire associative "bridges" synapses
         between memories that are semantically close but live in DIFFERENT
         clusters (different event_type — e.g. a chat message and a camera/sound
         observation about the same thing). This is how distant context links into
@@ -290,6 +375,37 @@ class ConsolidationEngine:
             }.get(theme, readable)
 
         return f"Повторяющийся паттерн: {readable} ({evidence_count} свидетельств)."
+
+    def _seen_path(self) -> Path | None:
+        try:
+            return Path(self.vector_memory.db_path).parent / SEEN_FILE
+        except Exception:  # noqa: BLE001 - без пути просто не дедуплицируем
+            return None
+
+    def _load_seen(self) -> dict[str, float]:
+        path = self._seen_path()
+        if path is None or not path.exists():
+            return {}
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+        except Exception:  # noqa: BLE001
+            return {}
+        if not isinstance(data, dict):
+            return {}
+        now = time.time()
+        return {k: float(v) for k, v in data.items() if now - float(v or 0) < SEEN_TTL_SEC}
+
+    def _mark_seen(self, seen: dict[str, float], pattern_id: str) -> None:
+        path = self._seen_path()
+        if path is None:
+            return
+        seen[pattern_id] = time.time()
+        try:
+            tmp = path.with_suffix(".tmp")
+            tmp.write_text(json.dumps(seen), encoding="utf-8")
+            tmp.replace(path)
+        except Exception:  # noqa: BLE001 - дедуп не критичнее самой консолидации
+            pass
 
     def _store_pattern(self, pattern: dict[str, Any]) -> None:
         event = Event(

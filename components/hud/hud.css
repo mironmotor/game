@@ -43,6 +43,30 @@
   opacity: 0.85;
 }
 
+/* Земля мира: 3D-сцена между обоями и окнами. Клики сквозь неё проходят —
+ * холст сам включает себе pointer-events, только когда курсор над объектом. */
+.hud-ground {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  pointer-events: none;
+}
+
+/* Тень земли: низ кадра притемняется, и голограмма читается даже на светлых
+ * обоях. Заодно у мира появляется вес — сцена стоит на грунте, а не висит. */
+.hud-ground::before {
+  content: '';
+  position: absolute;
+  inset: 42% 0 0;
+  background: linear-gradient(
+    to bottom,
+    transparent 0%,
+    rgba(5, 3, 16, 0.5) 45%,
+    rgba(3, 2, 11, 0.78) 100%
+  );
+  pointer-events: none;
+}
+
 .hud-scanlines {
   position: absolute;
   inset: 0;
@@ -616,11 +640,18 @@
 
 .hud-core-caption {
   font-size: 13px;
-  color: rgba(255, 255, 255, 0.72);
+  color: rgba(255, 255, 255, 0.78);
   text-align: center;
   letter-spacing: 0.02em;
   text-shadow: 0 0 12px rgba(0, 0, 0, 0.7);
   max-width: min(60vw, 420px);
+  /* Подпись висит ровно там, где земля показывает подписи монолитов: без
+     собственной подложки два текста сливались в кашу. Плашка едва заметна на
+     пустом фоне и спасает строку на плотной сцене. */
+  padding: 3px 12px;
+  border-radius: 999px;
+  background: rgba(6, 4, 16, 0.34);
+  backdrop-filter: blur(5px);
 }
 
 /* Floating windows. */
@@ -826,6 +857,22 @@
   border-left-color: var(--hud-cyan);
 }
 
+/* Небо в общем кадре — задник. Солнечная система и земля мира рисуются двумя
+   независимыми канвасами со своими камерами: без разведения по глубине планеты
+   висели ровно между монолитами графа. Приглушаем и уводим из фокуса. */
+.hud-synapse-field.is-recessed {
+  opacity: 0.42;
+  filter: blur(1.2px) saturate(0.75);
+}
+
+/* На телефоне полноэкранный blur стоит заметных кадров — хватает прозрачности. */
+@media (max-width: 700px) {
+  .hud-synapse-field.is-recessed {
+    opacity: 0.35;
+    filter: saturate(0.75);
+  }
+}
+
 /* Dock / control cluster. */
 .hud-dock {
   position: absolute;
@@ -926,7 +973,7 @@
     position: fixed;
     inset: 0;
     min-height: 100dvh;
-    padding-top: calc(214px + env(safe-area-inset-top));
+    padding-top: calc(200px + env(safe-area-inset-top));
     overflow-x: hidden;
     overflow-y: auto;
     overscroll-behavior-y: contain;
@@ -936,6 +983,7 @@
   .hud-adaptive .hud-bg,
   .hud-adaptive .hud-bg-scrim,
   .hud-adaptive .hud-synapse-field,
+  .hud-adaptive .hud-ground,
   .hud-adaptive .hud-scanlines {
     position: fixed;
   }
@@ -949,7 +997,7 @@
     max-width: none;
     transform: none;
     display: block;
-    padding: 6px 8px;
+    padding: 4px 8px;
     border-radius: 14px;
   }
 
@@ -959,6 +1007,12 @@
     justify-content: flex-start;
     overflow-x: auto;
     scrollbar-width: none;
+    /* В ленты не влезает и половина кнопок (939px в 356px), а полосы прокрутки
+       на телефоне нет — без растворяющегося края никто не догадается тянуть
+       вбок. Плюс snap, чтобы чип не останавливался разрезанным пополам. */
+    scroll-snap-type: x proximity;
+    -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 26px), rgba(0, 0, 0, 0.12));
+    mask-image: linear-gradient(to right, #000 calc(100% - 26px), rgba(0, 0, 0, 0.12));
   }
 
   .hud-dock-windows::-webkit-scrollbar,
@@ -967,8 +1021,8 @@
   }
 
   .hud-dock-tools {
-    margin-top: 5px;
-    padding-top: 5px;
+    margin-top: 4px;
+    padding-top: 4px;
     padding-left: 0;
     border-top: 1px solid rgba(255, 255, 255, 0.12);
     border-left: none;
@@ -976,8 +1030,9 @@
 
   .hud-dock-chip,
   .hud-dock-tool {
-    min-height: 40px;
+    min-height: 38px;
     flex: 0 0 auto;
+    scroll-snap-align: start;
   }
 
   .angels-command-bar {
@@ -1049,7 +1104,9 @@
     display: flex;
     flex-direction: column;
     gap: 12px;
-    padding: 0 12px calc(104px + env(safe-area-inset-bottom));
+    /* 104px хватало ровно на навбар, но над ним теперь стоит этаж плавающих
+       кнопок (режимы, корпус) — последнее окно упиралось прямо в них. */
+    padding: 0 12px calc(156px + env(safe-area-inset-bottom));
   }
 
   .hud-windows .hud-window {

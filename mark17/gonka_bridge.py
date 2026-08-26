@@ -128,6 +128,68 @@ def is_enabled(role: str = "chat") -> bool:
 _RETRYABLE = {408, 409, 425, 429, 500, 502, 503, 529}
 
 
+# ── Anthropic (Claude Fable / Opus) ──────────────────────────────────────────
+# Единственный бэкенд в лестнице, который НЕ говорит по OpenAI-совместимому
+# протоколу: у него свой путь (/messages), свои заголовки (x-api-key +
+# anthropic-version), system отдельным полем и ответ блоками в content[].
+_ANTHROPIC_HOST = "api.anthropic.com"
+_ANTHROPIC_VERSION = "2023-06-01"
+
+
+def _is_anthropic(base_url: str) -> bool:
+    return _ANTHROPIC_HOST in str(base_url or "")
+
+
+def _anthropic_request(
+    base_url: str,
+    key: str,
+    model: str,
+    messages: list[dict[str, str]],
+    *,
+    max_tokens: int,
+    response_format: dict[str, Any] | None,
+) -> tuple[str, dict[str, str], bytes]:
+    """Собрать запрос к Messages API. Возвращает (url, заголовки, тело)."""
+    # system у Anthropic — отдельное поле, а не роль в списке сообщений.
+    system_parts = [str(m.get("content") or "") for m in messages if m.get("role") == "system"]
+    turns = [
+        {"role": ("assistant" if m.get("role") == "assistant" else "user"), "content": str(m.get("content") or "")}
+        for m in messages
+        if m.get("role") != "system" and str(m.get("content") or "").strip()
+    ]
+    if not turns:  # разговор из одного system: Anthropic требует хотя бы один ход
+        turns = [{"role": "user", "content": system_parts.pop() if system_parts else "."}]
+
+    system = "\n\n".join(p for p in system_parts if p.strip())
+    if response_format is not None:
+        # Строгий JSON у Anthropic задаётся иначе; для короткого решения ядра
+        # достаточно требования в system — оно работает на всех моделях.
+        system = (system + "\n\nОтвечай СТРОГО одним JSON-объектом, без пояснений и без markdown.").strip()
+
+    payload: dict[str, Any] = {"model": model, "max_tokens": max_tokens, "messages": turns}
+    if system:
+        payload["system"] = system
+    # temperature/top_p/top_k у Fable 5 и Opus 5 УДАЛЕНЫ и дают 400 — поэтому
+    # сюда они не попадают вообще, в отличие от OpenAI-совместимой ветки.
+    headers = {
+        "x-api-key": key,
+        "anthropic-version": _ANTHROPIC_VERSION,
+        "Content-Type": "application/json",
+    }
+    return f"{str(base_url).rstrip('/')}/messages", headers, json.dumps(payload).encode("utf-8")
+
+
+def _anthropic_text(raw: dict[str, Any]) -> tuple[str, str]:
+    """Текст ответа и причина остановки. Отказ модели — это HTTP 200 с пустым
+    content и stop_reason='refusal': без разбора он выглядел бы как «пустой
+    ответ», и лестница молча ушла бы к следующему бэкенду."""
+    blocks = raw.get("content") or []
+    text = "".join(
+        str(b.get("text") or "") for b in blocks if isinstance(b, dict) and b.get("type") == "text"
+    ).strip()
+    return text, str(raw.get("stop_reason") or "")
+
+
 def _chat_once(
     base_url: str,
     key: str,
@@ -152,9 +214,15 @@ def _chat_once(
     # back gracefully if the provider ignores it.
     if response_format is not None:
         payload["response_format"] = response_format
-    body = json.dumps(payload).encode("utf-8")
-    url = f"{base_url}/chat/completions"
-    headers = {"Authorization": f"Bearer {key}", "Content-Type": "application/json"}
+    anthropic = _is_anthropic(base_url)
+    if anthropic:
+        url, headers, body = _anthropic_request(
+            base_url, key, model, messages, max_tokens=max_tokens, response_format=response_format
+        )
+    else:
+        body = json.dumps(payload).encode("utf-8")
+        url = f"{base_url}/chat/completions"
+        headers = {"Authorization": f"Bearer {key}", "Content-Type": "application/json"}
     last_error = "no response"
     started = time.time()
     # Free-tier Gemini throws transient 429/503 ("overloaded") on heavier calls —
@@ -165,10 +233,19 @@ def _chat_once(
         try:
             with urllib.request.urlopen(request, timeout=timeout, context=_SSL_CONTEXT) as response:  # noqa: S310
                 raw = json.loads(response.read().decode("utf-8", errors="replace"))
-            choices = raw.get("choices") or []
-            text = ""
-            if choices and isinstance(choices[0], dict):
-                text = str((choices[0].get("message") or {}).get("content") or "").strip()
+            if anthropic:
+                text, stop_reason = _anthropic_text(raw)
+                if stop_reason == "refusal":
+                    ms = round((time.time() - started) * 1000, 1)
+                    return GonkaResponse(
+                        ok=False, text="", model=model, status="refusal", role=role,
+                        latency_ms=ms, error="модель отказалась отвечать",
+                    )
+            else:
+                choices = raw.get("choices") or []
+                text = ""
+                if choices and isinstance(choices[0], dict):
+                    text = str((choices[0].get("message") or {}).get("content") or "").strip()
             text = _THINK_RE.sub("", text).strip()
             # Висячий </think> без открывающего: всё до него — рассуждения модели.
             lowered = text.lower()

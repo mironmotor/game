@@ -29,12 +29,27 @@ from mark17.synapse_graph import BulkRecord
 _FLUSH_SIZE = 10_000
 
 
+# Собственный выхлоп ядра. Между собой такие записи не связываются.
+MACHINE_TYPES = frozenset({
+    "compressed_concept",
+    "consolidated_pattern",
+    "ultra_decision",
+    "semantic_ir",
+    "system_state",
+})
+
+
 def forge(
     vector_memory: Any,
     synapse_graph: Any,
     *,
     k: int = 10,
-    min_sim: float = 0.45,
+    # 0.45 подбирался под ХЭШ-эмбеддинги, которые слипали несвязанные тексты
+    # (замер в compression.py: «Firebase unauthorized-domain» ↔ «оплатил
+    # интернет» = 0.354). С переездом на BGE-M3 картина другая: у настоящих пар
+    # медиана сходства 0.955, минимум в выборке 0.524. Порог 0.7 отсекает слабое,
+    # не трогая живое — при нём в замере отсеялся 1% связей из 400.
+    min_sim: float = 0.7,
     max_nodes: int = 60_000,
     block: int = 1024,
     normal_degree_cap: int = 40,
@@ -72,6 +87,12 @@ def forge(
     known_pairs, degrees = synapse_graph.memory_similarity_index()
     emitted_pairs: set[int] = set()
 
+    # Связь «служебное ↔ служебное» знанием не является: два одинаковых
+    # «повторяющийся паттерн: compress» похожи друг на друга на единицу, и
+    # кузница честно ковала между ними similar_to. Так набралось 201 015 связей
+    # из 238 957 — 84% графа, притом что цель считается по ЗАРАБОТАННЫМ связям.
+    machine = np.asarray([str(t) in MACHINE_TYPES for t in event_types_arr], dtype=bool)
+
     def degree_cap(event_type: str) -> int:
         if event_type == "compressed_concept":
             return compressed_degree_cap
@@ -92,6 +113,7 @@ def forge(
     skipped_identical = 0
     skipped_hub = 0
     skipped_duplicate = 0
+    skipped_machine = 0
 
     # Батч-буфер для накопления BulkRecord
     buf: list[BulkRecord] = []
@@ -128,6 +150,9 @@ def forge(
                 if pair_key in emitted_pairs:
                     skipped_duplicate += 1
                     continue
+                if machine[ci] and machine[nb]:
+                    skipped_machine += 1
+                    continue
                 is_new = pair_key not in known_pairs
                 if is_new and (
                     degrees.get(idc, 0) >= caps[ci]
@@ -147,6 +172,10 @@ def forge(
                     target_id=str(hi),
                     relation_type="similar_to",
                     weight=s,
+                    # Кузница честно называет себя: это ВЫЧИСЛЕННОЕ сходство, а
+                    # не заработанная связь, и по этому признаку его теперь
+                    # можно отличить точно, без гадания по метаданным.
+                    origin="forge",
                     metadata={
                         "forge": True,
                         "source_degree": degrees.get(lo, 0),
@@ -203,6 +232,7 @@ def forge(
         "skipped_identical": skipped_identical,
         "skipped_hub": skipped_hub,
         "skipped_duplicate": skipped_duplicate,
+        "skipped_machine": skipped_machine,
         "degree_caps": {
             "normal": normal_degree_cap,
             "compressed_concept": compressed_degree_cap,
