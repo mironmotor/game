@@ -87,7 +87,8 @@ def request(task: str, reason: str, state_dir: Path | str, *, kind: str = "look"
 
     queue_path = _path(state_dir, QUEUE_NAME)
     rows = _read(queue_path)
-    pending = [r for r in rows if not r.get("taken_at")]
+    answered = _answered_ids(state_dir)
+    pending = [r for r in rows if not r.get("taken_at") and _is_open(r, answered)]
     if len(pending) >= MAX_PENDING:
         return {"ok": False, "reason": f"очередь полна ({len(pending)}) — рука ещё не разобрала прошлое"}
 
@@ -112,6 +113,15 @@ def _answered_ids(state_dir: Path | str) -> set[str]:
     return {str(r.get("id")) for r in _read(_path(state_dir, RESULTS_NAME))}
 
 
+def _is_open(row: dict[str, Any], answered: set[str]) -> bool:
+    """Заявка считается открытой, пока её не закрыли отчётом.
+
+    Смотрим и на отметку в самой заявке, и на файл результатов: старые записи
+    сделаны до появления `closed_at`, их признак живёт только в истории.
+    """
+    return not row.get("closed_at") and str(row.get("id")) not in answered
+
+
 def pending(state_dir: Path | str) -> list[dict[str, Any]]:
     """Заявки, которые рука ещё не забрала и на которые нет ответа.
 
@@ -122,7 +132,7 @@ def pending(state_dir: Path | str) -> list[dict[str, Any]]:
     answered = _answered_ids(state_dir)
     return [
         r for r in _read(_path(state_dir, QUEUE_NAME))
-        if not r.get("taken_at") and str(r.get("id")) not in answered
+        if not r.get("taken_at") and _is_open(r, answered)
     ]
 
 
@@ -137,7 +147,7 @@ def take(state_dir: Path | str, limit: int = 5) -> list[dict[str, Any]]:
     now = time.time()
     for row in rows:
         # Снятая заявка остаётся в очереди как история — выдавать её заново нельзя.
-        if str(row.get("id")) in answered:
+        if not _is_open(row, answered):
             continue
         if row.get("taken_at") or len(taken) >= limit:
             continue
@@ -161,6 +171,20 @@ def report(task_id: str, ok: bool, summary: str, state_dir: Path | str, *, detai
     }
     rows.append(item)
     _write(results_path, rows[-200:])
+
+    # Отметку о закрытии ставим в самой заявке: файл результатов урезается, и
+    # признак «отвечено», выведенный только из него, однажды исчезает вместе с
+    # хвостом — заявка воскресает и снова занимает руку.
+    queue_path = _path(state_dir, QUEUE_NAME)
+    queue = _read(queue_path)
+    changed = False
+    for row in queue:
+        if str(row.get("id")) == item["id"] and not row.get("closed_at"):
+            row["closed_at"] = item["ts"]
+            row["closed_ok"] = item["ok"]
+            changed = True
+    if changed:
+        _write(queue_path, queue)
     return item
 
 
@@ -200,7 +224,7 @@ def reclaim(state_dir: Path | str, *, now: float | None = None) -> dict[str, int
     returned, dropped, changed = 0, 0, False
     for row in queue:
         taken = row.get("taken_at")
-        if not taken or str(row.get("id")) in answered_ids:
+        if not taken or not _is_open(row, answered_ids):
             continue
         if now - float(taken) < STALE_AFTER_SEC:
             continue
@@ -238,8 +262,8 @@ def stats(state_dir: Path | str) -> dict[str, Any]:
     queue = _read(_path(state_dir, QUEUE_NAME))
     results = _read(_path(state_dir, RESULTS_NAME))
     answered_ids = {str(r.get("id")) for r in results}
-    waiting = [r for r in queue if not r.get("taken_at") and str(r.get("id")) not in answered_ids]
-    in_work = [r for r in queue if r.get("taken_at") and str(r.get("id")) not in answered_ids]
+    waiting = [r for r in queue if not r.get("taken_at") and _is_open(r, answered_ids)]
+    in_work = [r for r in queue if r.get("taken_at") and _is_open(r, answered_ids)]
     return {
         "pending": len(waiting),
         "in_work": len(in_work),

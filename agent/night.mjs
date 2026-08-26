@@ -245,6 +245,9 @@ async function main() {
       .slice(0, 400);
     const sent = await reportTask(task.id, Boolean(line), summary, last.slice(0, 1500));
     await journal(`РУКА ${task.id}: ${sent ? 'исход отправлен ядру' : 'ядро не приняло исход'} — ${summary.slice(0, 120)}`);
+    // Вычёркиваем сразу: всё, что ниже (запись отчёта, телеграм), может упасть,
+    // и тогда catch отчитается провалом по уже закрытой заявке.
+    if (sent) claimedTasks = claimedTasks.filter((t) => t.id !== task.id);
   }
 
   const stamp = new Date().toISOString().replace(/[:.]/g, '-');
