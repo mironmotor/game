@@ -36,6 +36,14 @@ RESULTS_NAME = "hands_results.jsonl"
 MAX_PENDING = 12
 # Одно и то же намерение в пределах этого окна считается повтором.
 DEDUP_WINDOW_SEC = 6 * 3600
+# Рука смертна: агент падает, теряет сеть, просто не запускается ночью. Взятая
+# и не отвеченная заявка держала `free=false` вечно — ядро сутками выбирало
+# «none», потому что честно ждало ответа, которого уже никто не даст.
+# После этого срока заявка считается брошенной и возвращается в очередь.
+STALE_AFTER_SEC = 30 * 60
+# Сколько раз возвращаем в очередь, прежде чем закрыть как неудачу. Иначе
+# невыполнимая заявка кружит вечно и занимает руку снова и снова.
+MAX_ATTEMPTS = 2
 
 
 def _path(state_dir: Path | str, name: str) -> Path:
@@ -100,9 +108,21 @@ def request(task: str, reason: str, state_dir: Path | str, *, kind: str = "look"
     return {"ok": True, **item, "pending": len(pending) + 1}
 
 
+def _answered_ids(state_dir: Path | str) -> set[str]:
+    return {str(r.get("id")) for r in _read(_path(state_dir, RESULTS_NAME))}
+
+
 def pending(state_dir: Path | str) -> list[dict[str, Any]]:
-    """Заявки, которые рука ещё не забрала."""
-    return [r for r in _read(_path(state_dir, QUEUE_NAME)) if not r.get("taken_at")]
+    """Заявки, которые рука ещё не забрала и на которые нет ответа.
+
+    Ответ снимает заявку с очереди, даже если она вернулась туда после
+    протухания: иначе снятая задача выдавалась руке снова и снова.
+    """
+    answered = _answered_ids(state_dir)
+    return [
+        r for r in _read(_path(state_dir, QUEUE_NAME))
+        if not r.get("taken_at") and str(r.get("id")) not in answered
+    ]
 
 
 def take(state_dir: Path | str, limit: int = 5) -> list[dict[str, Any]]:
@@ -110,9 +130,13 @@ def take(state_dir: Path | str, limit: int = 5) -> list[dict[str, Any]]:
     по ним потом видно, что рука делала и сколько это заняло."""
     queue_path = _path(state_dir, QUEUE_NAME)
     rows = _read(queue_path)
+    answered = _answered_ids(state_dir)
     taken: list[dict[str, Any]] = []
     now = time.time()
     for row in rows:
+        # Снятая заявка остаётся в очереди как история — выдавать её заново нельзя.
+        if str(row.get("id")) in answered:
+            continue
         if row.get("taken_at") or len(taken) >= limit:
             continue
         row["taken_at"] = now
@@ -157,6 +181,46 @@ def collect(state_dir: Path | str) -> list[dict[str, Any]]:
     return fresh
 
 
+def reclaim(state_dir: Path | str, *, now: float | None = None) -> dict[str, int]:
+    """Вернуть брошенные заявки в очередь, безнадёжные — закрыть.
+
+    Заявка считается брошенной, если её взяли больше STALE_AFTER_SEC назад и
+    ответа так и нет. Первые MAX_ATTEMPTS раз она возвращается в ожидание (у
+    руки будет ещё попытка), после — закрывается неудачей, чтобы не занимать
+    руку вечно. Без этого одна мёртвая заявка глушила всю автономность.
+    """
+    now = time.time() if now is None else now
+    queue_path = _path(state_dir, QUEUE_NAME)
+    queue = _read(queue_path)
+    results = _read(_path(state_dir, RESULTS_NAME))
+    answered_ids = {str(r.get("id")) for r in results}
+
+    returned, dropped, changed = 0, 0, False
+    for row in queue:
+        taken = row.get("taken_at")
+        if not taken or str(row.get("id")) in answered_ids:
+            continue
+        if now - float(taken) < STALE_AFTER_SEC:
+            continue
+        attempts = int(row.get("attempts") or 0) + 1
+        row["attempts"] = attempts
+        row["taken_at"] = None
+        changed = True
+        if attempts > MAX_ATTEMPTS:
+            report(
+                str(row.get("id")), False,
+                f"рука не ответила за {int((now - float(taken)) / 60)} мин — заявка снята",
+                state_dir,
+                detail="автоматическое закрытие: превышен лимит попыток",
+            )
+            dropped += 1
+        else:
+            returned += 1
+    if changed:
+        _write(queue_path, queue)
+    return {"returned": returned, "dropped": dropped}
+
+
 def stats(state_dir: Path | str) -> dict[str, Any]:
     """Короткая сводка для снимка состояния ядра.
 
@@ -164,11 +228,15 @@ def stats(state_dir: Path | str) -> dict[str, Any]:
     историю нельзя: счётчик растёт вечно, и ядро начинает видеть руку навсегда
     занятой — на первом же такте после запуска оно так и решило («руки заняты»),
     хотя свободных заявок не было ни одной.
+
+    Перед подсчётом подбираем брошенное: иначе одна мёртвая заявка держит
+    `free=false` бесконечно.
     """
+    reclaim(state_dir)
     queue = _read(_path(state_dir, QUEUE_NAME))
     results = _read(_path(state_dir, RESULTS_NAME))
     answered_ids = {str(r.get("id")) for r in results}
-    waiting = [r for r in queue if not r.get("taken_at")]
+    waiting = [r for r in queue if not r.get("taken_at") and str(r.get("id")) not in answered_ids]
     in_work = [r for r in queue if r.get("taken_at") and str(r.get("id")) not in answered_ids]
     return {
         "pending": len(waiting),

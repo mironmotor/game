@@ -83,7 +83,9 @@ _DECIDER_PROMPT = (
     "Поле futile_actions — сколько раз подряд действие давало пустой результат. "
     "Три и больше означает стену: выбери другое, а не бей в неё снова.\n"
     "Поле hands — состояние руки: pending это сколько твоих заявок ещё ждут. "
-    "Если их много, не ставь новых, дождись ответа.\n"
+    "Если их много, не ставь новых. Но ожидание руки — НЕ повод простаивать: "
+    "пока она занята, работай сам — consolidate, compose, tree. «none» выбирай "
+    "только когда действительно нечего делать, а не когда ждёшь чужого ответа.\n"
     "Критерии: закрывай пробелы знаний, не повторяй последнее действие без причины, "
     "research выбирай только с конкретным полезным query. Ответ — строго JSON: "
     '{"action":"...","query":"...","kind":"look|do","reason":"одно предложение почему"}. '
@@ -278,6 +280,18 @@ def decide(state: dict[str, Any]) -> dict[str, Any]:
             "query": decision.get("query") or "",
             "reason": f"«{decision['action']}» дал пустой результат {futile.get(decision['action'])} раз подряд — меняю подход"[:200],
         }
+    # Ожидание — не работа. Ядро сутки выбирало «none», честно дожидаясь ответа
+    # руки по одной заявке; за это время оно могло привести память в порядок.
+    if decision["action"] == "none":
+        hands_state = state.get("hands") if isinstance(state.get("hands"), dict) else {}
+        waiting_for_hand = not hands_state.get("free", True) or bool(hands_state.get("unseen"))
+        if waiting_for_hand:
+            decision = {
+                "action": "consolidate",
+                "query": "",
+                "reason": "рука ещё отвечает — вместо простоя привожу память в порядок",
+            }
+
     decision["decider"] = decider
     # The MAX Ultimate constraints this decision operated under (the constitution).
     decision["applied_constraints"] = applied_constraints(decision["action"])
