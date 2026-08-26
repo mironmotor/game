@@ -118,6 +118,7 @@ def pending(state_dir: Path | str) -> list[dict[str, Any]]:
     Ответ снимает заявку с очереди, даже если она вернулась туда после
     протухания: иначе снятая задача выдавалась руке снова и снова.
     """
+    reclaim(state_dir)
     answered = _answered_ids(state_dir)
     return [
         r for r in _read(_path(state_dir, QUEUE_NAME))
@@ -128,6 +129,7 @@ def pending(state_dir: Path | str) -> list[dict[str, Any]]:
 def take(state_dir: Path | str, limit: int = 5) -> list[dict[str, Any]]:
     """Агент забирает работу. Заявки помечаются взятыми, но НЕ удаляются:
     по ним потом видно, что рука делала и сколько это заняло."""
+    reclaim(state_dir)
     queue_path = _path(state_dir, QUEUE_NAME)
     rows = _read(queue_path)
     answered = _answered_ids(state_dir)
