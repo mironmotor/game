@@ -34,6 +34,9 @@ const FIX = args.includes('--fix');
 // Режим руки: никакого обхода сайта и никакого вызова модели, пока ядру ничего
 // не нужно. Это то, что позволяет держать цикл включённым постоянно.
 const HANDS_ONLY = args.includes('--hands');
+// Взятые заявки держим на виду у обработчика падений: упавший прогон обязан
+// вернуть ядру честный провал, иначе заявка зависает «в работе» навечно.
+let claimedTasks = [];
 const taskFlag = args.indexOf('--task');
 const ONE_OFF = taskFlag >= 0 ? args[taskFlag + 1] : null;
 
@@ -151,6 +154,7 @@ async function main() {
   // В режиме руки сначала смотрим, есть ли работа, и только потом шумим и тратим
   // токены: холостой тик должен стоить одну ssh-команду и ничего больше.
   const coreTasks = ONE_OFF ? [] : await intakeTasks();
+  claimedTasks = coreTasks;
   if (HANDS_ONLY && coreTasks.length === 0) {
     await journal('рука: очередь ядра пуста — выхожу без вызова модели');
     return;
@@ -253,7 +257,17 @@ async function main() {
 }
 
 main().catch(async (e) => {
-  await warn(`🌙 Ночной агент упал: ${String(e).slice(0, 500)}`);
+  const reason = String(e).slice(0, 300);
+  // Сначала развязываем ядро, потом жалуемся. Молчаливое падение с взятой
+  // заявкой once стоило суток простоя: ядро ждало ответа, которого не будет.
+  for (const task of claimedTasks) {
+    try {
+      await reportTask(task.id, false, `рука не справилась: ${reason}`, String(e).slice(0, 1500));
+    } catch (reportError) {
+      console.error('не удалось вернуть исход ядру:', reportError);
+    }
+  }
+  await warn(`🌙 Ночной агент упал: ${reason}${claimedTasks.length ? `\nЗаявок возвращено ядру: ${claimedTasks.length}` : ''}`);
   console.error(e);
   process.exit(1);
 });
