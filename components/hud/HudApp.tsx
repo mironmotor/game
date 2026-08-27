@@ -740,6 +740,37 @@ function HudContent() {
     setLog((prev) => [clean, ...prev].slice(0, 24));
   }, []);
 
+  // Светило в сцене будит ядро вне расписания: обычный такт приходит раз в
+  // минуту, но человеку иногда нужно «сейчас». Ответ возвращаем событием —
+  // кнопка живёт в фоне и о сети ничего не знает.
+  useEffect(() => {
+    const onUltra = async () => {
+      window.dispatchEvent(new CustomEvent('max:thinking', { detail: { active: true } }));
+      try {
+        const res = await emitMax17HudEvent({ type: 'ultra_think' });
+        const ultra = (res as { ultra?: { decision?: { action?: string; reason?: string } } })?.ultra;
+        const action = ultra?.decision?.action;
+        const reason = ultra?.decision?.reason;
+        const note = action ? `${action}${reason ? ` — ${reason}` : ''}` : String(res?.next_adaptation || 'такт прошёл');
+        if (note) {
+          pushLog(`🌈 УЛЬТРА: ${note}`);
+          setAgiMessage(`MAX17: ${note}`);
+        }
+        window.dispatchEvent(new CustomEvent('max:ultra-result', { detail: { ok: true, note } }));
+      } catch (e) {
+        window.dispatchEvent(
+          new CustomEvent('max:ultra-result', { detail: { ok: false, note: 'ядро не ответило' } }),
+        );
+        console.error('ultra по клику не прошёл:', e);
+      } finally {
+        window.dispatchEvent(new CustomEvent('max:thinking', { detail: { active: false } }));
+      }
+    };
+    window.addEventListener('max:ultra', onUltra as EventListener);
+    return () => window.removeEventListener('max:ultra', onUltra as EventListener);
+  }, [emitMax17HudEvent, pushLog]);
+
+
   // JARVIS приветствует при входе: текст сразу, голос — на первый жест
   // пользователя (политика автоплея браузера блокирует звук до взаимодействия).
   const greetedRef = useRef(false);

@@ -45,6 +45,7 @@ import {
 import { getBackground } from './backgrounds';
 import { HudGround } from './HudGround';
 import { SolarSystem } from './SolarSystem';
+import { UltraStar } from './UltraStar';
 import type { Task } from '@/hooks/use-game-state';
 import { useI18n } from '@/components/I18nProvider';
 import type { MessageKey } from '@/lib/i18n/messages';
@@ -364,6 +365,7 @@ export function GameHud(props: GameHudProps) {
       <div className="hud-bg" style={{ background: bg.css }} />
       {bg.scrim ? <div className="hud-bg-scrim" style={{ opacity: bg.scrim }} /> : null}
       <SolarSystem className="hud-synapse-field" />
+      <UltraStar />
       <HudGround
         coreStatus={coreStatus}
         missions={missions}
