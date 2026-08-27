@@ -11,6 +11,7 @@ import { MusicDecomposer } from './music-decompose';
 import { generateDreamTrack, playBuffer, type DreamTaste } from './dream-music';
 import { AppearancePanel } from './AppearancePanel';
 import { applyTheme, initTheme } from './themes';
+import { initRainbow } from './rainbow';
 import { WindowManagerProvider, useWindowManager } from './window-manager';
 import { interpretUiCommand, type UiCommand } from './ui-commands';
 import { detectFaces, prewarmFaceApi, type FaceReading } from './face-detect';
@@ -23,6 +24,7 @@ import { initJarvis } from '@/lib/jarvis-voice';
 import { getPersona, speakNeural, stopNeural } from '@/lib/neural-voice';
 import { useI18n } from '@/components/I18nProvider';
 import './hud.css';
+import './rainbow.css';
 
 type Max17HudEvent = Record<string, unknown>;
 type CameraStatus = 'off' | 'starting' | 'active' | 'error';
@@ -383,6 +385,7 @@ function HudContent() {
   // Restore the persisted HUD theme (CSS variable overrides) on mount.
   useEffect(() => {
     initTheme();
+    initRainbow();
   }, []);
   const [isSpeechEnabled, setIsSpeechEnabled] = useState(true);
   const [isSpeaking, setIsSpeaking] = useState(false);

@@ -30,6 +30,7 @@ import {
   Zap,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { isRainbowOn, toggleRainbow } from '@/components/hud/rainbow';
 import { getLlmConfig, setLlmModel, type LlmConfig, type LlmPreset } from '@/lib/max17-client';
 import MusicStudio from '@/components/MusicStudio';
 import Mode777 from '@/components/Mode777';
@@ -80,6 +81,14 @@ const QUICK_MODES: GodModeTile[] = [
 
 export default function GodMode() {
   const [open, setOpen] = useState(false);
+  // Радуга живёт в атрибуте на <html>, здесь держим только зеркало для подписи кнопки.
+  const [rainbowOn, setRainbowOn] = useState(false);
+
+  // Панель может открыться после того, как режим включили в прошлой сессии,
+  // поэтому подпись кнопки сверяем с реальным состоянием при каждом открытии.
+  useEffect(() => {
+    if (open) setRainbowOn(isRainbowOn());
+  }, [open]);
   const [config, setConfig] = useState<LlmConfig | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [note, setNote] = useState<string | null>(null);
@@ -227,6 +236,28 @@ export default function GodMode() {
             <span className="min-w-0">
               <span className="block text-sm font-semibold text-white/90">🧠 Мозг MAX — живой граф памяти</span>
               <span className="block text-[11px] text-white/45">настоящие синапсы, нейроны и импульсы из ядра</span>
+            </span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setRainbowOn(toggleRainbow())}
+            className={`flex w-full items-center gap-2 rounded-xl border px-4 py-3 text-left transition ${
+              rainbowOn
+                ? 'border-fuchsia-400/50 bg-[linear-gradient(90deg,rgba(255,0,128,.18),rgba(255,200,0,.18),rgba(0,220,255,.18),rgba(160,80,255,.18))]'
+                : 'border-white/12 bg-white/[0.03] hover:bg-white/[0.06]'
+            }`}
+          >
+            <Sparkles className={`h-5 w-5 ${rainbowOn ? 'text-fuchsia-200' : 'text-white/50'}`} />
+            <span className="min-w-0">
+              <span className="block text-sm font-semibold text-white/90">
+                🌈 Радужный режим {rainbowOn ? '— включён' : ''}
+              </span>
+              <span className="block text-[11px] text-white/45">
+                {rainbowOn
+                  ? 'интерфейс дышит спектром — выключить'
+                  : 'спектр по всему интерфейсу: аура, кромка, живые заголовки'}
+              </span>
             </span>
           </button>
 

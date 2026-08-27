@@ -1,0 +1,123 @@
+/**
+ * Радужный режим ядра.
+ *
+ * Включается атрибутом `data-rainbow="on"` на <html>. Работает поверх любой
+ * темы: тема задаёт характер, радуга — живое дыхание поверх неё.
+ *
+ * Почему через @property, а не через смену переменных из JS: анимируется одно
+ * число (угол оттенка), всё остальное считается из него в CSS. Никаких таймеров
+ * в JS, никаких перерисовок React — браузер крутит это сам, на композиторе.
+ */
+
+@property --rainbow-hue {
+  syntax: "<number>";
+  initial-value: 0;
+  inherits: true;
+}
+
+@keyframes rainbow-spin {
+  to {
+    --rainbow-hue: 360;
+  }
+}
+
+@keyframes rainbow-aura-drift {
+  to {
+    transform: rotate(1turn);
+  }
+}
+
+@keyframes rainbow-breathe {
+  0%, 100% { opacity: 0.55; }
+  50% { opacity: 0.9; }
+}
+
+:root[data-rainbow="on"] {
+  animation: rainbow-spin 12s linear infinite;
+
+  /* Три опорных цвета разведены по кругу — так радуга читается как спектр,
+     а не как одноцветная пульсация. */
+  --hud-cyan: hsl(calc(var(--rainbow-hue) + 0) 100% 62%);
+  --hud-purple: hsl(calc(var(--rainbow-hue) + 120) 100% 66%);
+  --hud-magenta: hsl(calc(var(--rainbow-hue) + 240) 100% 66%);
+  --hud-border: hsl(calc(var(--rainbow-hue) + 60) 100% 70% / 0.34);
+  --hud-glow-cyan: 0 0 26px hsl(calc(var(--rainbow-hue) + 0) 100% 60% / 0.35);
+  --hud-glow-purple: 0 0 30px hsl(calc(var(--rainbow-hue) + 200) 100% 64% / 0.4);
+}
+
+/* Переменные нужны и внутри .hud-root: часть окон живёт там, часть — снаружи. */
+:root[data-rainbow="on"] .hud-root {
+  animation: rainbow-spin 12s linear infinite;
+  --hud-cyan: hsl(calc(var(--rainbow-hue) + 0) 100% 62%);
+  --hud-purple: hsl(calc(var(--rainbow-hue) + 120) 100% 66%);
+  --hud-magenta: hsl(calc(var(--rainbow-hue) + 240) 100% 66%);
+  --hud-border: hsl(calc(var(--rainbow-hue) + 60) 100% 70% / 0.34);
+  --hud-glow-cyan: 0 0 26px hsl(calc(var(--rainbow-hue) + 0) 100% 60% / 0.35);
+  --hud-glow-purple: 0 0 30px hsl(calc(var(--rainbow-hue) + 200) 100% 64% / 0.4);
+}
+
+/* Аура по краям экрана: спектр, медленно проворачивающийся вокруг центра.
+   Один слой, только transform и opacity — то, что браузер умеет двигать
+   без перерисовки страницы. */
+:root[data-rainbow="on"] body::before {
+  content: "";
+  position: fixed;
+  inset: -35vmax;
+  z-index: 0;
+  pointer-events: none;
+  background: conic-gradient(
+    from 0deg,
+    hsl(0 100% 60% / 0.16),
+    hsl(60 100% 60% / 0.16),
+    hsl(120 100% 60% / 0.16),
+    hsl(180 100% 60% / 0.16),
+    hsl(240 100% 60% / 0.16),
+    hsl(300 100% 60% / 0.16),
+    hsl(360 100% 60% / 0.16)
+  );
+  filter: blur(90px);
+  animation: rainbow-aura-drift 26s linear infinite, rainbow-breathe 7s ease-in-out infinite;
+  will-change: transform, opacity;
+}
+
+/* Тонкая световая кромка по периметру — рамка «живого» экрана. */
+:root[data-rainbow="on"] body::after {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  pointer-events: none;
+  border: 1px solid transparent;
+  box-shadow:
+    inset 0 0 0 1px hsl(calc(var(--rainbow-hue) + 30) 100% 70% / 0.28),
+    inset 0 0 42px hsl(calc(var(--rainbow-hue) + 180) 100% 62% / 0.14);
+}
+
+/* Заголовки окон HUD переливаются самим текстом — эффект, ради которого всё
+   и затевалось: интерфейс выглядит живым, а не покрашенным. */
+:root[data-rainbow="on"] .hud-window-title,
+:root[data-rainbow="on"] .hud-title {
+  background: linear-gradient(
+    90deg,
+    hsl(calc(var(--rainbow-hue) + 0) 100% 72%),
+    hsl(calc(var(--rainbow-hue) + 90) 100% 72%),
+    hsl(calc(var(--rainbow-hue) + 180) 100% 72%),
+    hsl(calc(var(--rainbow-hue) + 270) 100% 72%)
+  );
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+/* Уважение к настройке системы: анимацию гасим, спектр оставляем статичным —
+   человеку, которому движение мешает, режим всё равно должен быть доступен. */
+@media (prefers-reduced-motion: reduce) {
+  :root[data-rainbow="on"],
+  :root[data-rainbow="on"] .hud-root,
+  :root[data-rainbow="on"] body::before {
+    animation: none;
+  }
+  :root[data-rainbow="on"] body::before {
+    opacity: 0.5;
+  }
+}
