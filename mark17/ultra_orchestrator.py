@@ -82,6 +82,10 @@ _DECIDER_PROMPT = (
     "в query — что именно узнать), у неё поиск разрешён.\n"
     "Поле futile_actions — сколько раз подряд действие давало пустой результат. "
     "Три и больше означает стену: выбери другое, а не бей в неё снова.\n"
+    "Поле idleness — твой простой. idle_streak это сколько тактов подряд ты НИЧЕГО "
+    "не изменил в мире: ни записи в памяти, ни связи, ни ответа руки. Мысль, не "
+    "оставившая следа, работой не считается. Если idle_streak 3 и больше — это отказ, "
+    "а не норма: выбери действие, которое ГАРАНТИРОВАННО оставит след (hands, consolidate), и не повторяй то, чем простаивал.\n"
     "Поле hands — состояние руки: pending это сколько твоих заявок ещё ждут. "
     "Если их много, не ставь новых. Но ожидание руки — НЕ повод простаивать: "
     "пока она занята, работай сам — consolidate, compose, tree. «none» выбирай "
@@ -113,6 +117,12 @@ def _extract_json(text: str) -> Any:
 def gather_state(stores: Any) -> dict[str, Any]:
     """Self-snapshot the decision is based on. Deterministic, read-only."""
     state: dict[str, Any] = {}
+    try:
+        from mark17 import stagnation
+
+        state["idleness"] = stagnation.report(stores.state_dir)
+    except Exception:  # noqa: BLE001
+        pass
     try:
         from mark17.meaning_tree import MeaningTree
 
@@ -280,6 +290,23 @@ def decide(state: dict[str, Any]) -> dict[str, Any]:
             "query": decision.get("query") or "",
             "reason": f"«{decision['action']}» дал пустой результат {futile.get(decision['action'])} раз подряд — меняю подход"[:200],
         }
+    # Застой сильнее вежливости. Модель может сколько угодно объяснять, почему
+    # сейчас правильно ничего не делать; если следа в мире нет третий такт
+    # подряд — это отказ системы, и мы меняем поведение принудительно.
+    idle_state = state.get("idleness") if isinstance(state.get("idleness"), dict) else {}
+    if idle_state.get("stagnant") and decision["action"] in ("none", "tree", "compile"):
+        streak_len = int(idle_state.get("idle_streak") or 0)
+        # hands оставляет след в реальности, consolidate — в памяти. Выбираем
+        # руку, если она свободна: контакт с миром ценнее внутреннего оборота.
+        hands_state = state.get("hands") if isinstance(state.get("hands"), dict) else {}
+        forced = "hands" if hands_state.get("free", False) else "consolidate"
+        decision = {
+            "action": forced,
+            "query": decision.get("query") or "",
+            "kind": "look",
+            "reason": f"{streak_len} тактов подряд без следа в мире — простой засчитан отказом, беру действие с гарантированным результатом"[:200],
+        }
+
     # Ожидание — не работа. Ядро сутки выбирало «none», честно дожидаясь ответа
     # руки по одной заявке; за это время оно могло привести память в порядок.
     if decision["action"] == "none":

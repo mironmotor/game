@@ -74,12 +74,15 @@ export default function AgentStudio() {
         body: JSON.stringify({ type: 'user_message', message: text, source: 'agent-studio' }),
       });
       const data = await res.json();
+      // Реплика ядра лежит в answer.text — его тут не читали вовсе, и на экран
+      // шло next_adaptation, которое роут всегда заполняет заглушкой. А раз
+      // ответ дошёл, ядро работает: говорить «мост не поднят» больше нельзя.
       setReply(
-        String(data?.next_adaptation || data?.llm?.text || data?.memory?.hint || '')
-          || 'Ядро молчит — мост не поднят. Облик всё равно сохранится.',
+        String(data?.answer?.text || data?.llm?.text || data?.next_adaptation || data?.memory?.hint || '').trim()
+          || 'Ядро ответило молча. Облик всё равно сохранится.',
       );
     } catch {
-      setReply('Ядро недоступно. Облик сохраняется локально и без него.');
+      setReply('Ответ от ядра не дошёл. Облик сохраняется локально и без него.');
     } finally {
       setBusy(false);
       // Речь гасим с задержкой, иначе пульсация обрывается ровно в тот момент,

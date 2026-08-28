@@ -33,14 +33,19 @@ import { type GlassesPreset, minFontPx, pixelsPerDegree, PRESETS, SAFE_AREA } fr
  */
 
 interface CoreState {
-  ok: boolean;
+  /** unknown — ещё не спросили или не дозвонились, down — ядро точно молчит. */
+  status: 'unknown' | 'alive' | 'down';
   memories: number | null;
   confidence: number | null;
   thought: string;
   error: string;
 }
 
-const IDLE: CoreState = { ok: false, memories: null, confidence: null, thought: '', error: '' };
+const IDLE: CoreState = { status: 'unknown', memories: null, confidence: null, thought: '', error: '' };
+
+// Сколько промахов подряд считать молчанием ядра. Один — это ещё не поломка:
+// холодный старт после деплоя и мигнувший вайфай выглядят точно так же.
+const SILENCE_AFTER_MISSES = 2;
 
 export default function GlassesHud() {
   const [preset, setPreset] = useState<GlassesPreset>(PRESETS[0]);
@@ -52,6 +57,8 @@ export default function GlassesHud() {
   const [now, setNow] = useState('--:--');
   const [scale, setScale] = useState(1);
   const boxRef = useRef<HTMLDivElement | null>(null);
+  // Промахи подряд — счётчик живёт в ref: он про связь, а не про кадр.
+  const misses = useRef(0);
 
   // Аватар лежит в localStorage, которого на сервере нет: прочитать его можно
   // только после монтирования. Правило про каскадные перерисовки здесь не про
@@ -86,6 +93,16 @@ export default function GlassesHud() {
   }, [preset]);
 
   const pull = useCallback(async () => {
+    // Промах не стирает то, что ядро уже рассказало: цифры на просвете нужнее
+    // пустых прочерков, а объявлять ядро молчащим с первой осечки — враньё.
+    const miss = (message: string) => {
+      misses.current += 1;
+      setCore((prev) => ({
+        ...prev,
+        status: misses.current >= SILENCE_AFTER_MISSES ? 'down' : prev.status,
+        error: message,
+      }));
+    };
     try {
       const base = process.env.NEXT_PUBLIC_BASE_PATH ?? '';
       const res = await fetch(`${base}/api/max17`, {
@@ -95,18 +112,21 @@ export default function GlassesHud() {
       });
       const data = await res.json();
       if (data?.ok === false) {
-        setCore({ ...IDLE, error: String(data.error || 'ядро не ответило') });
+        miss(String(data.error || 'ядро не ответило'));
         return;
       }
+      // Первый же удачный ответ возвращает «на связи», сколько бы промахов ни
+      // было до него.
+      misses.current = 0;
       setCore({
-        ok: true,
+        status: 'alive',
         memories: Number(data?.memory?.stats?.memories ?? data?.memory?.count ?? NaN) || null,
         confidence: Number(data?.plasticity?.confidence ?? data?.confidence ?? NaN) || null,
         thought: String(data?.plasticity?.hint || data?.next_adaptation || '').slice(0, 90),
         error: '',
       });
     } catch (err) {
-      setCore({ ...IDLE, error: err instanceof Error ? err.message : 'нет связи' });
+      miss(err instanceof Error ? err.message : 'нет связи');
     }
   }, []);
 
@@ -218,10 +238,10 @@ export default function GlassesHud() {
                     fontSize: f.small,
                     fontWeight: 800,
                     letterSpacing: 2,
-                    color: core.ok ? pal.main : '#ff9b3d',
+                    color: core.status === 'down' ? '#ff9b3d' : pal.main,
                   }}
                 >
-                  {core.ok ? 'ЯДРО НА СВЯЗИ' : 'ЯДРО МОЛЧИТ'}
+                  {core.status === 'alive' ? 'ЯДРО НА СВЯЗИ' : core.status === 'down' ? 'ЯДРО МОЛЧИТ' : 'ЯДРО · ПРОВЕРКА'}
                 </span>
               </div>
 
@@ -254,9 +274,11 @@ export default function GlassesHud() {
 
               {/* Низ: одна мысль. Не абзац — на ходу читается только строка. */}
               <div style={{ fontSize: f.body, fontWeight: 800, lineHeight: 1.3, color: pal.main }}>
-                {core.ok
+                {core.status === 'alive'
                   ? core.thought || 'Ядро на связи, сказать нечего.'
-                  : `Мост не отвечает${core.error ? `: ${core.error}` : ''}`}
+                  : core.status === 'down'
+                    ? `Мост не отвечает${core.error ? `: ${core.error}` : ''}`
+                    : 'Спрашиваю ядро…'}
               </div>
             </div>
           </div>

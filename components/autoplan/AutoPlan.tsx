@@ -61,11 +61,14 @@ export default function AutoPlan() {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ type: 'bridge_health' }),
         }).then((r) => r.json());
-        diag = h.configured
-          ? h.reachable
-            ? ` · Мост (${h.url_host}) отвечает — проблема в самом событии.`
-            : ` · Мост задан (${h.url_host}), но НЕ отвечает: ${h.hint ?? 'туннель/сервер упал.'}`
-          : ` · ${h.hint ?? 'Мост не сконфигурирован.'}`;
+        // Раньше здесь читались поля `reachable` и `url_host`, которых в ответе
+        // никогда не было: undefined → «Мост задан (undefined), но НЕ отвечает»
+        // на каждой ошибке, даже когда ядро отвечало. Диагноз идёт по state.
+        diag = h.ok || h.state === 'alive'
+          ? ' · Ядро отвечает — дело в самом событии, а не в связи.'
+          : h.state === 'down'
+            ? ` · Ядро не отвечает: ${h.hint ?? 'смотри логи pm2.'}`
+            : ` · Проверить ядро не удалось: ${h.hint ?? 'ответ не пришёл вовремя.'}`;
       } catch { /* диагностика недоступна */ }
       setError((e instanceof Error ? e.message : 'Ошибка') + diag);
     } finally {

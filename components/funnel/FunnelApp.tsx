@@ -78,9 +78,12 @@ export default function FunnelApp() {
       setIdea(bigIdea);
       setPhase('done');
     } catch (e: unknown) {
+      // Ядро тут не диагностируется: сюда приводит и упавший браузерный
+      // фолбэк. Про MAX17_BRIDGE_URL говорить нечего — на mir.care ядро стоит
+      // рядом с сайтом, а не за мостом.
       setError(
         (e instanceof Error ? e.message : 'Что-то пошло не так') +
-          ' · Ядро Max недоступно и нет браузерного ключа. Подними мост (MAX17_BRIDGE_URL) или задай NEXT_PUBLIC_GEMINI_API_KEY.',
+          ' · Идея не собралась: ядро не ответило по этому запросу и браузерного ключа (NEXT_PUBLIC_GEMINI_API_KEY) нет.',
       );
       setPhase('error');
     }

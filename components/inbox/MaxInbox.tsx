@@ -21,7 +21,10 @@ export default function MaxInbox() {
     setRes(null);
     const out = await ingestViaMax(interest.trim(), stream);
     if (out) setRes(out);
-    else setError('Ядро Max недоступно. Проверь, что мост запущен на M3.');
+    // Пустой ответ — это «запрос не прошёл», а не «ядро стоит»: ingestViaMax
+    // отдаёт null и когда ядро ответило, но без разбора потока. Про мост на M3
+    // здесь тем более неправда — ядро живёт на том же сервере, что и сайт.
+    else setError('Ядро не разобрало поток на этот раз. Попробуй ещё раз или сократи текст.');
     setBusy(false);
   }
 

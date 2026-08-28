@@ -23,12 +23,16 @@ export interface BuildInfo {
 }
 
 interface BridgeStatus {
-  ok: boolean;
-  host: string;
+  /** alive — ядро ответило, down — ответило «стою», unknown — проверить не вышло. */
+  state: 'alive' | 'unknown' | 'down';
   source: string;
   environment: string;
   hint: string;
 }
+
+// Раз в столько перепроверяем ядро. Страница живёт часами, а первая проверка
+// вполне могла попасть на холодный старт после деплоя.
+const BRIDGE_POLL_MS = 45_000;
 
 export default function ModesHub({ build }: { build: BuildInfo }) {
   const [avatar, setAvatar] = useState<AvatarConfig>(DEFAULT_AVATAR);
@@ -40,27 +44,60 @@ export default function ModesHub({ build }: { build: BuildInfo }) {
     setMounted(true);
   }, []);
 
-  // Состояние моста проверяется сразу при открытии, а не после первой упавшей
+  // Состояние ядра проверяется сразу при открытии, а не после первой упавшей
   // команды: иначе о поломке узнаёшь, только нажав кнопку и получив «fetch
   // failed», по которому всё равно ничего не понять.
+  //
+  // Но одной проверки при монтировании мало: она застывала на весь сеанс, и
+  // единственная неудача (холодный старт, мигнувшая сеть) навсегда вешала
+  // красное «Ядро недоступно» поверх работающего ядра. Поэтому опрос по кругу,
+  // плюс внеочередной при возврате на вкладку, и падение сети больше не
+  // считается приговором ядру — оно про сеть, а не про ядро.
   useEffect(() => {
     const base = process.env.NEXT_PUBLIC_BASE_PATH ?? '';
-    fetch(`${base}/api/max17`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ type: 'bridge_health' }),
-    })
-      .then((r) => r.json())
-      .then((d) =>
+    let mountedNow = true;
+    let inFlight = false;
+
+    const check = async () => {
+      if (inFlight || document.visibilityState === 'hidden') return;
+      inFlight = true;
+      try {
+        const d = await fetch(`${base}/api/max17`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ type: 'bridge_health' }),
+        }).then((r) => r.json());
+        if (!mountedNow) return;
+        const state: BridgeStatus['state'] = d?.ok || d?.state === 'alive' ? 'alive' : d?.state === 'down' ? 'down' : 'unknown';
         setBridge({
-          ok: Boolean(d?.ok),
-          host: String(d?.url_host || ''),
+          state,
           source: String(d?.source || d?.bridge || ''),
           environment: String(d?.environment || ''),
           hint: String(d?.hint || ''),
-        }),
-      )
-      .catch(() => setBridge({ ok: false, host: '', source: '', environment: '', hint: 'Проверка не дошла до сервера.' }));
+        });
+      } catch {
+        if (!mountedNow) return;
+        // Ответ не дошёл: про ядро это не говорит ничего. Уже подтверждённое
+        // «живое» не сбрасываем — иначе один блип сети снова врёт про ядро.
+        setBridge((prev) =>
+          prev?.state === 'alive'
+            ? prev
+            : { state: 'unknown', source: '', environment: '', hint: 'Проверка не дошла до сервера.' },
+        );
+      } finally {
+        inFlight = false;
+      }
+    };
+
+    void check();
+    const id = setInterval(() => void check(), BRIDGE_POLL_MS);
+    const onVisible = () => void check();
+    document.addEventListener('visibilitychange', onVisible);
+    return () => {
+      mountedNow = false;
+      clearInterval(id);
+      document.removeEventListener('visibilitychange', onVisible);
+    };
   }, []);
 
   const pal = palette(avatar);
@@ -93,19 +130,28 @@ export default function ModesHub({ build }: { build: BuildInfo }) {
           </div>
         </header>
 
-        {/* ── состояние моста ─────────────────────────────────────────────── */}
-        {bridge && !bridge.ok && (
+        {/* ── состояние ядра ──────────────────────────────────────────────── */}
+        {/* Красная плашка — только когда ядро точно стоит. «Не смогли
+            проверить» — отдельная тихая строка: заявлять по ней, что ядро
+            недоступно, было враньём, из-за которого владелец и видел
+            «ядро стоит» на работающем ядре. */}
+        {bridge?.state === 'down' && (
           <div className="mb-7 rounded-2xl border p-4" style={{ borderColor: '#ff9b3d55', background: '#ff9b3d12' }}>
             <div className="text-[12px] font-bold uppercase tracking-[2px]" style={{ color: '#ff9b3d' }}>
               Ядро недоступно — команды не сработают
             </div>
             <p className="mt-1.5 text-[12px] leading-relaxed opacity-75">{bridge.hint}</p>
             <div className="mt-2 flex flex-wrap gap-x-5 gap-y-1 font-mono text-[10px] opacity-45">
-              {bridge.host && <span>адрес: {bridge.host}</span>}
               {bridge.source && <span>источник: {bridge.source}</span>}
               {bridge.environment && <span>окружение: {bridge.environment}</span>}
             </div>
           </div>
+        )}
+        {bridge?.state === 'unknown' && (
+          <p className="mb-7 text-[11px] leading-relaxed opacity-45">
+            Не удалось проверить ядро — {bridge.hint || 'ответ не пришёл вовремя'}. Команды, скорее всего, работают;
+            проверю ещё раз через полминуты.
+          </p>
         )}
 
         {/* ── режимы ──────────────────────────────────────────────────────── */}

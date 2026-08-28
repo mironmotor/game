@@ -16,6 +16,46 @@
     }
   }
 
+  /* Вкладка «Поддержать». Позиция живёт здесь, а не в Tailwind-классах, потому
+     что телефонная раскладка HUD переключается на 700px (hud.css), а sm: у
+     Tailwind — на 640px: в промежутке вкладка уезжала в десктопное положение,
+     пока HUD оставался мобильным. Этаж 160px — на 12px выше кнопки режимов
+     (её этаж 92px + 56px высоты), поэтому вкладка не садится ни на неё, ни на
+     нижнюю навигацию. Отступ от края возвращён (был max(0.5rem, safe-area),
+     стал 0): прижатая к самому краю полоска шириной 20px тонет в скруглении
+     экрана и в безопасной зоне — её просто не замечают. */
+  button.support-tab {
+    right: max(8px, env(safe-area-inset-right, 0px));
+    bottom: calc(env(safe-area-inset-bottom, 0px) + 160px);
+  }
+
+  /* Низкий экран — телефон боком или сплит-скрин. Вертикальная надпись высотой
+     ~130px над навигацией уже не помещается и уходит за верх экрана: кнопки
+     просто нет. Оставляем одно сердце (подпись остаётся в aria-label/title),
+     вкладка сжимается до тапабельного квадрата и гарантированно в кадре. */
+  @media (max-width: 700px) and (max-height: 470px) {
+    button.support-tab {
+      min-width: 36px;
+      min-height: 44px;
+    }
+
+    .support-tab-label {
+      display: none;
+    }
+  }
+
+  /* Десктоп: вкладка возвращается к самому краю по центру высоты. */
+  @media (min-width: 701px) {
+    button.support-tab {
+      right: 0;
+      bottom: auto;
+      top: 50%;
+      transform: translateY(-50%);
+      border-top-right-radius: 0;
+      border-bottom-right-radius: 0;
+    }
+  }
+
   .scrollbar-thin::-webkit-scrollbar {
     width: 4px;
   }

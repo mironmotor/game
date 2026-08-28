@@ -76,4 +76,23 @@ export async function warn(text) {
   return sent;
 }
 
+/**
+ * Уведомление в самой macOS — то, что видно, даже когда сайт закрыт, а телеграм
+ * не настроен. Именно этого не хватало, когда рука падала вторые сутки:
+ * предупреждения писались в журнал, который никто не читал.
+ *
+ * osascript есть в системе всегда, ставить нечего. Текст экранируем сами:
+ * кавычка внутри сообщения ломает AppleScript целиком.
+ */
+export async function notifyOS(title, text, { sound = false } = {}) {
+  if (process.platform !== 'darwin') return false;
+  const esc = (v) => String(v).replace(/\\/g, '\\\\').replace(/"/g, '\\"').slice(0, 400);
+  const script =
+    `display notification "${esc(text)}" with title "${esc(title)}"` +
+    (sound ? ' sound name "Submarine"' : '');
+  return new Promise((resolve) => {
+    execFile('osascript', ['-e', script], (err) => resolve(!err));
+  });
+}
+
 export { journal };

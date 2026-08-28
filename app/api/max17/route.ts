@@ -166,6 +166,57 @@ function stageMedia(body: Record<string, unknown>): { dir: string; file: string;
 }
 
 
+/** «Отвечает», «не смог проверить» и «точно стоит» — три разных факта. */
+type CoreLiveness = 'alive' | 'unknown' | 'down';
+
+type DaemonSnapshot = { alive: boolean; warmedUp: boolean; queueDepth: number };
+
+// Бюджет проверки короче рабочего: демон даёт холодному старту две минуты, а
+// человеку у экрана нужен ответ раньше. Не уложились — это «не смог
+// проверить», а не «ядро стоит».
+const HEALTH_PROBE_MS = 20_000;
+
+type Settled<T> = { kind: 'value'; value: T } | { kind: 'error'; error: unknown } | { kind: 'timeout' };
+
+// Гонка запроса с бюджетом. Обработчик на промис ядра вешается прямо здесь:
+// ответ может прийти уже после того, как бюджет вышел, и неперехваченный
+// reject уронил бы процесс.
+async function settleWithin<T>(task: Promise<T>, ms: number): Promise<Settled<T>> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const guarded: Promise<Settled<T>> = task.then(
+    (value) => ({ kind: 'value', value }),
+    (error) => ({ kind: 'error', error }),
+  );
+  const budget = new Promise<Settled<T>>((resolve) => {
+    timer = setTimeout(() => resolve({ kind: 'timeout' }), ms);
+  });
+  try {
+    return await Promise.race([guarded, budget]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
+function healthPayload(state: CoreLiveness, startedAt: number, daemon: DaemonSnapshot | null, hint: string) {
+  const alive = state === 'alive';
+  return NextResponse.json({
+    // ok и reachable означают ровно «ядро подтверждённо живо». Всё остальное
+    // клиент обязан читать по state, иначе «не смог проверить» снова
+    // превратится в «ядро стоит».
+    ok: alive,
+    reachable: alive,
+    state,
+    checked: state !== 'unknown',
+    bridge: 'local-python',
+    configured: true,
+    source: daemon?.alive ? 'local-python-daemon' : 'local-python',
+    environment: process.env.NODE_ENV || 'production',
+    latency_ms: Date.now() - startedAt,
+    daemon,
+    hint,
+  });
+}
+
 /**
  * Диагностика моста: жив ли путь до ядра.
  *
@@ -175,37 +226,76 @@ function stageMedia(body: Record<string, unknown>): { dir: string; file: string;
  * вообще вызывается.
  *
  * Здесь ядро локальное — python3 рядом с сайтом, поэтому проверка честная:
- * отправляем ему настоящее событие health и смотрим, ответил ли. Проверять
- * наличие файла было бы враньём: файл на месте, а интерпретатор может не
- * запуститься.
+ * отправляем ему настоящее событие и смотрим, ответил ли. Проверять наличие
+ * файла было бы враньём: файл на месте, а интерпретатор может не запуститься.
+ *
+ * Проверка обязана идти ТЕМ ЖЕ путём, что и настоящий трафик. Раньше она
+ * поднимала одноразовый json_cli.py с бюджетом 12с, пока чат работал через
+ * тёплого демона. Холодный старт одноразового моста сам по себе съедает больше
+ * (см. комментарий в runMax17Bridge), поэтому проверка падала на живом ядре —
+ * отсюда «Ядро недоступно» в интерфейсе при работающем ядре.
  */
 async function bridgeHealth() {
   const started = Date.now();
+  let daemon: DaemonSnapshot | null = null;
+  let probe: Promise<Record<string, unknown>>;
+
   try {
-    const result = await runMax17Bridge({ type: 'health' }, 12_000);
-    const alive = result?.ok !== false;
-    return NextResponse.json({
-      ok: alive,
-      bridge: 'local-python',
-      configured: true,
-      source: 'local-python',
-      environment: process.env.NODE_ENV || 'production',
-      latency_ms: Date.now() - started,
-      hint: alive
-        ? 'Ядро рядом с сайтом и отвечает.'
-        : 'Ядро запустилось, но вернуло ошибку — смотри логи pm2.',
-    });
+    if (process.env.MAX17_DAEMON !== 'false') {
+      const { daemonStatus, sendToDaemon } = await import('./max17-daemon');
+      daemon = daemonStatus();
+      // Тёплый демон — это и есть канал живого чата: раз он уже отвечал, ядро
+      // работает. Гонять питона ради галочки незачем.
+      if (daemon.alive && daemon.warmedUp) {
+        return healthPayload('alive', started, daemon, 'Ядро рядом с сайтом и отвечает.');
+      }
+      // Пинг самым дешёвым событием: health — это полный свип Доктора с
+      // записью в доску миссий, для регулярного опроса он слишком тяжёлый.
+      probe = sendToDaemon({ type: 'cache_stats' });
+    } else {
+      probe = runMax17Bridge({ type: 'cache_stats' }, HEALTH_PROBE_MS);
+    }
   } catch (error) {
-    return NextResponse.json({
-      ok: false,
-      bridge: 'local-python',
-      configured: true,
-      source: 'local-python',
-      environment: process.env.NODE_ENV || 'production',
-      latency_ms: Date.now() - started,
-      hint: `Ядро не ответило: ${error instanceof Error ? error.message : String(error)}`,
-    });
+    // Процесс даже не удалось запустить — вот это и есть «точно стоит».
+    const message = error instanceof Error ? error.message : String(error);
+    return healthPayload('down', started, daemon, `Ядро не запускается: ${message}`);
   }
+
+  const outcome = await settleWithin(probe, HEALTH_PROBE_MS);
+
+  if (outcome.kind === 'timeout') {
+    return healthPayload(
+      'unknown',
+      started,
+      daemon,
+      'Ядро не успело ответить за отведённое время. Это не значит, что оно стоит: холодный старт занимает десятки секунд.',
+    );
+  }
+
+  if (outcome.kind === 'error') {
+    const message = outcome.error instanceof Error ? outcome.error.message : String(outcome.error);
+    // Таймаут и обрыв — «не смог проверить». Упавший/несуществующий процесс —
+    // «точно стоит», об этом честно говорят ENOENT и ненулевой код выхода.
+    const state: CoreLiveness = /timeout|abort/i.test(message) ? 'unknown' : 'down';
+    return healthPayload(
+      state,
+      started,
+      daemon,
+      state === 'down' ? `Ядро не ответило: ${message}` : `Проверка не дошла до ядра: ${message}`,
+    );
+  }
+
+  // Ядро ответило — оно живо, даже если ответ с ошибкой внутри. Раньше такой
+  // ответ давал ok:false, и интерфейс объявлял работающее ядро остановленным.
+  const failed = outcome.value?.ok === false;
+  return healthPayload(
+    'alive',
+    started,
+    daemon,
+    failed
+      ? `Ядро отвечает, но вернуло ошибку: ${shortText(outcome.value?.error, 'без подробностей')} — смотри логи pm2.`
+      : 'Ядро рядом с сайтом и отвечает.',
+  );
 }
 
 function errorResponse(message: string, status = 400, details?: unknown) {

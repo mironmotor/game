@@ -20,6 +20,7 @@ import { dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { queueStats } from './hands.mjs';
 import { patrol } from './guard.mjs';
+import { pulseWatch } from './pulse.mjs';
 import { journal, warn } from './notify.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -64,6 +65,13 @@ async function tick() {
       }
     } catch (e) {
       await journal(`сторож споткнулся: ${String(e).slice(0, 160)}`);
+    }
+    // Пульс: простаивает ли ядро и сделало ли оно что-то весомое. Важное
+    // всплывает уведомлением в самой системе — журнал никто не читает.
+    try {
+      await pulseWatch();
+    } catch (e) {
+      await journal(`пульс не снялся: ${String(e).slice(0, 160)}`);
     }
   }
 

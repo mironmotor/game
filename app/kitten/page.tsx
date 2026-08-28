@@ -1,4 +1,5 @@
 import type { Metadata } from 'next';
+import KittenFrame from '@/components/kitten/KittenFrame';
 
 export const metadata: Metadata = {
   title: 'Мяугочи — котёнок в GAME',
@@ -16,17 +17,10 @@ export const metadata: Metadata = {
  *
  * Рамка ещё и защищает. У игры свои глобальные стили и обработчики на всё
  * окно — попади они на общую страницу, поехали бы чужие режимы.
+ *
+ * Сама рамка живёт в клиентском компоненте: адрес игры зависит от basePath,
+ * а её наличие на сервере — от выкатки, и об отсутствии надо сказать вслух.
  */
 export default function KittenPage() {
-  return (
-    <iframe
-      src="/meowgotchi/index.html"
-      title="Мяугочи"
-      className="fixed inset-0 h-full w-full border-0 bg-[#ffe7f3]"
-      // Скриптам игры сюда нужен доступ к своему localStorage — иначе котёнок
-      // забывал бы имя и голод при каждом заходе.
-      sandbox="allow-scripts allow-same-origin allow-popups allow-modals"
-      allow="autoplay"
-    />
-  );
+  return <KittenFrame />;
 }

@@ -18,7 +18,10 @@ export default function SelfAwareness() {
     setError('');
     const r = await introspectMax();
     if (r) setIntro(r);
-    else setError('Ядро Max недоступно. Проверь, что мост запущен на M3.');
+    // introspectMax отдаёт null и тогда, когда ядро ответило, но без
+    // self_state, — объявлять по этому ядро недоступным (да ещё на M3, где его
+    // давно нет) значит врать про работающее ядро.
+    else setError('Ядро не прислало своё состояние на этот раз. Нажми ещё раз.');
     setBusy(false);
   }
 

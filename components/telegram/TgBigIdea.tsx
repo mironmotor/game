@@ -54,10 +54,10 @@ export default function TgBigIdea() {
       setPhase('done');
       haptic('success');
     } catch (e) {
-      setError(
-        (e instanceof Error ? e.message : 'Ошибка') +
-          ' · Ядро Max недоступно. Проверь, что мост запущен на M3.',
-      );
+      // Сюда попадаем, когда упал и запасной браузерный путь. Утверждать при
+      // этом, что ядро стоит (да ещё на M3, где его нет), нельзя — мы знаем
+      // только то, что идея не собралась.
+      setError((e instanceof Error ? e.message : 'Ошибка') + ' · Идея не собралась. Попробуй ещё раз.');
       setPhase('error');
       haptic('error');
     }

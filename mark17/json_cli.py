@@ -2251,6 +2251,16 @@ def _handle_ultra_think(event: Event, args: argparse.Namespace, stores: Mark17St
     except Exception:  # noqa: BLE001 - рука не должна ронять такт мышления
         hands_seen = []
 
+    # Слепок мира до такта: по нему потом видно, оставило ли ядро след.
+    # Замер стоит миллисекунды и не трогает модель — поэтому он безусловный.
+    try:
+        from mark17 import stagnation as stagnation_meter
+
+        world_before = stagnation_meter.snapshot(stores)
+    except Exception:  # noqa: BLE001 - счётчик не имеет права ронять мышление
+        stagnation_meter = None  # type: ignore[assignment]
+        world_before = {}
+
     state = ultra_gather_state(stores)
     if hands_seen:
         state["hands_answers"] = [
@@ -2390,11 +2400,30 @@ def _handle_ultra_think(event: Event, args: argparse.Namespace, stores: Mark17St
         mood = executed.get("mood") or {}
         text += f" Сочиняю {mood.get('label', 'трек')} (~{mood.get('avg_bpm')} BPM, {mood.get('fav_key')} {mood.get('mode')})."
 
+    # Замер после действия: изменил ли этот такт мир хоть в чём-то. Полосу
+    # простоя кладём в ответ, чтобы ядро видело её следующим тактом, а
+    # интерфейс — прямо сейчас.
+    idle: dict[str, Any] = {}
+    if stagnation_meter is not None:
+        try:
+            idle = stagnation_meter.record(
+                stores.state_dir,
+                action=action,
+                before=world_before,
+                after=stagnation_meter.snapshot(stores),
+                reason=str(decision.get("reason") or ""),
+            )
+            if idle.get("idle_streak", 0) >= stagnation_meter.STAGNANT_AFTER:
+                text += f" Простой: {idle['idle_streak']} тактов подряд без следа в мире."
+        except Exception:  # noqa: BLE001
+            idle = {}
+
     return {
         "ok": True,
         "event_type": event.type,
         "route": "ultra_orchestrator",
         "memory": {},
+        "idleness": idle,
         "hands": {"answers": hands_seen[:3], "queued": executed if action == "hands" else None},
         "plasticity": {"confidence": 0.65, "action": f"ultra_{action}", "learned": action != "none"},
         "llm": {"status": "skipped", "text": "Ультра-оркестратор.", "latency_ms": 0.0},

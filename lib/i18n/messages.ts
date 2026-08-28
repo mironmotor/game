@@ -91,6 +91,26 @@ const englishMessages = {
   "angel.product": "Product",
   "angel.growth": "Growth",
   "angel.guardian": "Guardian",
+  "support.tab": "Support",
+  "support.tabTitle": "Support the project",
+  "support.title": "SUPPORT GAME",
+  "support.intro":
+    "GAME and the MAX core are made by one person, and all of it is given away for free. If the project has been useful to you, you can support it. This is voluntary and changes nothing: every feature stays open to everyone.",
+  "support.copy": "copy",
+  "support.copied": "copied",
+  "support.tagLabel": "tag / memo",
+  "support.cardLabel": "Card · MIR",
+  "support.hintTrc20": "Tron network — the cheapest fee",
+  "support.hintTon": "TON network — the tag is MANDATORY",
+  "support.hintTonPlain": "TON network",
+  "support.hintErc20": "Ethereum network",
+  "support.hintEth": "Ethereum network (ETH)",
+  "support.hintBtc": "Bitcoin network (bech32)",
+  "support.hintCard": "transfer by card number",
+  "support.empty":
+    "No payment details have been added yet. To the owner: write the addresses into {file} → {list}.",
+  "support.disclaimer":
+    "Check the address and the network before you send — a crypto transfer is irreversible, and one wrong character or the wrong network means the money is lost. Support is voluntary, it is not a payment for services and it unlocks no extra features.",
   "ai.replyLanguageInstruction":
     "Reply in the user interface language: {language}. If the latest user message is clearly in another language, reply in that language instead.",
 } as const;
@@ -98,7 +118,17 @@ const englishMessages = {
 export type MessageKey = keyof typeof englishMessages;
 export type MessageParams = Record<string, string | number>;
 
-type Catalog = Record<MessageKey, string>;
+/**
+ * Ключи, перевод которых пока необязателен: недостающее getMessage добирает из
+ * английского. Раньше Catalog требовал все ключи от всех пятнадцати языков —
+ * из-за этого новую строку нельзя было добавить, не сочинив ей пятнадцать
+ * переводов, и её просто не добавляли. Всё, что уже переведено везде, остаётся
+ * обязательным: иначе ключ молча выпадет из четырнадцати языков.
+ */
+type FallbackKey = Extract<MessageKey, `support.${string}`>;
+
+type Catalog = Record<Exclude<MessageKey, FallbackKey>, string> &
+  Partial<Record<FallbackKey, string>>;
 
 const ru: Catalog = {
   "language.label": "Язык",
@@ -193,6 +223,26 @@ const ru: Catalog = {
   "angel.product": "Продукт",
   "angel.growth": "Рост",
   "angel.guardian": "Хранитель",
+  "support.tab": "Поддержать",
+  "support.tabTitle": "Поддержать проект",
+  "support.title": "ПОДДЕРЖАТЬ GAME",
+  "support.intro":
+    "GAME и ядро MAX делает один человек, и всё это раздаётся бесплатно. Если проект оказался тебе полезен — можешь поддержать. Это добровольно и ни на что не влияет: все функции остаются открытыми для всех.",
+  "support.copy": "копировать",
+  "support.copied": "скопировано",
+  "support.tagLabel": "tag / memo",
+  "support.cardLabel": "Карта · МИР",
+  "support.hintTrc20": "сеть Tron — самая дешёвая комиссия",
+  "support.hintTon": "сеть TON — ОБЯЗАТЕЛЬНО укажи tag",
+  "support.hintTonPlain": "сеть TON",
+  "support.hintErc20": "сеть Ethereum",
+  "support.hintEth": "сеть Ethereum (ETH)",
+  "support.hintBtc": "сеть Bitcoin (bech32)",
+  "support.hintCard": "перевод по номеру карты",
+  "support.empty":
+    "Реквизиты пока не добавлены. Владельцу: вписать адреса в {file} → {list}.",
+  "support.disclaimer":
+    "Перед отправкой сверь адрес и сеть — перевод в криптовалюте необратим, ошибка в одном символе или не та сеть означают потерю средств. Поддержка добровольная, это не оплата услуг и не даёт дополнительных функций.",
   "ai.replyLanguageInstruction":
     "Отвечай на языке интерфейса пользователя: {language}. Если последнее сообщение пользователя явно написано на другом языке, отвечай на языке этого сообщения.",
 };
@@ -1513,7 +1563,10 @@ export function getMessage(
   const catalog = hasUiCatalog(base)
     ? catalogs[base as UiCatalogLocale]
     : catalogs.en;
-  const message = catalog[key] ?? catalogs.en[key];
+  // Фолбэк берём напрямую из английского объекта, а не из catalogs.en: только он
+  // гарантированно полный, и человек на любом языке увидит английскую строку
+  // вместо пустоты.
+  const message = catalog[key] ?? englishMessages[key];
 
   if (!params) return message;
 
