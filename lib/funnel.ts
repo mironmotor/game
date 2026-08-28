@@ -2,6 +2,8 @@
 // Multi-stage "funnel": pour raw inputs in at the top → narrow through sparks → one Big Idea at the bottom.
 // Runs fully client-side against OpenRouter (same pattern as lib/gemini.ts), so it works on the static export.
 
+import { appBasePath } from './base-path';
+
 const OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions";
 const OPENROUTER_MODEL = "google/gemini-2.0-flash-exp:free";
 
@@ -75,8 +77,7 @@ async function callOpenRouter(systemPrompt: string, userPrompt: string, temperat
 // ядро). Ключ в браузере не нужен. Возвращает null, если мост недоступен.
 export async function generateViaMax(seed: FunnelSeed): Promise<{ sparks: string[]; idea: BigIdea; source: string } | null> {
   try {
-    const base = process.env.NEXT_PUBLIC_BASE_PATH ?? '';
-    const res = await fetch(`${base}/api/max17`, {
+    const res = await fetch(`${appBasePath}/api/max17`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ type: 'big_idea', ...seed }),

@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import Link from 'next/link';
 import { sendMax17Event, type Max17Plan, type Max17PlanTask, type Max17Synapses } from '@/lib/max17-client';
+import { appBasePath } from '@/lib/base-path';
 import './autoplan.css';
 
 const MGR_META: Record<string, { label: string; color: string }> = {
@@ -56,7 +57,7 @@ export default function AutoPlan() {
     } catch (e: unknown) {
       let diag = '';
       try {
-        const h = await fetch(`${process.env.NEXT_PUBLIC_BASE_PATH ?? ''}/api/max17`, {
+        const h = await fetch(`${appBasePath}/api/max17`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ type: 'bridge_health' }),

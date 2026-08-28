@@ -5,6 +5,7 @@ import Link from 'next/link';
 import AvatarCanvas from '@/components/agent/AvatarCanvas';
 import { type AvatarConfig, DEFAULT_AVATAR, loadAvatar, palette } from '@/lib/agent-avatar';
 import { GROUPS, HIDDEN_COMMANDS, type HiddenCommand, MODES } from '@/lib/modes-catalog';
+import { appBasePath } from '@/lib/base-path';
 
 /**
  * Витрина: все режимы и все команды ядра на одной странице.
@@ -54,7 +55,6 @@ export default function ModesHub({ build }: { build: BuildInfo }) {
   // плюс внеочередной при возврате на вкладку, и падение сети больше не
   // считается приговором ядру — оно про сеть, а не про ядро.
   useEffect(() => {
-    const base = process.env.NEXT_PUBLIC_BASE_PATH ?? '';
     let mountedNow = true;
     let inFlight = false;
 
@@ -62,7 +62,7 @@ export default function ModesHub({ build }: { build: BuildInfo }) {
       if (inFlight || document.visibilityState === 'hidden') return;
       inFlight = true;
       try {
-        const d = await fetch(`${base}/api/max17`, {
+        const d = await fetch(`${appBasePath}/api/max17`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ type: 'bridge_health' }),
@@ -150,7 +150,7 @@ export default function ModesHub({ build }: { build: BuildInfo }) {
         {bridge?.state === 'unknown' && (
           <p className="mb-7 text-[11px] leading-relaxed opacity-45">
             Не удалось проверить ядро — {bridge.hint || 'ответ не пришёл вовремя'}. Команды, скорее всего, работают;
-            проверю ещё раз через полминуты.
+            проверю ещё раз меньше чем через минуту.
           </p>
         )}
 
@@ -237,8 +237,7 @@ function CommandCard({ cmd }: { cmd: HiddenCommand }) {
       }
       if (cmd.dangerous) body.allow_execute = hands;
 
-      const base = process.env.NEXT_PUBLIC_BASE_PATH ?? '';
-      const res = await fetch(`${base}/api/max17`, {
+      const res = await fetch(`${appBasePath}/api/max17`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body),

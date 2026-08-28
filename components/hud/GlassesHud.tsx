@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import AvatarCanvas from '@/components/agent/AvatarCanvas';
 import { type AvatarConfig, DEFAULT_AVATAR, loadAvatar, palette } from '@/lib/agent-avatar';
 import { type GlassesPreset, minFontPx, pixelsPerDegree, PRESETS, SAFE_AREA } from '@/lib/glasses-presets';
+import { appBasePath } from '@/lib/base-path';
 
 /**
  * HUD для очков.
@@ -104,8 +105,7 @@ export default function GlassesHud() {
       }));
     };
     try {
-      const base = process.env.NEXT_PUBLIC_BASE_PATH ?? '';
-      const res = await fetch(`${base}/api/max17`, {
+      const res = await fetch(`${appBasePath}/api/max17`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ type: 'system_state', source: 'glasses-hud' }),

@@ -1,5 +1,7 @@
 // Клиент саморефлексии Макса: /api/max17 (event: introspect).
 
+import { appBasePath } from './base-path';
+
 export interface Priority {
   action: string;
   why: string;
@@ -34,8 +36,7 @@ export interface Introspection {
  */
 export async function introspectMax(): Promise<Introspection | null> {
   try {
-    const base = process.env.NEXT_PUBLIC_BASE_PATH ?? '';
-    const res = await fetch(`${base}/api/max17`, {
+    const res = await fetch(`${appBasePath}/api/max17`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ type: 'introspect' }),

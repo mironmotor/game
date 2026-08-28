@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { sha256hex, leadingZeros } from '@/lib/sha256';
+import { appBasePath } from '@/lib/base-path';
 import './decoder.css';
 
 // ── РЕЖИМ ДЕКОДЕР ────────────────────────────────────────────────────────────
@@ -60,8 +61,7 @@ function localParams(target: string): DecodeParams {
 
 async function coreParams(target: string): Promise<DecodeParams | null> {
   try {
-    const base = process.env.NEXT_PUBLIC_BASE_PATH ?? '';
-    const res = await fetch(`${base}/api/max17`, {
+    const res = await fetch(`${appBasePath}/api/max17`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ type: 'decode', target }),

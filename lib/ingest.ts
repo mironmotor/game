@@ -1,5 +1,7 @@
 // Клиент Инбокса Макса: поток + промпт-критерий → фильтр через ядро (/api/max17).
 
+import { appBasePath } from './base-path';
+
 export interface IngestEntry {
   text: string;
   score: number;
@@ -19,8 +21,7 @@ export interface IngestResult {
 
 export async function ingestViaMax(interest: string, stream: string): Promise<IngestResult | null> {
   try {
-    const base = process.env.NEXT_PUBLIC_BASE_PATH ?? '';
-    const res = await fetch(`${base}/api/max17`, {
+    const res = await fetch(`${appBasePath}/api/max17`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ type: 'ingest', interest, stream }),

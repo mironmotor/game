@@ -16,6 +16,7 @@ import {
   SHAPES,
   TEMPERS,
 } from '@/lib/agent-avatar';
+import { appBasePath } from '@/lib/base-path';
 
 /**
  * Студия облика: слева — живой персонаж, справа — ползунки.
@@ -67,8 +68,7 @@ export default function AgentStudio() {
     setSpeaking(true);
     setReply('');
     try {
-      const base = process.env.NEXT_PUBLIC_BASE_PATH ?? '';
-      const res = await fetch(`${base}/api/max17`, {
+      const res = await fetch(`${appBasePath}/api/max17`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ type: 'user_message', message: text, source: 'agent-studio' }),

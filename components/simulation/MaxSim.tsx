@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useRef, useState, useCallback } from 'react';
+import { appBasePath } from '@/lib/base-path';
 import './sim.css';
 
 // ── СИМУЛЯЦИЯ МАКСА ──────────────────────────────────────────────────────────
@@ -127,8 +128,7 @@ function localParams(prompt: string): SimParams {
 
 async function coreParams(prompt: string): Promise<SimParams | null> {
   try {
-    const base = process.env.NEXT_PUBLIC_BASE_PATH ?? '';
-    const res = await fetch(`${base}/api/max17`, {
+    const res = await fetch(`${appBasePath}/api/max17`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ type: 'simulation', prompt }),
