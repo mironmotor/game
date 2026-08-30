@@ -200,21 +200,64 @@ async function callModel(prompt: string): Promise<string> {
   }
 }
 
-/** Достаёт массив строк из ответа модели, прощая обёртку в ```json и болтовню вокруг. */
+/**
+ * Достаёт массив строк из ответа модели.
+ *
+ * Наивная версия — от первой «[» до последней «]» — на живом брокере не
+ * работает. DeepSeek через Gonka отвечает так:
+ *
+ *   ["Dua samudra","air"]  // Note: "Two oceans" = "Dua samudra"…
+ *   ```json
+ *   ["Dua samudra","air"]
+ *   ```
+ *
+ * То есть массив, комментарий с ЕЩЁ ОДНОЙ парой скобок и повтор в ограде.
+ * Срез между крайними скобками захватывает всё это разом и не разбирается.
+ * Поэтому здесь честное сканирование: находим каждую «[», отсчитываем от неё
+ * сбалансированную скобку (не считая тех, что внутри строковых литералов) и
+ * пробуем разобрать. Побеждает первый кандидат нужной формы и длины.
+ */
 export function parseStrings(raw: string, expected: number): string[] | null {
-  const cleaned = raw.replace(/^\s*```(?:json)?/i, '').replace(/```\s*$/, '').trim();
-  const start = cleaned.indexOf('[');
-  const end = cleaned.lastIndexOf(']');
-  if (start === -1 || end <= start) return null;
+  for (let start = raw.indexOf('['); start !== -1; start = raw.indexOf('[', start + 1)) {
+    const end = matchingBracket(raw, start);
+    if (end === -1) continue;
 
-  try {
-    const parsed = JSON.parse(cleaned.slice(start, end + 1)) as unknown;
-    if (!Array.isArray(parsed) || parsed.length !== expected) return null;
-    if (!parsed.every((item) => typeof item === 'string')) return null;
-    return parsed as string[];
-  } catch {
-    return null;
+    try {
+      const parsed = JSON.parse(raw.slice(start, end + 1)) as unknown;
+      if (!Array.isArray(parsed) || parsed.length !== expected) continue;
+      if (!parsed.every((item) => typeof item === 'string')) continue;
+      return parsed as string[];
+    } catch {
+      // Не массив, а начало чего-то другого — пробуем следующую скобку.
+    }
   }
+  return null;
+}
+
+/** Индекс «]», закрывающей скобку в позиции open, или -1. Строки и экранирование учитываются. */
+function matchingBracket(text: string, open: number): number {
+  let depth = 0;
+  let inString = false;
+  let escaped = false;
+
+  for (let i = open; i < text.length; i += 1) {
+    const char = text[i];
+
+    if (inString) {
+      if (escaped) escaped = false;
+      else if (char === '\\') escaped = true;
+      else if (char === '"') inString = false;
+      continue;
+    }
+
+    if (char === '"') inString = true;
+    else if (char === '[') depth += 1;
+    else if (char === ']') {
+      depth -= 1;
+      if (depth === 0) return i;
+    }
+  }
+  return -1;
 }
 
 async function translateStrings(
