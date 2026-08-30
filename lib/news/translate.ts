@@ -148,40 +148,51 @@ const SYSTEM_PROMPT = [
 ].join('\n');
 
 /**
- * Ни ядра, ни брокера. Отдельный класс ошибки, потому что реакция на неё
- * другая: повторять попытку бессмысленно, и цикл обязан оборваться сразу.
- * Без этого запрос на непереводимый язык висел минуту, дважды дожидаясь
- * таймаута ядра, прежде чем отдать тот же английский текст.
+ * Провайдер перевода. Их несколько, и порядок важен: сначала собственное
+ * ядро — оно настроено, ничего не стоит, и запрос не уходит на сторону.
  */
-class NoBackendError extends Error {
-  constructor() {
-    super('no translation backend available');
-    this.name = 'NoBackendError';
-  }
+interface Provider {
+  name: string;
+  call: (prompt: string) => Promise<string>;
 }
 
-async function callModel(prompt: string): Promise<string> {
-  // Первый выбор — собственное ядро: оно уже настроено, и запрос не уходит
-  // на сторону. Если демон не поднят (на дроплете это штатная ситуация),
-  // идём напрямую в брокер.
-  try {
-    const { max17Llm } = await import('@/lib/max17-llm');
-    const viaCore = await max17Llm(prompt, { system: SYSTEM_PROMPT, json: true });
-    if (viaCore.trim()) return viaCore;
-  } catch (err) {
-    console.warn('[news/translate] core unavailable, falling back to broker', err);
-  }
+/**
+ * Кто может переводить прямо сейчас.
+ *
+ * Решать, состоялся ли ответ, обязан тот, кто знает ожидаемую форму, — поэтому
+ * разбор поднят на уровень цикла, а провайдер с неразбираемым ответом уступает
+ * следующему. Раньше цепочка обрывалась раньше времени: лёгкое ядро на дроплете
+ * не поднимается и отдаёт заглушку вместо перевода, а заглушка — непустая
+ * строка. Непустой ответ считался успехом, парсер честно отбрасывал мусор, и
+ * читатель получал английский оригинал. Брокер при этом не вызывался ни разу,
+ * хотя ключ был на месте и модель отвечала верно.
+ */
+function providers(): Provider[] {
+  const list: Provider[] = [
+    {
+      name: 'core',
+      call: async (prompt) => {
+        const { max17Llm } = await import('@/lib/max17-llm');
+        return max17Llm(prompt, { system: SYSTEM_PROMPT, json: true });
+      },
+    },
+  ];
 
+  if (process.env.GONKA_API_KEY) list.push({ name: 'broker', call: callBroker });
+  return list;
+}
+
+async function callBroker(prompt: string): Promise<string> {
   const base = (process.env.GONKA_BASE_URL || 'https://proxy.gonkabroker.com/v1').replace(/\/+$/, '');
-  const key = process.env.GONKA_API_KEY;
-  if (!key) throw new NoBackendError();
-
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), TRANSLATE_TIMEOUT_MS);
   try {
     const res = await fetch(`${base}/chat/completions`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${key}` },
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${process.env.GONKA_API_KEY}`,
+      },
       body: JSON.stringify({
         model: process.env.GONKA_MODEL || 'deepseek-ai/DeepSeek-V4-Flash-0731',
         messages: [
@@ -266,6 +277,13 @@ async function translateStrings(
   sourceLanguage: string,
 ): Promise<string[] | null> {
   const result: string[] = [];
+  // Список живёт на всю статью: провайдер, справившийся с первым куском,
+  // переезжает в начало очереди и переводит остальные без лишних проб.
+  let available = providers();
+  if (available.length === 0) {
+    console.warn('[news/translate] no backend configured, serving the original');
+    return null;
+  }
 
   for (let offset = 0; offset < strings.length; offset += CHUNK_SIZE) {
     const chunk = strings.slice(offset, offset + CHUNK_SIZE);
@@ -277,17 +295,28 @@ async function translateStrings(
     ].join('\n');
 
     let translated: string[] | null = null;
-    for (let attempt = 0; attempt < 2 && !translated; attempt += 1) {
-      try {
-        translated = parseStrings(await callModel(prompt), chunk.length);
-      } catch (err) {
-        // Переводить нечем — вторая попытка даст тот же результат, только
-        // через минуту ожидания. Выходим сразу, читатель получит оригинал.
-        if (err instanceof NoBackendError) {
-          console.warn('[news/translate] no backend configured, serving the original');
-          return null;
+    for (const provider of available) {
+      for (let attempt = 0; attempt < 2 && !translated; attempt += 1) {
+        let raw = '';
+        try {
+          raw = await provider.call(prompt);
+        } catch (err) {
+          console.error(`[news/translate] ${provider.name} call failed`, err);
+          continue;
         }
-        console.error('[news/translate] model call failed', err);
+
+        translated = parseStrings(raw, chunk.length);
+        if (!translated) {
+          console.warn(
+            `[news/translate] ${provider.name} returned unusable output (${raw.length} chars): ` +
+              raw.slice(0, 160).replace(/\s+/g, ' '),
+          );
+        }
+      }
+
+      if (translated) {
+        available = [provider, ...available.filter((item) => item !== provider)];
+        break;
       }
     }
     if (!translated) return null;
