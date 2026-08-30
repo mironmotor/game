@@ -67,3 +67,33 @@
     border-radius: 10px;
   }
 }
+
+/* Подпись MAX AGI — переливается всем спектром.
+   Градиент шире блока втрое и едет по нему: анимируется background-position,
+   а не сам градиент, поэтому браузер не пересчитывает заливку каждый кадр.
+   Цвет берётся из текста через background-clip, так что радуга светится
+   ровно по буквам, а не квадратом за ними. */
+@keyframes max-agi-spectrum {
+  0% { background-position: 0% 50%; }
+  100% { background-position: 300% 50%; }
+}
+
+.max-agi-rainbow {
+  background-image: linear-gradient(
+    100deg,
+    #ff2d95, #ff8a00, #ffe600, #45ff8f, #00f2ff, #7b5cff, #ff2d95
+  );
+  background-size: 300% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  -webkit-text-fill-color: transparent;
+  animation: max-agi-spectrum 7s linear infinite;
+  font-weight: 600;
+  letter-spacing: 0.22em;
+}
+
+/* Кому анимация мешает — тот получает статичный градиент, а не мигание. */
+@media (prefers-reduced-motion: reduce) {
+  .max-agi-rainbow { animation: none; }
+}

@@ -16,13 +16,32 @@ const CLOUD_ROLES = [
   { id: 'ultra', label: 'Ультра-оркестратор' },
 ];
 
-function cloudConfig(active = 'gonka-deepseek') {
+function cloudConfig(active = 'claude-opus') {
   const configuredGonkaModel = process.env.GONKA_MODEL?.trim();
   const gonkaModel =
     configuredGonkaModel === 'Qwen/Qwen3-235B-A22B-Instruct-2507-FP8'
       ? DEFAULT_GONKA_MODEL
       : configuredGonkaModel || DEFAULT_GONKA_MODEL;
   const presets = [
+    // Клод первым: на mir.care это ведущая модель ролей «код», «архитектор» и
+    // собственных решений ядра. Без ANTHROPIC_API_KEY пресет просто числится
+    // недоступным, и активным разрешается следующий с ключом.
+    {
+      id: 'claude-opus',
+      label: 'Claude Opus 5 — 1M контекст, ведущая модель',
+      model: 'claude-opus-5',
+      local: false,
+      available: Boolean(process.env.ANTHROPIC_API_KEY),
+      active: active === 'claude-opus',
+    },
+    {
+      id: 'claude-fable',
+      label: 'Claude Fable 5 — самый сильный, 1M контекст (дорого)',
+      model: 'claude-fable-5',
+      local: false,
+      available: Boolean(process.env.ANTHROPIC_API_KEY),
+      active: active === 'claude-fable',
+    },
     {
       id: 'gonka-deepseek',
       label: 'Gonka · DeepSeek-V4-Flash — 400k контекст, облако Vercel',
@@ -131,13 +150,13 @@ export async function POST(request: Request) {
     return NextResponse.json({ ok: false, error: 'Invalid JSON body' }, { status: 400 });
   }
   if (IS_VERCEL) {
-    return NextResponse.json(cloudConfig(id || 'gonka-deepseek'));
+    return NextResponse.json(cloudConfig(id || 'claude-opus'));
   }
   try {
     return NextResponse.json(await runLlmConfig({ action: 'set', id, role }));
   } catch (error) {
     if (String(error).includes('ENOENT') || String(error).includes('spawn python')) {
-      return NextResponse.json(cloudConfig(id || 'gonka-deepseek'));
+      return NextResponse.json(cloudConfig(id || 'claude-opus'));
     }
     return NextResponse.json({ ok: false, error: String(error), presets: [] }, { status: 502 });
   }

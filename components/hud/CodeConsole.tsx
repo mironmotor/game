@@ -129,7 +129,7 @@ export function CodeConsole({
       <div className="flex items-center justify-between border-b border-cyan-300/20 px-3 py-2">
         <div className="flex items-center gap-2 text-[11px] uppercase tracking-[0.2em] text-cyan-100/85">
           <Terminal size={14} />
-          <span>Код · Qwen3</span>
+          <span className="max-agi-rainbow">MAX AGI</span>
         </div>
         <div className="flex items-center gap-1">
           <button

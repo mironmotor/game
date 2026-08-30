@@ -32,10 +32,55 @@ if str(_ROOT) not in sys.path:
 from mark17.gonka_bridge import chat as gonka_chat, is_enabled as gonka_is_enabled
 from mark17.code_memory import CodeMemory, distill as distill_lesson
 
-MAX_STEPS_DEFAULT = 8
-MAX_STEPS_CAP = 16
-READ_LIMIT = 6000
-OBS_LIMIT = 4000
+# Лимиты агента считаются от окна активной модели, а не задаются константой.
+# Пока роль «код» вела модель на 32k, шесть тысяч символов на файл были
+# разумной осторожностью. С Клодом на миллионе токенов та же константа
+# означала бы, что агент читает полтора процента доступного ему контекста и
+# слепнет на большом файле ровно так же, как слепла ollama.
+#
+# Пересчёт грубый и намеренно консервативный: ~3 символа на токен, и лишь
+# доля окна на одну сущность — остальное нужно самому диалогу, истории и
+# ответу. Нижние границы оставлены прежними, чтобы слабым моделям не стало
+# хуже, чем было.
+def _context_budget() -> int:
+    try:
+        from mark17.llm_config import context_window
+
+        return int(context_window("code"))
+    except Exception:
+        return 32_768
+
+
+_CTX = _context_budget()
+
+
+def _answer_tokens() -> int:
+    try:
+        from mark17.llm_config import voice_max_tokens
+
+        return max(4_000, int(voice_max_tokens("code")))
+    except Exception:
+        return 4_000
+
+
+_ANSWER_TOKENS = _answer_tokens()
+_CHARS_PER_TOKEN = 3
+
+#: Сколько символов файла агент видит за одно чтение.
+READ_LIMIT = max(6_000, (_CTX // 20) * _CHARS_PER_TOKEN)
+#: Сколько символов вывода команды попадает в наблюдение.
+OBS_LIMIT = max(4_000, (_CTX // 40) * _CHARS_PER_TOKEN)
+#: Сколько символов одного сообщения истории переживает обрезку.
+HISTORY_MSG_LIMIT = max(2_000, (_CTX // 60) * _CHARS_PER_TOKEN)
+#: Сколько прошлых ходов диалога агент берёт с собой.
+HISTORY_TURNS = 6 if _CTX < 100_000 else 40
+#: Сколько записей каталога показывать в листинге.
+LIST_LIMIT = 200 if _CTX < 100_000 else 2_000
+
+# Шагов ReAct: на большом окне агент может доводить задачу до конца, а не
+# упираться в потолок на середине.
+MAX_STEPS_DEFAULT = 8 if _CTX < 100_000 else 24
+MAX_STEPS_CAP = 16 if _CTX < 100_000 else 60
 CMD_TIMEOUT = 30
 # verify→fix: how many times we bounce a premature "final" back when the agent's
 # last verification command failed. Keeps it from declaring success on red.
@@ -111,7 +156,7 @@ class Workspace:
         if target.is_file():
             return f"{rel} — это файл ({target.stat().st_size} байт)"
         entries = []
-        for child in sorted(target.iterdir())[:200]:
+        for child in sorted(target.iterdir())[:LIST_LIMIT]:
             if child.is_dir():
                 entries.append(f"{child.name}/")
             else:
@@ -262,9 +307,9 @@ def run_agent(request: dict[str, Any]) -> dict[str, Any]:
     ]
     history = request.get("history")
     if isinstance(history, list):
-        for turn in history[-6:]:
+        for turn in history[-HISTORY_TURNS:]:
             if isinstance(turn, dict) and turn.get("role") in {"user", "assistant"} and turn.get("content"):
-                messages.append({"role": str(turn["role"]), "content": str(turn["content"])[:2000]})
+                messages.append({"role": str(turn["role"]), "content": str(turn["content"])[:HISTORY_MSG_LIMIT]})
     user_parts = [f"Задача: {instruction}"]
     if lessons_block:
         user_parts.append(lessons_block)
@@ -279,7 +324,7 @@ def run_agent(request: dict[str, Any]) -> dict[str, Any]:
     fix_attempts = 0                   # times a premature "final" was bounced back
     verify_passed: bool | None = None  # True ok / False failed / None nothing to verify
     for _ in range(max_steps):
-        res = gonka_chat(messages, role="code", max_tokens=4000, temperature=0.2)
+        res = gonka_chat(messages, role="code", max_tokens=_ANSWER_TOKENS, temperature=0.2)
         model = res.model
         if not res.ok or not res.text:
             answer = "Модель не ответила: " + (res.error or res.status)
@@ -303,7 +348,7 @@ def run_agent(request: dict[str, Any]) -> dict[str, Any]:
                         "observation": f"проверка не пройдена (exit={last_exit}); возврат на исправление",
                     }
                 )
-                messages.append({"role": "assistant", "content": res.text[:4000]})
+                messages.append({"role": "assistant", "content": res.text[:HISTORY_MSG_LIMIT]})
                 messages.append(
                     {
                         "role": "user",
@@ -334,7 +379,7 @@ def run_agent(request: dict[str, Any]) -> dict[str, Any]:
             }
         )
         # Feed the loop: assistant's raw action, then the tool observation.
-        messages.append({"role": "assistant", "content": res.text[:4000]})
+        messages.append({"role": "assistant", "content": res.text[:HISTORY_MSG_LIMIT]})
         messages.append({"role": "user", "content": f"Результат ({kind}):\n{observation[:OBS_LIMIT]}\n\nСледующее JSON-действие."})
     else:
         answer = answer or "Достигнут лимит шагов — задача может быть выполнена частично."

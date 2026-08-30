@@ -62,15 +62,18 @@ ROLE_DEFAULTS = {
     # Gemini). Основной теперь DeepSeek-V4-Flash: 400k контекста против 205k у
     # MiniMax, $0.25/млн против $0.30, tools поддерживает. MiniMax остаётся
     # первым в лестнице отката, так что ошибка DeepSeek ничего не гасит.
-    "code": "gonka-deepseek",
-    "architect": "gonka-deepseek",
+    # Клод ведёт роли, где решений мало, а цена ошибки высока: код, архитектура
+    # и собственные решения ядра. Нет ключа — resolve_preset_id молча пропустит
+    # его и вернётся к DeepSeek, поэтому дефолт безопасен даже без Anthropic.
+    "code": "claude-opus",
+    "architect": "claude-opus",
     "desktop": "gonka-deepseek",
     # Bulk graph growth should be cheap. If Ollama is not running, it will fail
     # soft and the deterministic pipeline remains the fallback.
     "bulk": "ollama-0.5b",
     # Ultra decides the core's OWN next action — needs judgment, calls are rare
     # (idle cadence) and tiny, so the smart model is worth it.
-    "ultra": "gonka-deepseek",
+    "ultra": "claude-opus",
 }
 
 # Resilience ladder per role: if the resolved primary backend fails (provider
@@ -81,14 +84,14 @@ ROLE_DEFAULTS = {
 FALLBACK_CHAINS = {
     # Локальные модели (LM Studio :1234, Bonsai :8127) стоят ПЕРЕД Gemini: свой
     # сервер без лимитов лучше, чем 429 на бесплатном тарифе Gemini.
-    "chat": ["gonka-deepseek", "gonka-minimax", "gonka-kimi", "lmstudio-qwen3", "bonsai-27b", "gemini", "groq", "ollama-3b"],
-    "code": ["gonka-deepseek", "gonka-minimax", "gonka-kimi", "lmstudio-qwen3", "bonsai-27b", "gemini", "groq"],
-    "architect": ["gonka-deepseek", "gonka-minimax", "gonka-kimi", "bonsai-27b", "lmstudio-qwen3", "gemini"],
+    "chat": ["claude-opus", "gonka-deepseek", "gonka-minimax", "gonka-kimi", "lmstudio-qwen3", "bonsai-27b", "gemini", "groq", "ollama-3b"],
+    "code": ["claude-opus", "gonka-deepseek", "gonka-minimax", "gonka-kimi", "lmstudio-qwen3", "bonsai-27b", "gemini", "groq"],
+    "architect": ["claude-opus", "gonka-deepseek", "gonka-minimax", "gonka-kimi", "bonsai-27b", "lmstudio-qwen3", "gemini"],
     "desktop": ["gonka-deepseek", "gonka-minimax", "gonka-kimi", "lmstudio-qwen3", "gemini", "groq"],
     # Bulk растит граф пачками: сначала дешёвая локальная мелочь, потом Bonsai
     # (27 млрд параметров без счётчика токенов), и только затем облако.
     "bulk": ["ollama-0.5b", "ollama-3b", "bonsai-27b", "lmstudio-qwen3", "gonka-deepseek", "gemini"],
-    "ultra": ["gonka-deepseek", "gonka-minimax", "gonka-kimi", "lmstudio-qwen3", "bonsai-27b", "gemini"],
+    "ultra": ["claude-opus", "gonka-deepseek", "gonka-minimax", "gonka-kimi", "lmstudio-qwen3", "bonsai-27b", "gemini"],
 }
 
 # id -> preset. `key` = literal API key; `key_env` = env var holding the key.
@@ -160,13 +163,13 @@ PRESETS: dict[str, dict[str, Any]] = {
     # у DeepSeek, поэтому в лестницы отката он НЕ добавлен — только ручной выбор
     # или назначение на роль, где решений мало, а цена ошибки высока.
     "claude-fable": {
-        "label": "Claude Fable 5 — самый сильный, $10/$50 за млн (дорого)",
+        "label": "Claude Fable 5 — 1M контекст, самый сильный, $10/$50 за млн",
         "base": "https://api.anthropic.com/v1",
         "key_env": "ANTHROPIC_API_KEY",
         "model": "claude-fable-5",
     },
     "claude-opus": {
-        "label": "Claude Opus 5 — сильный, $5/$25 за млн",
+        "label": "Claude Opus 5 — 1M контекст, ведущая модель, $5/$25 за млн",
         "base": "https://api.anthropic.com/v1",
         "key_env": "ANTHROPIC_API_KEY",
         "model": "claude-opus-5",
@@ -442,6 +445,41 @@ def resolve_chain(role: str | None = None) -> list[tuple[str, str, str]]:
     return out
 
 
+# Окно контекста модели в токенах. Отсюда агенты берут свои лимиты — сколько
+# читать из файла, сколько истории тащить, сколько вывода команды показывать.
+# Раньше эти числа были константами под самую слабую модель, и Клод с его
+# миллионом токенов работал так же скупо, как ollama на полгигабайта.
+_CONTEXT_WINDOW = {
+    "claude-opus": 1_000_000,
+    "claude-fable": 1_000_000,
+    "gemini": 1_000_000,
+    "gonka-deepseek": 400_000,
+    "gonka-minimax": 205_000,
+    "gonka-kimi": 200_000,
+    "groq": 128_000,
+    "lmstudio-qwen3": 32_768,
+    "ollama-3b": 32_768,
+    "ollama-0.5b": 32_768,
+    "ollama-qwen3": 32_768,
+    "bonsai-27b": 8_192,
+}
+_CONTEXT_DEFAULT = 32_768
+
+
+def context_window(role: str | None = None) -> int:
+    """Окно контекста активной для роли модели, в токенах."""
+    preset_id = resolve_preset_id(role)
+    if preset_id in _CONTEXT_WINDOW:
+        return _CONTEXT_WINDOW[preset_id]
+    env = os.environ.get("MAX17_CONTEXT_WINDOW")
+    if env:
+        try:
+            return max(4_000, min(2_000_000, int(env)))
+        except (TypeError, ValueError):
+            pass
+    return _CONTEXT_DEFAULT
+
+
 # Answer-length cap per backend: small for slow local CPU (snappy), large for
 # fast cloud models (richer). Overrides the MAX17_VOICE_MAX_TOKENS env fallback.
 _VOICE_MAX = {
@@ -450,12 +488,12 @@ _VOICE_MAX = {
     "gemini": 700,
     "groq": 700,
     "bonsai-27b": 220,
-    "claude-fable": 900,
-    "claude-opus": 900,
-    "gonka-deepseek": 900,
+    "claude-fable": 16000,
+    "claude-opus": 16000,
+    "gonka-deepseek": 4000,
     "gonka-qwen3": 800,
-    "gonka-kimi": 800,
-    "gonka-minimax": 800,
+    "gonka-kimi": 4000,
+    "gonka-minimax": 4000,
 }
 
 
@@ -466,7 +504,7 @@ def voice_max_tokens(role: str | None = None) -> int:
     env = os.environ.get("MAX17_VOICE_MAX_TOKENS")
     if env:
         try:
-            return max(64, min(4000, int(env)))
+            return max(64, min(128000, int(env)))
         except (TypeError, ValueError):
             pass
     return 512

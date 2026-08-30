@@ -17,6 +17,7 @@ import { interpretUiCommand, type UiCommand } from './ui-commands';
 import { detectFaces, prewarmFaceApi, type FaceReading } from './face-detect';
 import { useVoiceWake } from './use-voice-wake';
 import { CodeConsole } from './CodeConsole';
+import { CodeTerminal } from './CodeTerminal';
 import { DesktopConsole } from './DesktopConsole';
 import { ArchitectConsole } from './ArchitectConsole';
 import { ModelSwitcher } from './ModelSwitcher';
@@ -373,6 +374,24 @@ function HudContent() {
   const [isLoading, setIsLoading] = useState(false);
   const [handsFree, setHandsFree] = useState(false);
   const [codeOpen, setCodeOpen] = useState(false);
+  /**
+   * Узкий экран. Порог 700px — тот же, что у раскладки HUD в hud.css, а не
+   * Tailwind-овские 640: иначе в промежутке телефон получал бы десктопный
+   * терминал, оставаясь мобильным во всём остальном.
+   *
+   * Стартовое значение false, а не измерение при инициализации: на сервере
+   * ширины нет, и любое «угаданное» значение разошлось бы с разметкой при
+   * гидратации.
+   */
+  const [compactViewport, setCompactViewport] = useState(false);
+
+  useEffect(() => {
+    const query = window.matchMedia('(max-width: 700px)');
+    const sync = () => setCompactViewport(query.matches);
+    sync();
+    query.addEventListener('change', sync);
+    return () => query.removeEventListener('change', sync);
+  }, []);
   const [codeTask, setCodeTask] = useState('');
   const [codeTarget, setCodeTarget] = useState<'sandbox' | 'project'>('sandbox');
   const [desktopOpen, setDesktopOpen] = useState(false);
@@ -2316,9 +2335,16 @@ function HudContent() {
           </div>
         </div>
       )}
-      {codeOpen && (
-        <CodeConsole onClose={() => setCodeOpen(false)} initialTask={codeTask} initialTarget={codeTarget} />
-      )}
+      {codeOpen &&
+        // На телефоне остаётся прежняя консоль: терминал живёт клавиатурой —
+        // историей по стрелкам, автодополнением по Tab, слэш-командами, — а на
+        // экранной клавиатуре всего этого нет, и вместо управления получается
+        // борьба с вводом. Порог тот же, что у остального HUD (hud.css, 700px).
+        (compactViewport ? (
+          <CodeConsole onClose={() => setCodeOpen(false)} initialTask={codeTask} initialTarget={codeTarget} />
+        ) : (
+          <CodeTerminal onClose={() => setCodeOpen(false)} initialTask={codeTask} initialTarget={codeTarget} />
+        ))}
       {desktopOpen && <DesktopConsole onClose={() => setDesktopOpen(false)} initialTask={desktopTask} />}
       {architectOpen && (
         <ArchitectConsole

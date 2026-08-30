@@ -1587,7 +1587,7 @@ def _dispatch_result(event: Event, intent: dict[str, Any]) -> dict[str, Any]:
     instruction = _event_text(event)
     confidence = float(intent.get("confidence") or 0.6)
     text = (
-        "Похоже на задачу для кода — открываю код-режим и передаю её агенту Qwen3."
+        "Похоже на задачу для кода — открываю код-режим и передаю её агенту MAX AGI."
         if route == "code"
         else "Открываю Режим 777 — сочиняю трек с нуля и запускаю. Слушай и смотри визуал."
         if route == "music"
@@ -2741,11 +2741,23 @@ def _gonka_history_block(working_memory: WorkingMemory) -> str:
     except Exception:  # noqa: BLE001
         return ""
     turns = ctx.get("recent_turns") if isinstance(ctx.get("recent_turns"), list) else []
+    # Глубина памяти диалога и длина реплики зависят от окна модели: на
+    # миллионе токенов десять обрезанных до двухсот символов реплик — это не
+    # экономия, а искусственная амнезия.
+    try:
+        from mark17.llm_config import context_window
+
+        window = int(context_window("chat"))
+    except Exception:  # noqa: BLE001
+        window = 32_768
+    depth = 10 if window < 100_000 else 60
+    cap = 200 if window < 100_000 else 2_000
+
     lines: list[str] = []
-    for turn in turns[-10:]:
+    for turn in turns[-depth:]:
         if isinstance(turn, dict) and turn.get("text"):
             who = "Ты" if turn.get("role") == "model" else "Пользователь"
-            lines.append(f"{who}: {str(turn['text'])[:200]}")
+            lines.append(f"{who}: {str(turn['text'])[:cap]}")
     return "\n".join(lines)
 
 
