@@ -73,7 +73,9 @@ export async function POST(request: Request) {
   if (!text) return NextResponse.json({ error: 'empty_text' }, { status: 400 });
   if (text.length > 2500) return NextResponse.json({ error: 'too_long' }, { status: 400 });
 
-  const persona: TtsPersona = body.persona === 'friday' ? 'friday' : 'jarvis';
+  // Голос по умолчанию женский: мужской синтез на русском звучит резко и был
+  // первым, что слышал человек, открывший сайт. Мужской остаётся выбором.
+  const persona: TtsPersona = body.persona === 'jarvis' ? 'jarvis' : 'friday';
   const requestedVoice = parseVoiceReference(typeof body.voiceId === 'string' ? body.voiceId : undefined);
   const input: TtsSynthesisInput = {
     text,

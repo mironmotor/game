@@ -35,7 +35,7 @@ const TEST_LINE: Record<Persona, string> = {
 };
 
 export default function VoicePicker() {
-  const [persona, setPersonaState] = useState<Persona>('jarvis');
+  const [persona, setPersonaState] = useState<Persona>('friday');
   const [voiceId, setVoiceIdState] = useState('');
   const [voices, setVoices] = useState<NeuralVoice[]>([]);
   const [providers, setProviders] = useState<NeuralProvider[]>([]);

@@ -198,23 +198,18 @@ function HudDock({ onOpenAppearance }: { onOpenAppearance?: () => void }) {
         })}
       </div>
       <div className="hud-dock-tools">
-        <button
-          type="button"
-          className="hud-dock-tool"
-          onClick={() => window.dispatchEvent(new CustomEvent('angels:open'))}
-          title={t('dock.council')}
-        >
-          <Sparkles size={13} />
-          <span>{t('dock.council')}</span>
-        </button>
+        {/* Одна кнопка вместо двух. «Совет» открывал пустую панель и ждал
+            вопроса, «Разгон» задавал его сам — на деле нужен был только второй
+            шаг. Теперь кнопка сразу приносит разбор: что добить и что начать
+            дальше, собранный из реально открытых задач. */}
         <button
           type="button"
           className="hud-dock-tool"
           onClick={() => window.dispatchEvent(new CustomEvent('angels:kickoff'))}
-          title={t('dock.kickoff')}
+          title={t('dock.council')}
         >
-          <Zap size={13} />
-          <span>{t('dock.kickoff')}</span>
+          <Sparkles size={13} />
+          <span>{t('dock.council')}</span>
         </button>
         <button
           type="button"

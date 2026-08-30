@@ -3,15 +3,24 @@
  *
  * Not a clone of the film's actor (real person's voice — rights/ethics, and not
  * reproducible offline). It speaks in a calm, low, measured register and lets the
- * user pick whichever installed voice sounds most JARVIS-like on their machine
- * (the auto-pick prefers a Russian male voice like macOS "Yuri" / Windows "Pavel").
+ * user pick whichever installed voice sounds best on their machine (the
+ * auto-pick prefers a Russian female voice like macOS "Milena" — the male
+ * synth reads harsh on Russian; male voices remain in the ladder below it).
  */
 
 import { baseLanguage } from '@/lib/i18n/config';
 import { getActiveLocale } from '@/lib/i18n/runtime';
 
 const NAME_KEY = 'max_voice_name';
-const PREFERRED_MALE = ['yuri', 'pavel', 'dmitri', 'aleksandr', 'artem'];
+/**
+ * Порядок автоподбора русского голоса.
+ *
+ * Женские идут первыми: системный мужской синтез на русском звучит резко и
+ * механически, и именно он встречал человека, открывшего сайт впервые.
+ * Мужские остаются в списке — если женского в системе нет, голос всё равно
+ * найдётся, а явный выбор пользователя (max_voice_name) старше любого из них.
+ */
+const PREFERRED_RU = ['milena', 'katya', 'katja', 'alyona', 'irina', 'yuri', 'pavel', 'dmitri', 'aleksandr', 'artem'];
 
 let cached: SpeechSynthesisVoice | null = null;
 
@@ -36,7 +45,7 @@ function autoPick(locale = getActiveLocale()): SpeechSynthesisVoice | null {
   const matching = allVoices().filter((voice) => baseLanguage(voice.lang) === base);
   if (!matching.length) return allVoices()[0] ?? null;
   if (base === 'ru') {
-    for (const name of PREFERRED_MALE) {
+    for (const name of PREFERRED_RU) {
       const hit = matching.find((voice) => voice.name.toLowerCase().includes(name));
       if (hit) return hit;
     }

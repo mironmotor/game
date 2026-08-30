@@ -29,7 +29,11 @@ export const SCENE_MODES: SceneModeEntry[] = [
 
 const KEY = 'max17_scene_mode';
 const EVENT = 'scene:mode';
-const DEFAULT: SceneMode = 'all';
+// Первый экран — небо, а не «всё сразу». Режим `all` держит два независимых
+// 3D-слоя одновременно: он тяжёлый для телефона и читается как каша из
+// наложенных визуализаций. Солнечная система — 2D-канвас, лёгкая и понятная
+// с первого взгляда; остальные слои человек включает сам, когда захочет.
+const DEFAULT: SceneMode = 'sky';
 
 // Запасной путь для приватного режима, где localStorage бросает исключение.
 let memory: SceneMode | null = null;

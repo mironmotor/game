@@ -72,8 +72,7 @@ const RIGHT_PANEL_MODES: GodModeTile[] = [
 ];
 
 const QUICK_MODES: GodModeTile[] = [
-  { action: 'council', label: 'Совет', detail: 'ангелы MAX', Icon: Sparkles },
-  { action: 'kickoff', label: 'Разгон', detail: 'миссия дня', Icon: Rocket },
+  { action: 'kickoff', label: 'Совет дня', detail: 'что делать дальше', Icon: Sparkles },
   { action: 'sleep', label: 'Сон', detail: 'консолидация', Icon: Moon },
   { action: 'all', label: 'Всё', detail: 'показать окна', Icon: Maximize2 },
   { action: 'reset', label: 'Сброс', detail: 'разложить HUD', Icon: RotateCcw },
