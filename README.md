@@ -4,7 +4,7 @@
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
 [![Next.js 15](https://img.shields.io/badge/Next.js-15-black)](https://nextjs.org)
 [![Python 3.10+](https://img.shields.io/badge/Python-3.10%2B-3776ab)](https://python.org)
-![19 modes](https://img.shields.io/badge/modes-19-ff2fd0)
+![22 modes](https://img.shields.io/badge/modes-22-ff2fd0)
 
 **Talk or play music into your microphone and watch it turn into a living
 world.** Every particle you see is born from a frequency in your voice —
@@ -18,10 +18,11 @@ game engine, and no sign-up.
 
 ![Efir — a 3D world where voice becomes matter](docs/media/efir.gif)
 
-That's one of **19 browser modes** in GAME, all free and all open in one
-click: audio-reactive worlds, chaotic attractors, webcam hand tracking, a
-real SHA-256 proof-of-work visualizer, and a hand-written cognitive core
-called **Max17** that has no ML framework and needs no API key to run.
+That's one of **22 browser modes** in GAME, all free and all open in one
+click: audio-reactive worlds, an autonomous agent that decides what to do to
+its world on its own, chaotic attractors, webcam hand tracking, a real
+SHA-256 proof-of-work visualizer, and a hand-written cognitive core called
+**Max17** that has no ML framework and needs no API key to run.
 
 ### ▶ Try it now
 
@@ -32,6 +33,7 @@ no install, no account. Best three to start with:
 | --- | --- |
 | [`/vision`](https://game-orpin-two-85.vercel.app/vision) | Click **🎙**, then talk or play music — the spectrum blooms into liquid ink |
 | [`/efir`](https://game-orpin-two-85.vercel.app/efir) | Speak and matter is literally created; go quiet and it fades. Drag to orbit |
+| [`/agentmind`](https://game-orpin-two-85.vercel.app/agentmind) | Watch an autonomous agent decide what to do to that world — and show you its reasoning |
 | [`/attractor`](https://game-orpin-two-85.vercel.app/attractor) | Four strange attractors in 3D, tunable live |
 
 Built solo by a creator from Russia, coded over the course of a year.
@@ -62,7 +64,7 @@ Flip it to `false` and the tier system it ships with comes back intact.
 | Doc | Covers |
 | --- | --- |
 | [docs/GETTING_STARTED.md](docs/GETTING_STARTED.md) | Step-by-step local setup, running tests, troubleshooting |
-| [docs/GAME_MODES.md](docs/GAME_MODES.md) | All 19 modes: what each one does, its route, its core files |
+| [docs/GAME_MODES.md](docs/GAME_MODES.md) | All modes: what each one does, its route, its core files |
 | [docs/MAX17_CORE.md](docs/MAX17_CORE.md) | The cognitive core architecture — memory, synapse graph, cognitive-physics metaphors, principles |
 | [docs/VOICE_AND_VISION.md](docs/VOICE_AND_VISION.md) | The voice/audio subsystem: Voice Signature, Quantum Eyes, the Efir 3D world, MAX VISION, and the World Model that lets the core know what's in the 3D world |
 | [docs/API_REFERENCE.md](docs/API_REFERENCE.md) | Every `/api/max17` event type, with request/response examples |
@@ -85,6 +87,15 @@ Flip it to `false` and the tier system it ships with comes back intact.
   literal equation set that throttles how expensive it is for a voice-driven
   3D world to create new matter, computed live from how dense that world
   has become. See [docs/VOICE_AND_VISION.md](docs/VOICE_AND_VISION.md#world-model-the-core-learns-what-its-world-looks-like).
+- **An agent that acts, not just responds.** Everything else waits for an
+  event; the agent at [`/agentmind`](docs/GAME_MODES.md#agent-mind--it-decides-on-its-own-agentmind)
+  runs its own loop once a second — perceive, want, choose, act, check. It
+  picks its action by minimizing Helmholtz free energy `F = E − T·S`, where
+  `T` comes from your vocal arousal and the thickness of the ether, so a
+  single equation covers both exploring and perfecting. It then compares
+  what it promised against where the world actually went and adjusts how much
+  it trusts that action. No LLM call, nothing random, and it remembers what
+  it has learned across restarts. See [`mark17/agent.py`](mark17/agent.py).
 - **No particle cap, by design.** The 3D/audio-reactive modes rasterize
   particles into a pixel buffer instead of issuing one draw call per
   particle, so population is bounded by physics (birth rate vs. lifetime),

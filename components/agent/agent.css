@@ -1,0 +1,133 @@
+/* Автономный агент: панель разума поверх мира «Эфира». */
+
+.ag-panel {
+  width: 268px;
+  max-height: calc(100vh - 150px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 13px 15px;
+  border-radius: 14px;
+  border: 1px solid rgba(0, 242, 255, 0.22);
+  background: rgba(6, 10, 24, 0.86);
+  backdrop-filter: blur(9px);
+  box-shadow: 0 10px 34px rgba(0, 0, 0, 0.5);
+  font-size: 11px;
+  color: #d6ecff;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(0, 242, 255, 0.3) transparent;
+}
+.ag-panel::-webkit-scrollbar { width: 5px; }
+.ag-panel::-webkit-scrollbar-thumb { background: rgba(0, 242, 255, 0.3); border-radius: 3px; }
+
+.ag-head { display: flex; align-items: baseline; gap: 8px; margin-bottom: 10px; }
+.ag-title {
+  font-family: var(--font-hud-display, sans-serif);
+  letter-spacing: 0.18em; font-size: 10px; color: #00f2ff;
+}
+.ag-id { margin-left: auto; font-size: 9px; color: rgba(150, 200, 240, 0.55); }
+.ag-empty { font-size: 10px; line-height: 1.45; color: rgba(150, 200, 240, 0.7); }
+
+/* Текущее действие */
+.ag-act { padding: 9px 10px; border-radius: 10px; border: 1px solid; margin-bottom: 10px; }
+.ag-act-top { display: flex; align-items: baseline; gap: 8px; }
+.ag-act-top b { font-size: 13px; letter-spacing: 0.03em; }
+.ag-trust { margin-left: auto; font-size: 9px; color: rgba(150, 200, 240, 0.6); white-space: nowrap; }
+.ag-act-note { margin-top: 4px; font-size: 10px; line-height: 1.35; color: rgba(200, 228, 255, 0.8); }
+.ag-mood { margin-top: 5px; font-size: 9px; letter-spacing: 0.12em; text-transform: uppercase; opacity: 0.85; }
+
+/* F = E − T·S */
+.ag-thermo {
+  padding: 9px 10px; border-radius: 10px; margin-bottom: 10px;
+  border: 1px solid rgba(0, 242, 255, 0.16); background: rgba(0, 242, 255, 0.05);
+}
+.ag-thermo-law {
+  font-size: 10px; letter-spacing: 0.1em; color: #00f2ff; text-align: center; margin-bottom: 7px;
+}
+.ag-thermo-nums { display: grid; grid-template-columns: repeat(4, 1fr); gap: 4px; }
+.ag-num { text-align: center; }
+.ag-num span { display: block; font-size: 9px; color: rgba(150, 200, 240, 0.55); }
+.ag-num b { font-size: 11px; color: #d6ecff; }
+.ag-num-accent { color: #00f2ff !important; text-shadow: 0 0 10px rgba(0, 242, 255, 0.5); }
+
+.ag-heat-track {
+  margin-top: 9px; height: 5px; border-radius: 3px; overflow: hidden;
+  background: linear-gradient(90deg, rgba(0, 242, 255, 0.14), rgba(255, 47, 208, 0.14));
+}
+.ag-heat-fill {
+  height: 100%; border-radius: 3px; transition: width 0.5s ease;
+  background: linear-gradient(90deg, #00f2ff, #ff2fd0);
+  box-shadow: 0 0 10px rgba(255, 47, 208, 0.45);
+}
+.ag-heat-legend {
+  display: flex; justify-content: space-between; margin-top: 3px;
+  font-size: 8px; letter-spacing: 0.08em; color: rgba(150, 200, 240, 0.45);
+}
+
+/* Блоки */
+.ag-block { margin-bottom: 11px; }
+.ag-block-title {
+  font-size: 9px; letter-spacing: 0.18em; color: rgba(0, 242, 255, 0.75); margin-bottom: 7px;
+}
+
+/* Влечения */
+.ag-drive { margin-bottom: 7px; }
+.ag-drive-head {
+  display: flex; justify-content: space-between; font-size: 9px; margin-bottom: 3px;
+  color: rgba(180, 216, 245, 0.75);
+}
+.ag-hungry { color: #ffb14e; }
+.ag-drive-track {
+  position: relative; height: 6px; border-radius: 4px;
+  background: rgba(255, 255, 255, 0.07); overflow: hidden;
+}
+.ag-drive-fill { height: 100%; border-radius: 4px; transition: width 0.4s ease; }
+/* Уставка: куда агент тянет эту ось. */
+.ag-drive-target {
+  position: absolute; top: -1px; width: 2px; height: 8px;
+  background: rgba(255, 255, 255, 0.75); border-radius: 1px;
+}
+
+/* Альтернативы */
+.ag-alts { display: flex; flex-direction: column; gap: 3px; }
+.ag-alt { display: flex; align-items: center; gap: 6px; font-size: 9px; }
+.ag-alt-name { width: 62px; color: rgba(180, 216, 245, 0.7); white-space: nowrap; }
+.ag-alt.chosen .ag-alt-name { font-weight: 700; }
+.ag-alt-track {
+  flex: 1; height: 5px; border-radius: 3px;
+  background: rgba(255, 255, 255, 0.06); overflow: hidden;
+}
+.ag-alt-fill { display: block; height: 100%; border-radius: 3px; transition: width 0.4s ease; }
+.ag-alt-f { width: 34px; text-align: right; color: rgba(150, 200, 240, 0.55); font-variant-numeric: tabular-nums; }
+
+/* Обучение */
+.ag-learn-row { display: flex; justify-content: space-between; font-size: 10px; }
+.ag-learn-row span { color: rgba(200, 228, 255, 0.8); }
+.ag-up { color: #59ffb2; }
+.ag-down { color: #ff6a8a; }
+.ag-learn-note { margin-top: 3px; font-size: 9px; color: rgba(150, 200, 240, 0.6); }
+
+/* Дневник */
+.ag-journal { display: flex; flex-direction: column; gap: 2px; }
+.ag-journal-row { display: flex; gap: 7px; font-size: 9px; }
+.ag-journal-tick { width: 34px; color: rgba(150, 200, 240, 0.45); font-variant-numeric: tabular-nums; }
+.ag-journal-act { flex: 1; }
+.ag-journal-f { color: rgba(150, 200, 240, 0.55); font-variant-numeric: tabular-nums; }
+
+.ag-say {
+  padding-top: 9px; border-top: 1px solid rgba(0, 242, 255, 0.14);
+  font-size: 10px; line-height: 1.4; color: rgba(190, 224, 250, 0.82);
+}
+
+/* Компактная строка для «Эфира» */
+.ag-line {
+  display: flex; align-items: center; gap: 7px; margin-top: 10px;
+  padding: 6px 9px; border-radius: 999px; border: 1px solid; font-size: 10px;
+}
+.ag-line-dot { width: 6px; height: 6px; border-radius: 50%; flex: none; }
+.ag-line-act { font-weight: 700; }
+.ag-line-mood { margin-left: auto; font-size: 9px; opacity: 0.65; }
+
+@media (max-width: 720px) {
+  .ag-panel { width: 190px; padding: 10px 12px; max-height: calc(100vh - 190px); }
+  .ag-alt-name { width: 48px; }
+}

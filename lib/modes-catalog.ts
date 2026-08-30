@@ -18,6 +18,7 @@ export interface ModeEntry {
 export const MODES: ModeEntry[] = [
   // ── Ядро ───────────────────────────────────────────────────────────────────
   { href: '/agent', label: 'Облик агента', about: 'Собрать персонажа: форма, глаза, аура, характер', color: '#00f2ff', group: 'Ядро' },
+  { href: '/agentmind', label: 'Разум агента', about: 'Сам решает, что сделать с миром: влечения и свободная энергия F = E − T·S', color: '#00d9ff', group: 'Ядро' },
   { href: '/mind', label: 'Самосознание', about: 'Ядро смотрит на себя и отчитывается о состоянии', color: '#9d8bff', group: 'Ядро' },
   { href: '/maxgraph', label: 'Синапс-граф', about: 'Связи, которые Макс успел построить', color: '#4ea8ff', group: 'Ядро' },
   { href: '/brain', label: 'EdgeAI · Нейро-мозг', about: 'Модель прямо в браузере, без сервера', color: '#00ffc8', group: 'Ядро' },

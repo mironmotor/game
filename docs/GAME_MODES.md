@@ -1,9 +1,14 @@
 # Game Modes
 
-GAME ships 19 modes, each its own route. Open the **△∞** floating menu
+GAME ships 22 modes, each its own route. Open the **△∞** floating menu
 (bottom-right on any page) to jump between them, or go straight to a route.
 
 All modes are free and require no sign-in — see [GODMODE](#godmode).
+
+The authoritative list lives in [`lib/modes-catalog.ts`](../lib/modes-catalog.ts),
+which both the △∞ menu and the `/modes` hub read. A few of the most
+recently added modes are in that catalog but do not yet have a write-up
+below.
 
 ## Quick reference
 
@@ -11,6 +16,7 @@ All modes are free and require no sign-in — see [GODMODE](#godmode).
 | --- | --- | --- | --- |
 | `/` | Home HUD | yes (`user_message`, `system_state`, `task_*`) | Missions, XP, and a chat with Max |
 | `/funnel` | Big Idea Funnel | yes (`big_idea`) | Seed words → many raw sparks → one structured idea |
+| `/agentmind` | Agent Mind — It Decides On Its Own | yes (`world_state` → `agent`) | The first autonomous inhabitant: it wants things from the world and acts, unprompted |
 | `/efir` | Efir — Reality from Voice | yes (`voice_state`, `world_state`) | A 3D world where particles are born from your voice |
 | `/vision` | MAX VISION | no (pure client audio viz) | A liquid, TouchDesigner-style visualizer driven by the mic |
 | `/simulation` | Max Simulation | yes (`simulation`) | A particle cloud on a chaotic attractor, steered by a prompt |
@@ -59,6 +65,77 @@ calling OpenRouter/Gemini directly from the browser.
 
 **Files:** `lib/funnel.ts`, `components/funnel/FunnelApp.tsx`,
 `app/funnel/page.tsx`
+
+## Agent Mind — It Decides On Its Own (`/agentmind`)
+
+Everything else in GAME reacts: the browser sends an event, the core answers.
+The Agent is the first thing in the project that **acts without being asked**.
+
+It lives in the `/efir` world (same particles, same physics), and once a
+second it does a full loop of its own:
+
+1. **Perceive.** The world census it already receives — density, symmetry,
+   turnover — plus your vocal tension, collapsed into four numbers.
+2. **Want.** Four drives, each with a setpoint: *care* (wants you calm),
+   *growth* (wants a populated world), *order* (wants structure), *novelty*
+   (wants the world to keep moving).
+3. **Choose.** It scores all seven actions by **Helmholtz free energy**:
+
+   ```
+   F = E − T·S
+   ```
+
+   `E` is how far the world is from what its drives want. `S` is the world's
+   Shannon entropy. `T` is the agent's temperature, taken from your arousal
+   and the thickness of the ether. It picks the action with the lowest `F`.
+
+   That single equation is the whole explore/exploit switch — not two modes
+   with a flag. When you're excited and the ether is thin, `T` is high, the
+   `−T·S` term dominates, and the agent buys disorder: it scatters the world
+   wide. When things settle, `T` collapses and it goes back to perfecting the
+   structure. On roughly a third of all reachable world states, hot and cold
+   agents choose *differently* — this is measured in `test_agent.py`, not
+   asserted.
+
+4. **Act.** The chosen action returns knobs the browser actually applies:
+   emission rate, particle lifetime, spiral tightness, arm count, hue.
+5. **Check.** Next tick it compares what it promised against where the world
+   actually went, and moves its trust in that action up or down. Trust scales
+   the action's claimed effect next time, so an action that lies stops winning.
+
+Nothing here is an LLM call, and nothing is random — the same world state and
+the same memory always produce the same choice.
+
+### On judging direction, not position
+
+The first version scored the agent on whether it predicted the world's next
+*state*. Every action scored 0% accuracy and all trust collapsed to the floor
+within a minute. The reason is structural: your voice moves this world an
+order of magnitude harder than the agent does, so demanding an accurate state
+prediction is demanding it predict *you*.
+
+It now scores the **cosine between what it promised and where the world
+actually moved**. Noise lands near 0.5 ("learned nothing", trust holds still),
+a genuine steer scores above it, and pushing the world the wrong way scores
+below. A world that doesn't move at all is a miss for any action that promised
+movement.
+
+### What the panel shows
+
+Every number on screen is the agent's own: current action and its trust, the
+live `F / E / T / S` readout, the four drives against their setpoints, **all
+seven alternatives with their free energies** (it has to be able to explain
+itself, not just decide), what it learned last tick, and its journal.
+
+The agent is addressed by world — one world, one agent — and it persists in
+SQLite, so it remembers its tick count, its journal, and everything it has
+learned to trust across restarts.
+
+**Files:** `mark17/agent.py`, `mark17/test_agent.py`,
+`components/agent/AgentPanel.tsx`, `app/agentmind/page.tsx`
+
+Not to be confused with `/agent`, which is the character-appearance studio —
+that one is about how the agent *looks*, this one about what it *wants*.
 
 ## Efir — Reality from Voice (`/efir`)
 
