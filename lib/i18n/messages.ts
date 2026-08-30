@@ -111,6 +111,17 @@ const englishMessages = {
     "No payment details have been added yet. To the owner: write the addresses into {file} → {list}.",
   "support.disclaimer":
     "Check the address and the network before you send — a crypto transfer is irreversible, and one wrong character or the wrong network means the money is lost. Support is voluntary, it is not a payment for services and it unlocks no extra features.",
+  "news.section": "Newsroom",
+  "news.tagline": "Verifiable data on what is happening to the planet",
+  "news.correspondent": "correspondent",
+  "news.sources": "Sources",
+  "news.machineTranslated": "Machine translation",
+  "news.machineTranslatedNote": "Translated by the MAX core and not proofread by a human. The original is in {language}.",
+  "news.backToFeed": "All stories",
+  "news.translating": "Translating…",
+  "news.empty": "Nothing published yet",
+  "news.readingTime": "{minutes} min read",
+  "news.updated": "Updated",
   "ai.replyLanguageInstruction":
     "Reply in the user interface language: {language}. If the latest user message is clearly in another language, reply in that language instead.",
 } as const;
@@ -125,7 +136,7 @@ export type MessageParams = Record<string, string | number>;
  * переводов, и её просто не добавляли. Всё, что уже переведено везде, остаётся
  * обязательным: иначе ключ молча выпадет из четырнадцати языков.
  */
-type FallbackKey = Extract<MessageKey, `support.${string}`>;
+type FallbackKey = Extract<MessageKey, `support.${string}` | `news.${string}`>;
 
 type Catalog = Record<Exclude<MessageKey, FallbackKey>, string> &
   Partial<Record<FallbackKey, string>>;
@@ -243,6 +254,17 @@ const ru: Catalog = {
     "Реквизиты пока не добавлены. Владельцу: вписать адреса в {file} → {list}.",
   "support.disclaimer":
     "Перед отправкой сверь адрес и сеть — перевод в криптовалюте необратим, ошибка в одном символе или не та сеть означают потерю средств. Поддержка добровольная, это не оплата услуг и не даёт дополнительных функций.",
+  "news.section": "Новости",
+  "news.tagline": "Проверяемые данные о том, что происходит с планетой",
+  "news.correspondent": "корреспондент",
+  "news.sources": "Источники",
+  "news.machineTranslated": "Машинный перевод",
+  "news.machineTranslatedNote": "Переведено ядром MAX без вычитки человеком. Оригинал — {language}.",
+  "news.backToFeed": "Все материалы",
+  "news.translating": "Переводим…",
+  "news.empty": "Пока ничего не опубликовано",
+  "news.readingTime": "{minutes} мин чтения",
+  "news.updated": "Обновлено",
   "ai.replyLanguageInstruction":
     "Отвечай на языке интерфейса пользователя: {language}. Если последнее сообщение пользователя явно написано на другом языке, отвечай на языке этого сообщения.",
 };
@@ -340,6 +362,17 @@ const es: Catalog = {
   "angel.product": "Producto",
   "angel.growth": "Crecimiento",
   "angel.guardian": "Guardián",
+  "news.section": "Noticias",
+  "news.tagline": "Datos verificables sobre lo que le ocurre al planeta",
+  "news.correspondent": "corresponsal",
+  "news.sources": "Fuentes",
+  "news.machineTranslated": "Traducción automática",
+  "news.machineTranslatedNote": "Traducido por el núcleo MAX, sin revisión humana. El original está en {language}.",
+  "news.backToFeed": "Todos los artículos",
+  "news.translating": "Traduciendo…",
+  "news.empty": "Aún no hay publicaciones",
+  "news.readingTime": "{minutes} min de lectura",
+  "news.updated": "Actualizado",
   "ai.replyLanguageInstruction":
     "Responde en el idioma de la interfaz del usuario: {language}. Si el último mensaje del usuario está claramente en otro idioma, responde en ese idioma.",
 };
@@ -437,6 +470,17 @@ const pt: Catalog = {
   "angel.product": "Produto",
   "angel.growth": "Crescimento",
   "angel.guardian": "Guardião",
+  "news.section": "Notícias",
+  "news.tagline": "Dados verificáveis sobre o que está acontecendo com o planeta",
+  "news.correspondent": "correspondente",
+  "news.sources": "Fontes",
+  "news.machineTranslated": "Tradução automática",
+  "news.machineTranslatedNote": "Traduzido pelo núcleo MAX, sem revisão humana. O original está em {language}.",
+  "news.backToFeed": "Todas as matérias",
+  "news.translating": "Traduzindo…",
+  "news.empty": "Ainda não há publicações",
+  "news.readingTime": "{minutes} min de leitura",
+  "news.updated": "Atualizado",
   "ai.replyLanguageInstruction":
     "Responda no idioma da interface do usuário: {language}. Se a última mensagem do usuário estiver claramente em outro idioma, responda nesse idioma.",
 };
@@ -534,6 +578,17 @@ const fr: Catalog = {
   "angel.product": "Produit",
   "angel.growth": "Croissance",
   "angel.guardian": "Gardien",
+  "news.section": "Actualités",
+  "news.tagline": "Des données vérifiables sur ce qui arrive à la planète",
+  "news.correspondent": "correspondant",
+  "news.sources": "Sources",
+  "news.machineTranslated": "Traduction automatique",
+  "news.machineTranslatedNote": "Traduit par le noyau MAX, sans relecture humaine. L'original est en {language}.",
+  "news.backToFeed": "Tous les articles",
+  "news.translating": "Traduction en cours…",
+  "news.empty": "Rien n'a encore été publié",
+  "news.readingTime": "{minutes} min de lecture",
+  "news.updated": "Mis à jour",
   "ai.replyLanguageInstruction":
     "Réponds dans la langue de l’interface utilisateur : {language}. Si le dernier message de l’utilisateur est clairement dans une autre langue, réponds dans cette langue.",
 };
@@ -631,6 +686,17 @@ const de: Catalog = {
   "angel.product": "Produkt",
   "angel.growth": "Wachstum",
   "angel.guardian": "Wächter",
+  "news.section": "Nachrichten",
+  "news.tagline": "Überprüfbare Daten darüber, was mit dem Planeten geschieht",
+  "news.correspondent": "Korrespondent",
+  "news.sources": "Quellen",
+  "news.machineTranslated": "Maschinelle Übersetzung",
+  "news.machineTranslatedNote": "Übersetzt vom MAX-Kern, ohne menschliche Korrektur. Das Original ist auf {language}.",
+  "news.backToFeed": "Alle Beiträge",
+  "news.translating": "Wird übersetzt…",
+  "news.empty": "Noch nichts veröffentlicht",
+  "news.readingTime": "{minutes} Min. Lesezeit",
+  "news.updated": "Aktualisiert",
   "ai.replyLanguageInstruction":
     "Antworte in der Sprache der Benutzeroberfläche: {language}. Wenn die letzte Nachricht des Benutzers eindeutig in einer anderen Sprache verfasst ist, antworte stattdessen in dieser Sprache.",
 };
@@ -728,6 +794,17 @@ const ar: Catalog = {
   "angel.product": "المنتج",
   "angel.growth": "النمو",
   "angel.guardian": "الحارس",
+  "news.section": "الأخبار",
+  "news.tagline": "بيانات يمكن التحقق منها عمّا يحدث للكوكب",
+  "news.correspondent": "مراسل",
+  "news.sources": "المصادر",
+  "news.machineTranslated": "ترجمة آلية",
+  "news.machineTranslatedNote": "تُرجم بواسطة نواة MAX دون مراجعة بشرية. النص الأصلي بلغة {language}.",
+  "news.backToFeed": "كل المواد",
+  "news.translating": "جارٍ الترجمة…",
+  "news.empty": "لم يُنشر شيء بعد",
+  "news.readingTime": "{minutes} دقيقة قراءة",
+  "news.updated": "حُدِّث",
   "ai.replyLanguageInstruction":
     "أجب بلغة واجهة المستخدم: {language}. إذا كانت أحدث رسالة للمستخدم مكتوبة بوضوح بلغة أخرى، فأجب بتلك اللغة بدلًا منها.",
 };
@@ -825,6 +902,17 @@ const hi: Catalog = {
   "angel.product": "उत्पाद",
   "angel.growth": "विकास",
   "angel.guardian": "संरक्षक",
+  "news.section": "समाचार",
+  "news.tagline": "ग्रह के साथ क्या हो रहा है, इसका सत्यापन योग्य डेटा",
+  "news.correspondent": "संवाददाता",
+  "news.sources": "स्रोत",
+  "news.machineTranslated": "मशीनी अनुवाद",
+  "news.machineTranslatedNote": "MAX कोर द्वारा अनूदित, मानव द्वारा जाँचा नहीं गया। मूल {language} में है।",
+  "news.backToFeed": "सभी सामग्री",
+  "news.translating": "अनुवाद हो रहा है…",
+  "news.empty": "अभी कुछ प्रकाशित नहीं हुआ",
+  "news.readingTime": "{minutes} मिनट पढ़ें",
+  "news.updated": "अद्यतन",
   "ai.replyLanguageInstruction":
     "उपयोगकर्ता इंटरफ़ेस की भाषा में जवाब दें: {language}। यदि उपयोगकर्ता का नवीनतम संदेश स्पष्ट रूप से किसी दूसरी भाषा में है, तो उसी भाषा में जवाब दें।",
 };
@@ -922,6 +1010,17 @@ const zh: Catalog = {
   "angel.product": "产品",
   "angel.growth": "增长",
   "angel.guardian": "守护者",
+  "news.section": "新闻",
+  "news.tagline": "关于地球正在发生什么的可核查数据",
+  "news.correspondent": "记者",
+  "news.sources": "来源",
+  "news.machineTranslated": "机器翻译",
+  "news.machineTranslatedNote": "由 MAX 内核翻译，未经人工校对。原文语言为{language}。",
+  "news.backToFeed": "全部报道",
+  "news.translating": "翻译中…",
+  "news.empty": "尚未发布内容",
+  "news.readingTime": "阅读约 {minutes} 分钟",
+  "news.updated": "已更新",
   "ai.replyLanguageInstruction":
     "请使用用户界面的语言回答：{language}。如果用户的最新消息明显使用了另一种语言，则改用该语言回答。",
 };
@@ -1019,6 +1118,17 @@ const ja: Catalog = {
   "angel.product": "プロダクト",
   "angel.growth": "成長",
   "angel.guardian": "ガーディアン",
+  "news.section": "ニュース",
+  "news.tagline": "地球に起きていることの検証可能なデータ",
+  "news.correspondent": "記者",
+  "news.sources": "出典",
+  "news.machineTranslated": "機械翻訳",
+  "news.machineTranslatedNote": "MAX コアによる翻訳で、人による校正は行われていません。原文は{language}です。",
+  "news.backToFeed": "すべての記事",
+  "news.translating": "翻訳中…",
+  "news.empty": "まだ何も公開されていません",
+  "news.readingTime": "読了 {minutes} 分",
+  "news.updated": "更新",
   "ai.replyLanguageInstruction":
     "ユーザーインターフェースの言語（{language}）で回答してください。直近のユーザーメッセージが明らかに別の言語で書かれている場合は、その言語で回答してください。",
 };
@@ -1116,6 +1226,17 @@ const ko: Catalog = {
   "angel.product": "제품",
   "angel.growth": "성장",
   "angel.guardian": "수호자",
+  "news.section": "뉴스",
+  "news.tagline": "지구에 일어나는 일에 대한 검증 가능한 데이터",
+  "news.correspondent": "특파원",
+  "news.sources": "출처",
+  "news.machineTranslated": "기계 번역",
+  "news.machineTranslatedNote": "MAX 코어가 번역했으며 사람이 교정하지 않았습니다. 원문은 {language}입니다.",
+  "news.backToFeed": "전체 기사",
+  "news.translating": "번역 중…",
+  "news.empty": "아직 게시된 글이 없습니다",
+  "news.readingTime": "읽는 데 {minutes}분",
+  "news.updated": "업데이트됨",
   "ai.replyLanguageInstruction":
     "사용자 인터페이스 언어인 {language}(으)로 답변하세요. 사용자의 최신 메시지가 명백히 다른 언어로 작성되었다면 그 언어로 답변하세요.",
 };
@@ -1213,6 +1334,17 @@ const id: Catalog = {
   "angel.product": "Produk",
   "angel.growth": "Pertumbuhan",
   "angel.guardian": "Penjaga",
+  "news.section": "Berita",
+  "news.tagline": "Data yang dapat diverifikasi tentang apa yang terjadi pada planet ini",
+  "news.correspondent": "koresponden",
+  "news.sources": "Sumber",
+  "news.machineTranslated": "Terjemahan mesin",
+  "news.machineTranslatedNote": "Diterjemahkan oleh inti MAX, tanpa penyuntingan manusia. Teks asli dalam bahasa {language}.",
+  "news.backToFeed": "Semua artikel",
+  "news.translating": "Menerjemahkan…",
+  "news.empty": "Belum ada yang diterbitkan",
+  "news.readingTime": "Baca {minutes} menit",
+  "news.updated": "Diperbarui",
   "ai.replyLanguageInstruction":
     "Jawab dalam bahasa antarmuka pengguna: {language}. Jika pesan terbaru pengguna jelas menggunakan bahasa lain, jawablah dalam bahasa tersebut.",
 };
@@ -1310,6 +1442,17 @@ const tr: Catalog = {
   "angel.product": "Ürün",
   "angel.growth": "Büyüme",
   "angel.guardian": "Muhafız",
+  "news.section": "Haberler",
+  "news.tagline": "Gezegende olup bitenlere dair doğrulanabilir veriler",
+  "news.correspondent": "muhabir",
+  "news.sources": "Kaynaklar",
+  "news.machineTranslated": "Makine çevirisi",
+  "news.machineTranslatedNote": "MAX çekirdeği tarafından çevrildi, insan editör okuması yapılmadı. Özgün metin {language} dilinde.",
+  "news.backToFeed": "Tüm haberler",
+  "news.translating": "Çevriliyor…",
+  "news.empty": "Henüz bir şey yayımlanmadı",
+  "news.readingTime": "{minutes} dk okuma",
+  "news.updated": "Güncellendi",
   "ai.replyLanguageInstruction":
     "Kullanıcı arayüzünün dilinde yanıt ver: {language}. Kullanıcının son mesajı açıkça başka bir dildeyse bunun yerine o dilde yanıt ver.",
 };
@@ -1407,6 +1550,17 @@ const uk: Catalog = {
   "angel.product": "Продукт",
   "angel.growth": "Зростання",
   "angel.guardian": "Охоронець",
+  "news.section": "Новини",
+  "news.tagline": "Перевірювані дані про те, що відбувається з планетою",
+  "news.correspondent": "кореспондент",
+  "news.sources": "Джерела",
+  "news.machineTranslated": "Машинний переклад",
+  "news.machineTranslatedNote": "Перекладено ядром MAX без вичитування людиною. Оригінал — {language}.",
+  "news.backToFeed": "Усі матеріали",
+  "news.translating": "Перекладаємо…",
+  "news.empty": "Поки нічого не опубліковано",
+  "news.readingTime": "{minutes} хв читання",
+  "news.updated": "Оновлено",
   "ai.replyLanguageInstruction":
     "Відповідай мовою інтерфейсу користувача: {language}. Якщо останнє повідомлення користувача явно написане іншою мовою, відповідай цією мовою.",
 };
@@ -1504,6 +1658,17 @@ const pl: Catalog = {
   "angel.product": "Produkt",
   "angel.growth": "Wzrost",
   "angel.guardian": "Strażnik",
+  "news.section": "Wiadomości",
+  "news.tagline": "Weryfikowalne dane o tym, co dzieje się z planetą",
+  "news.correspondent": "korespondent",
+  "news.sources": "Źródła",
+  "news.machineTranslated": "Tłumaczenie maszynowe",
+  "news.machineTranslatedNote": "Przetłumaczone przez rdzeń MAX, bez korekty człowieka. Oryginał w języku {language}.",
+  "news.backToFeed": "Wszystkie materiały",
+  "news.translating": "Tłumaczenie…",
+  "news.empty": "Nic jeszcze nie opublikowano",
+  "news.readingTime": "{minutes} min czytania",
+  "news.updated": "Zaktualizowano",
   "ai.replyLanguageInstruction":
     "Odpowiadaj w języku interfejsu użytkownika: {language}. Jeśli ostatnia wiadomość użytkownika jest wyraźnie napisana w innym języku, odpowiedz w tym języku.",
 };
