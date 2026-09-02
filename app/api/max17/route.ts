@@ -272,8 +272,12 @@ async function proxyToRemoteBridge(event: unknown): Promise<Record<string, unkno
   const bridgePath =
     process.env.MAX17_BRIDGE_PATH || (process.env.MAX17_REMOTE_BRIDGE_URL ? '/api/max17' : '/event');
   const controller = new AbortController();
+  // Мост ждёт чуть дольше, чем ядро ждёт провайдера (MAX17_LLM_TIMEOUT_SEC,
+  // по умолчанию 20 с), — чтобы обрыв случался на стороне ядра, с осмысленным
+  // фолбэком, а не здесь голым таймаутом. Потолок оставлен прежним на случай
+  // явно долгих операций вроде сна-консолидации.
   const timeoutMs = Math.min(
-    Number(process.env.MAX17_REMOTE_BRIDGE_TIMEOUT_MS || process.env.MAX17_BRIDGE_TIMEOUT_MS || 55000),
+    Number(process.env.MAX17_REMOTE_BRIDGE_TIMEOUT_MS || process.env.MAX17_BRIDGE_TIMEOUT_MS || 28000),
     55000,
   );
   const timeout = setTimeout(() => controller.abort(), timeoutMs);

@@ -15,7 +15,28 @@ from .max_prompt import system_prompt
 # MBA 2015 ~8GB RAM: qwen2.5:0.5b (~400MB). phi3:mini ~2.3GB — если хватает памяти.
 DEFAULT_MODEL = "qwen2.5:0.5b"
 DEFAULT_HOST = "http://127.0.0.1:11434"
-TIMEOUT_SEC = 45
+
+# Сколько ждать провайдера. Было 45 секунд — столько человек и стоял перед
+# пустым экраном, если провайдер тупил: детерминированный ответ ядра готов за
+# миллисекунды, но выдавался только после того, как ожидание сети закончится.
+# 20 секунд хватает любому нормальному ответу; всё, что дольше, — это уже не
+# «медленно», а «не приехало», и честнее отдать ответ ядра.
+TIMEOUT_SEC = max(3, int(os.environ.get("MAX17_LLM_TIMEOUT_SEC", "20") or 20))
+
+# Порядок выбора модели на OpenRouter. Раньше здесь стояла одна бесплатная
+# gemini-flash: быстрая и болтливая, но она проваливает ровно то, ради чего
+# LLM тут вообще нужен — держать инструкцию на несколько шагов, не терять
+# формат и не выдумывать вызовы. Список отсортирован по агентности, а не по
+# цене и не по скорости: первый пункт — то, чем Макс думает по умолчанию,
+# остальные идут запасными, если первый недоступен.
+#
+# MAX17_LLM_MODEL по-прежнему главнее всего списка.
+OPENROUTER_AGENTIC = (
+    "anthropic/claude-sonnet-4.5",
+    "openai/gpt-5-mini",
+    "google/gemini-2.5-flash",
+    "google/gemini-2.0-flash-exp:free",
+)
 
 
 @dataclass
@@ -62,7 +83,7 @@ class LlmBridge:
         if env_model:
             self.model = env_model
         elif self.provider == "openrouter":
-            self.model = "google/gemini-2.0-flash-exp:free"
+            self.model = OPENROUTER_AGENTIC[0]
         elif self.provider == "minimax":
             self.model = os.environ.get("MINIMAX_MODEL", "").strip() or "MiniMax-M2"
 
