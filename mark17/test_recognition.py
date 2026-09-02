@@ -152,12 +152,32 @@ def test_plan_answer() -> None:
         check("есть проверка реальностью", len(money["text"].splitlines()) >= 3)
         check("это не отчёт о маршруте", "Уверенность" not in money["text"])
 
-    body = _plan_answer("хочу начать бегать по утрам", 0.5)
-    check("тело тоже распознаётся", body is not None and body.get("domain") == "body")
+    # Каждая область отвечает своим, а не одним шаблоном на всё. Раньше план на
+    # «поднять доход» и на «начать бегать» совпадал дословно.
+    by_domain = {
+        "body": _plan_answer("хочу начать бегать по утрам", 0.5),
+        "learn": _plan_answer("хочу выучить английский", 0.5),
+        "build": _plan_answer("надо запустить лендинг", 0.5),
+        "people": _plan_answer("нужно нанять человека в команду", 0.5),
+    }
+    for want, got in by_domain.items():
+        check(f"область «{want}» распознана",
+              got is not None and got.get("domain") == want,
+              str(got.get("domain") if got else None))
+
+    texts = [a["text"] for a in [money, *by_domain.values()] if a]
+    check("планы разных областей не совпадают", len(set(texts)) == len(texts))
+    check("в плане про деньги есть деньги",
+          money is not None and any(w in money["text"].lower() for w in ("сумм", "цен", "трат")))
+    check("в плане про тело есть тело",
+          by_domain["body"] is not None
+          and any(w in by_domain["body"]["text"].lower() for w in ("форм", "будильник", "вес")))
 
     # Молчание — часть ответа: делать вид, что понял, ядро не должно.
     check("на неопознанное план не выдаётся",
-          _plan_answer("что почитать по маркетингу", 0.5) is None)
+          _plan_answer("расскажи анекдот про физиков", 0.5) is None)
+    check("на погоду план не выдаётся",
+          _plan_answer("какая завтра погода в москве", 0.5) is None)
     check("на короткую реплику план не выдаётся", _plan_answer("ок", 0.5) is None)
 
 

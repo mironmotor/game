@@ -578,13 +578,20 @@ def _plan_answer(user_text: str, confidence: float) -> dict[str, Any] | None:
         return None
 
     steps = "\n".join(
-        f"{i}. {t['desc']} ({t.get('mgr', 'MGR-1')}, {t.get('scheduledTime', '')})".rstrip(" ,")
-        for i, t in enumerate(tasks[:4], 1)
+        f"{i}. {t['desc']}" for i, t in enumerate(tasks[:5], 1)
     )
     check = next((t.get("reality_check") for t in tasks if t.get("reality_check")), "")
 
+    # Порядок шагов выбран интегралом по траекториям, а не «сначала важное»:
+    # первым идёт самый дешёвый старт, потому что дороже всего именно начать.
+    # Без этой строчки ответ открывался мелкой логистикой и выглядел так, будто
+    # ядро не поняло, о чём его спросили.
+    breakthrough = next((t["desc"] for t in tasks if t.get("mgr") == "MGR-3"), "")
+    head = f"Главное здесь — {breakthrough[0].lower() + breakthrough[1:]}." if breakthrough else ""
+
     text = (
-        f"Разбираю это как цель. Первый шаг: {plan.get('first_move', '—')}.\n\n"
+        f"{head}\n"
+        f"Порядок ниже — от самого дешёвого старта: начать всегда дороже всего.\n\n"
         f"{steps}\n\n"
         f"{check}"
     ).strip()
