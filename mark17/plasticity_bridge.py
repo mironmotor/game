@@ -30,6 +30,9 @@ class PatternEntry:
     # Нормализованная тема реплики. Нужна, чтобы узнать уже виденный вопрос,
     # заданный другими словами; для остальных типов событий пустая.
     topic: str = ""
+    # Когда тему поднимали в последний раз. Нужна, чтобы на «что дальше»
+    # отвечать по недавнему разговору, а не по самому частому за всю историю.
+    last_seen: float = 0.0
 
     @property
     def confidence(self) -> float:
@@ -83,6 +86,7 @@ class PlasticityBridge:
                 last_activation=v.get("last_activation", 0.0),
                 last_action=v.get("last_action", ""),
                 topic=v.get("topic", ""),
+                last_seen=v.get("last_seen", 0.0),
             )
             for k, v in raw.items()
         }
@@ -98,6 +102,7 @@ class PlasticityBridge:
                         "last_activation": e.last_activation,
                         "last_action": e.last_action,
                         "topic": e.topic,
+                        "last_seen": e.last_seen,
                     }
                     for k, e in self.pattern_cache.items()
                 },
@@ -134,6 +139,30 @@ class PlasticityBridge:
 
         h = hashlib.sha256(event.signature().encode()).hexdigest()[:12]
         return f"{event.type}:{h}"
+
+    def hot_topic(self, *, exclude: str = "") -> dict[str, Any] | None:
+        """Тема, к которой человек возвращается сейчас.
+
+        Это ответ на «что дальше» — вопрос, на который ядро до сих пор отвечало
+        описанием собственных возможностей, хотя знало ответ: вот тема, к
+        которой ты возвращаешься чаще всего в последнее время.
+
+        Выбор по свежести, а не по общему числу упоминаний: тема, которую
+        обсуждали двадцать раз в марте, к «что дальше» сегодня отношения не
+        имеет. Из одинаково свежих побеждает та, к которой возвращались чаще.
+        """
+        best: tuple[float, int, str] | None = None
+        for pid, entry in self.pattern_cache.items():
+            if not pid.startswith("user_message:") or not entry.topic:
+                continue
+            if exclude and entry.topic == exclude:
+                continue
+            key = (entry.last_seen, entry.hits, entry.topic)
+            if best is None or key > best:
+                best = key
+        if best is None:
+            return None
+        return {"topic": best[2], "hits": best[1], "last_seen": best[0]}
 
     def encode_event(self, event: Event) -> np.ndarray:
         x = np.zeros(self.network.num_inputs, dtype=np.float32)
@@ -205,6 +234,8 @@ class PlasticityBridge:
         entry.hits += 1
         entry.last_activation = max(entry.last_activation, result.hidden_activation)
         entry.last_action = action
+        if event.type == "user_message":
+            entry.last_seen = event.ts
         if event.type == "user_message" and not entry.topic:
             # Тема пишется один раз, при рождении паттерна. Переписывать её на
             # каждом попадании нельзя: тема поплывёт вслед за формулировками и

@@ -21,7 +21,7 @@ if str(_ROOT) not in sys.path:
     sys.path.insert(0, str(_ROOT))
 
 from mark17.cli_format import emit
-from mark17.events import Event, parse_event_line, parse_shorthand
+from mark17.events import Event, topic_key, parse_event_line, parse_shorthand
 from mark17.hippocampus import Hippocampus
 from mark17.llm_bridge import LlmBridge
 from mark17.meta_controller import MetaController, Route
@@ -121,6 +121,13 @@ class Mark17Brain:
             "learned": pl.learned,
             "snn": pl.snn,
         }
+        # Тема, к которой человек возвращается сейчас. Нужна, чтобы на «что
+        # дальше» ответить по делу, а не описанием своих возможностей. Свою же
+        # тему исключаем: на конкретный вопрос отвечать «ты часто про это
+        # спрашиваешь» — не ответ.
+        hot = self.plasticity.hot_topic(exclude=topic_key(event.payload.get("text", "")))
+        if hot:
+            out["plasticity"]["hot_topic"] = hot
 
         if event.type in STORE_TYPES:
             self.memory.remember(event, hint=pl.hint, action=pl.action)

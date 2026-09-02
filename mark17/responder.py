@@ -538,6 +538,45 @@ def _debug_answer(result: dict[str, Any], self_evaluation: dict[str, Any] | None
     }
 
 
+def _hot_topic_answer(result: dict[str, Any], confidence: float) -> dict[str, Any] | None:
+    """Ответ на «что дальше» — по теме, к которой человек возвращается.
+
+    Это самый частый вопрос в HUD, и до сих пор ядро отвечало на него
+    перечислением собственных возможностей: «могу принять сообщение, вспомнить
+    релевантную память, обновить ассоциации». Между тем ответ у него был —
+    тема, о которой шёл разговор, и первый шаг по ней.
+
+    Восстанавливать точную формулировку из ключа темы нельзя: там основы слов,
+    а не фраза. Поэтому план строится прямо по ним — планировщику для узнавания
+    области хватает и основ.
+    """
+    plasticity = result.get("plasticity")
+    if not isinstance(plasticity, dict):
+        return None
+    hot = plasticity.get("hot_topic")
+    if not isinstance(hot, dict):
+        return None
+
+    topic = str(hot.get("topic") or "").strip()
+    hits = int(hot.get("hits") or 0)
+    if not topic or hits < 2:
+        return None
+
+    plan = _plan_answer(topic, confidence)
+    if not plan:
+        return None
+
+    return {
+        "text": (
+            f"Незакрытым остаётся то, о чём мы говорили {hits} раза подряд.\n\n"
+            f"{plan['text']}"
+        ),
+        "source": "composer_hot_topic",
+        "confidence": round(max(confidence, 0.6), 4),
+        "domain": plan.get("domain"),
+    }
+
+
 def _vague_status_answer(confidence: float) -> dict[str, Any]:
     return {
         "text": (
@@ -725,7 +764,10 @@ def compose_answer(
         return _memory_question_answer(event, response)
 
     if _is_vague_input(user_text):
-        return _vague_status_answer(confidence)
+        # «Ок», «что дальше» — не пустая реплика, а вопрос про незакрытое.
+        # Ответ у ядра есть, если разговор уже шёл о чём-то конкретном.
+        hot = _hot_topic_answer(response, confidence)
+        return hot or _vague_status_answer(confidence)
 
     # Сначала пробуем ответить по существу своими силами. Получилось — за
     # содержанием не нужно идти в сеть вообще.

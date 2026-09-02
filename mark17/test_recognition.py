@@ -21,7 +21,7 @@ if str(_ROOT) not in sys.path:
 from mark17.events import Event, topic_key
 from mark17.llm_bridge import CACHE_TTL_SEC, LlmBridge
 from mark17.plasticity_bridge import TOPIC_MATCH, PlasticityBridge
-from mark17.responder import _is_echo, _plan_answer, _recall_note
+from mark17.responder import _hot_topic_answer, _is_echo, _plan_answer, _recall_note
 
 _FAILURES: list[str] = []
 
@@ -200,6 +200,56 @@ def test_recall_note() -> None:
     check("без plasticity не роняет", _recall_note({}, q) == "")
 
 
+def test_hot_topic(tmp: Path) -> None:
+    print("\n-- «что дальше» отвечает по незакрытой теме --")
+    bridge = PlasticityBridge(tmp)
+    check("пока разговора не было — темы нет", bridge.hot_topic() is None)
+
+    bridge.process(_msg("как поднять доход"))
+    bridge.process(_msg("хочу поднять доходы"))
+    hot = bridge.hot_topic()
+    check("тема нашлась", hot is not None)
+    check("считает заходы", hot and hot["hits"] == 2, str(hot))
+
+    # Свою же тему исключаем: на конкретный вопрос отвечать «ты часто про это
+    # спрашиваешь» — не ответ.
+    check("своя тема исключается",
+          bridge.hot_topic(exclude=hot["topic"]) is None if hot else False)
+
+    # Свежесть важнее общего числа: тема, которую обсуждали больше, но давно,
+    # к «что дальше» сегодня отношения не имеет. Метки времени задаём все явно —
+    # смешивать их с time.time() нельзя, иначе «давняя» тема окажется свежее
+    # любой заданной вручную.
+    aged = PlasticityBridge(tmp / "aged")
+    now = time.time()
+    for i in range(4):
+        aged.process(Event(type="user_message",
+                           payload={"text": "починить сборку проекта"}, ts=now - 86400 + i))
+    aged.process(Event(type="user_message",
+                       payload={"text": "нужно нанять человека"}, ts=now))
+    fresh = aged.hot_topic()
+    check("побеждает свежая тема, а не самая частая",
+          fresh is not None and "нан" in fresh["topic"], str(fresh))
+    check("у частой темы заходов действительно больше",
+          aged.pattern_cache[aged.pattern_id(_msg("починить сборку проекта"))].hits == 4)
+
+    # Ответ целиком: горячая тема превращается в план, а не в перечень
+    # собственных возможностей.
+    answer = _hot_topic_answer(
+        {"plasticity": {"hot_topic": {"topic": "доход подн", "hits": 3}}}, 0.5
+    )
+    check("на «что дальше» есть ответ", answer is not None)
+    if answer:
+        check("это план, а не описание себя", "1." in answer["text"])
+        check("названо число заходов", "3" in answer["text"])
+        check("область распознана по основам", answer.get("domain") == "money")
+
+    check("одного захода мало",
+          _hot_topic_answer({"plasticity": {"hot_topic": {"topic": "доход подн", "hits": 1}}}, 0.5) is None)
+    check("без горячей темы молчит", _hot_topic_answer({"plasticity": {}}, 0.5) is None)
+    check("мусор не роняет", _hot_topic_answer({"plasticity": {"hot_topic": "нет"}}, 0.5) is None)
+
+
 def test_echo_is_not_memory() -> None:
     print("\n-- эхо не выдаётся за воспоминание --")
     q = "что почитать по маркетингу"
@@ -269,6 +319,8 @@ def main() -> int:
         test_match_threshold_is_not_a_sieve(Path(d))
     test_plan_answer()
     test_recall_note()
+    with tempfile.TemporaryDirectory() as d:
+        test_hot_topic(Path(d))
     test_echo_is_not_memory()
     with tempfile.TemporaryDirectory() as d:
         test_cache(Path(d))
