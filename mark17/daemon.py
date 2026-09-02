@@ -43,7 +43,9 @@ class Mark17Brain:
     ) -> None:
         self.plasticity = PlasticityBridge(state_dir)
         self.memory = Hippocampus(state_dir)
-        self.llm = LlmBridge(host=llm_host, model=llm_model, enabled=llm_enabled)
+        self.llm = LlmBridge(
+            host=llm_host, model=llm_model, enabled=llm_enabled, state_dir=state_dir
+        )
         self.meta = MetaController(
             self.plasticity,
             plasticity_threshold=plasticity_threshold,

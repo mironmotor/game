@@ -10,7 +10,8 @@ from typing import Any
 
 import numpy as np
 
-from mark17.events import Event
+from mark17.compression import TOPIC_MATCH, similarity
+from mark17.events import Event, topic_key
 from mark17.snn_core import PlasticityNetwork, StepResult
 
 # Индексы входов (фиксированная семантика + хеш payload)
@@ -26,6 +27,9 @@ class PatternEntry:
     hits: int = 0
     last_activation: float = 0.0
     last_action: str = ""
+    # Нормализованная тема реплики. Нужна, чтобы узнать уже виденный вопрос,
+    # заданный другими словами; для остальных типов событий пустая.
+    topic: str = ""
 
     @property
     def confidence(self) -> float:
@@ -74,6 +78,7 @@ class PlasticityBridge:
                 hits=v.get("hits", 0),
                 last_activation=v.get("last_activation", 0.0),
                 last_action=v.get("last_action", ""),
+                topic=v.get("topic", ""),
             )
             for k, v in raw.items()
         }
@@ -88,6 +93,7 @@ class PlasticityBridge:
                         "hits": e.hits,
                         "last_activation": e.last_activation,
                         "last_action": e.last_action,
+                        "topic": e.topic,
                     }
                     for k, e in self.pattern_cache.items()
                 },
@@ -96,6 +102,32 @@ class PlasticityBridge:
         )
 
     def pattern_id(self, event: Event) -> str:
+        """Ключ паттерна. Для реплики человека — с узнаванием по смыслу.
+
+        Хеш от текста опознаёт только дословный повтор, а человек дословно не
+        повторяется. Поэтому для `user_message` сначала ищем среди уже виденных
+        тем ту, что совпадает с этой хотя бы на TOPIC_MATCH по основам слов, и
+        возвращаем ЕЁ ключ — тогда третий разговор об одном и том же и
+        засчитывается как третий, а не как первый.
+
+        Побеждает самая похожая тема, а при равенстве — ключ, меньший
+        лексикографически: одинаковый вход обязан давать одинаковый ключ
+        независимо от порядка обхода словаря.
+        """
+        if event.type == "user_message":
+            topic = topic_key(event.payload.get("text", ""))
+            if topic:
+                mine = set(topic.split())
+                best_pid, best_score = "", 0.0
+                for pid, entry in self.pattern_cache.items():
+                    if not entry.topic or not pid.startswith("user_message:"):
+                        continue
+                    score = similarity(mine, set(entry.topic.split()))
+                    if score > best_score or (score == best_score and pid < best_pid):
+                        best_pid, best_score = pid, score
+                if best_score >= TOPIC_MATCH:
+                    return best_pid
+
         h = hashlib.sha256(event.signature().encode()).hexdigest()[:12]
         return f"{event.type}:{h}"
 
@@ -169,6 +201,11 @@ class PlasticityBridge:
         entry.hits += 1
         entry.last_activation = max(entry.last_activation, result.hidden_activation)
         entry.last_action = action
+        if event.type == "user_message" and not entry.topic:
+            # Тема пишется один раз, при рождении паттерна. Переписывать её на
+            # каждом попадании нельзя: тема поплывёт вслед за формулировками и
+            # через десяток реплик паттерн перестанет узнавать сам себя.
+            entry.topic = topic_key(event.payload.get("text", ""))
         self.pattern_cache[pid] = entry
 
         conf = entry.confidence
