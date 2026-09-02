@@ -42,6 +42,10 @@ class PatternEntry:
 class PlasticityResponse:
     pattern_id: str
     confidence: float
+    # Сколько раз эта тема уже поднималась. Наружу отдаётся, потому что «в
+    # третий раз спрашиваешь об одном» — это то, что ядро реально знает, и то,
+    # что человеку полезнее любой цифры уверенности.
+    hits: int
     action: str
     hint: str
     snn: dict[str, float]
@@ -214,6 +218,7 @@ class PlasticityBridge:
         return PlasticityResponse(
             pattern_id=pid,
             confidence=round(conf, 4),
+            hits=entry.hits,
             action=action,
             hint=hint,
             snn={

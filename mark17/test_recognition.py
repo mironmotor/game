@@ -21,7 +21,7 @@ if str(_ROOT) not in sys.path:
 from mark17.events import Event, topic_key
 from mark17.llm_bridge import CACHE_TTL_SEC, LlmBridge
 from mark17.plasticity_bridge import TOPIC_MATCH, PlasticityBridge
-from mark17.responder import _is_echo, _plan_answer
+from mark17.responder import _is_echo, _plan_answer, _recall_note
 
 _FAILURES: list[str] = []
 
@@ -181,6 +181,25 @@ def test_plan_answer() -> None:
     check("на короткую реплику план не выдаётся", _plan_answer("ок", 0.5) is None)
 
 
+def test_recall_note() -> None:
+    print("\n-- ядро замечает, что ходим кругами --")
+    q = "как поднять доход"
+    check("на первом заходе молчит", _recall_note({"plasticity": {"hits": 1}}, q) == "")
+    check("на втором ещё молчит", _recall_note({"plasticity": {"hits": 2}}, q) == "")
+
+    third = _recall_note({"plasticity": {"hits": 3}}, q)
+    check("на третьем говорит", bool(third))
+    check("называет, в какой раз", "третий" in third, third)
+    check("не цитирует прошлую реплику", q not in third, third)
+    check("зовёт к шагу, а не к обдумыванию", "шаг" in third, third)
+
+    fifth = _recall_note({"plasticity": {"hits": 5}}, q)
+    check("считает дальше третьего", "5-й" in fifth, fifth)
+
+    check("мусор в hits не роняет", _recall_note({"plasticity": {"hits": "нет"}}, q) == "")
+    check("без plasticity не роняет", _recall_note({}, q) == "")
+
+
 def test_echo_is_not_memory() -> None:
     print("\n-- эхо не выдаётся за воспоминание --")
     q = "что почитать по маркетингу"
@@ -249,6 +268,7 @@ def main() -> int:
     with tempfile.TemporaryDirectory() as d:
         test_match_threshold_is_not_a_sieve(Path(d))
     test_plan_answer()
+    test_recall_note()
     test_echo_is_not_memory()
     with tempfile.TemporaryDirectory() as d:
         test_cache(Path(d))

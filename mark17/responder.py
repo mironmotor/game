@@ -550,6 +550,46 @@ def _vague_status_answer(confidence: float) -> dict[str, Any]:
     }
 
 
+# С какого раза возвращение к теме перестаёт быть совпадением. Два — это ещё
+# «уточнил», три — уже «ходишь кругами», и сказать об этом полезнее, чем ещё
+# раз разложить ту же цель по полочкам.
+CIRCLING_HITS = 3
+
+
+def _hits(result: dict[str, Any]) -> int:
+    plasticity = result.get("plasticity")
+    if isinstance(plasticity, dict):
+        try:
+            return max(0, int(plasticity.get("hits") or 0))
+        except (TypeError, ValueError):
+            return 0
+    return 0
+
+
+def _recall_note(result: dict[str, Any], user_text: str) -> str:
+    """Одна строка о том, что этот разговор уже был.
+
+    Ядро действительно это знает — счётчик темы лежит в паттерне, — но наружу
+    знание не выходило: человек получал ту же аккуратную раскладку в третий
+    раз подряд, как будто говорит с ним впервые. Заметить повтор и сказать о
+    нём — самое честное, что тут можно сделать, и это не требует ни сети, ни
+    выдумывания.
+    """
+    hits = _hits(result)
+    if hits < CIRCLING_HITS:
+        return ""
+
+    # Цитировать прошлую реплику здесь нельзя: раз hits вырос, тема та же, и
+    # «в прошлый раз речь шла о том же: <почти тот же вопрос>» — снова эхо,
+    # только другими словами. Порог ECHO_MATCH его не ловит: у переформулировок
+    # одной темы похожесть держится около 0.8, чуть ниже отсечки.
+    times = "третий" if hits == 3 else f"{hits}-й"
+    return (
+        f"Ты возвращаешься к этому {times} раз. Значит, дело не в том, чтобы обдумать ещё раз, "
+        "а в том, что первый шаг до сих пор не сделан."
+    )
+
+
 def _plan_answer(user_text: str, confidence: float) -> dict[str, Any] | None:
     """Ответ по существу для вопроса про действие — своими силами, без сети.
 
@@ -691,7 +731,20 @@ def compose_answer(
     # содержанием не нужно идти в сеть вообще.
     planned = _plan_answer(user_text, confidence)
     if planned:
+        # Повтор темы дописывается сверху: план остаётся, но человек видит, что
+        # ядро помнит предыдущие заходы, а не начинает разговор с чистого листа.
+        note = _recall_note(response, user_text)
+        if note:
+            planned["text"] = f"{note}\n\n{planned['text']}"
         return planned
+
+    note = _recall_note(response, user_text)
+    if note:
+        return {
+            "text": f"{note} {REALITY_CONTACT_HINT}",
+            "source": "composer_recall",
+            "confidence": round(confidence, 4),
+        }
 
     recalled = _first_recalled_summary(response, user_text)
     semantic = _first_semantic_summary(response, user_text)

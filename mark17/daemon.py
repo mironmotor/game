@@ -115,6 +115,7 @@ class Mark17Brain:
         out["plasticity"] = {
             "pattern_id": pl.pattern_id,
             "confidence": pl.confidence,
+            "hits": pl.hits,
             "action": pl.action,
             "hint": pl.hint,
             "learned": pl.learned,
