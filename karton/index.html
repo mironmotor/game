@@ -1,0 +1,653 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex, nofollow">
+<meta name="description" content="Как Картону дойти до 100 000 пользователей к 30 сентября: что ломает формат, что ломает бот, что ломает MRR.">
+<title>Картон до ста тысяч</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Unbounded:wght@600;800&family=Golos+Text:wght@400;500;600&family=JetBrains+Mono:wght@400;600&display=swap">
+<style>
+  *{box-sizing:border-box}
+  html{color-scheme:light dark}
+  :root{
+    --paper:#F5F5F2; --surface:#FFFFFF; --sunk:#EFEFEB;
+    --ink:#14171A; --muted:#6C7169; --line:#E0E1DB;
+    --accent:#0F6E4F; --hot:#B03A2C; --gold:#8A6D1F;
+    --chip:#F2F2F0; --radius:10px;
+  }
+  @media (prefers-color-scheme: dark){
+    :root:not([data-theme="light"]){
+      --paper:#0F1211; --surface:#171A18; --sunk:#131614;
+      --ink:#EBEDE8; --muted:#8E948B; --line:#282C29;
+      --accent:#3FBF8C; --hot:#E8776A; --gold:#D2AC4A; --chip:#1E221F;
+    }
+  }
+  :root[data-theme="dark"]{
+    --paper:#0F1211; --surface:#171A18; --sunk:#131614;
+    --ink:#EBEDE8; --muted:#8E948B; --line:#282C29;
+    --accent:#3FBF8C; --hot:#E8776A; --gold:#D2AC4A; --chip:#1E221F;
+  }
+  body{margin:0;background:var(--paper);color:var(--ink);
+    font-family:"Golos Text","Helvetica Neue",Arial,sans-serif;font-size:16.5px;line-height:1.6;
+    -webkit-font-smoothing:antialiased;}
+  img{max-width:100%}
+  .wrap{max-width:760px;margin:0 auto;padding:52px 24px 40px;}
+  hr.rule{border:0;border-top:1px solid var(--line);margin:0;}
+  section{padding:40px 0;}
+
+  .eyebrow{font-family:"JetBrains Mono",ui-monospace,monospace;font-size:11px;
+    letter-spacing:.16em;text-transform:uppercase;color:var(--muted);}
+  h1{font-family:"Unbounded","Golos Text",sans-serif;font-weight:800;
+    font-size:clamp(32px,7vw,54px);line-height:1.02;letter-spacing:-.03em;margin:14px 0 0;text-wrap:balance;}
+  h1 em{font-style:normal;color:var(--accent);}
+  .lede{font-size:19px;color:var(--muted);margin:18px 0 0;max-width:52ch;}
+  h2{font-family:"Unbounded","Golos Text",sans-serif;font-weight:600;
+    font-size:clamp(20px,3.6vw,25px);letter-spacing:-.02em;margin:0 0 14px;text-wrap:balance;}
+  h3{font-family:"Unbounded","Golos Text",sans-serif;font-weight:600;font-size:17px;
+    letter-spacing:-.01em;margin:32px 0 10px;text-wrap:balance;}
+  .sec-n{font-family:"JetBrains Mono",ui-monospace,monospace;font-size:11px;font-weight:600;
+    letter-spacing:.18em;text-transform:uppercase;color:var(--accent);margin-bottom:10px;}
+  p{margin:0 0 16px;max-width:62ch;}
+  strong{font-weight:600}
+  a{color:var(--accent)}
+
+  .kpi{display:grid;grid-template-columns:repeat(4,1fr);gap:1px;background:var(--line);
+    border:1px solid var(--line);border-radius:var(--radius);overflow:hidden;margin:26px 0 0;}
+  .kpi div{background:var(--surface);padding:16px 16px 18px;display:flex;flex-direction:column;gap:4px;}
+  .kpi b{font-family:"JetBrains Mono",ui-monospace,monospace;font-weight:600;font-size:25px;
+    letter-spacing:-.02em;line-height:1.1;font-variant-numeric:tabular-nums;}
+  .kpi b.win{color:var(--accent)} .kpi b.hot{color:var(--hot)}
+  .kpi span{font-family:"JetBrains Mono",ui-monospace,monospace;font-size:10px;
+    letter-spacing:.1em;text-transform:uppercase;color:var(--muted);}
+
+  .box{border:1px solid var(--line);border-left:3px solid var(--accent);background:var(--surface);
+    border-radius:0 var(--radius) var(--radius) 0;padding:18px 20px;margin:24px 0;}
+  .box.hot{border-left-color:var(--hot)}
+  .box.gold{border-left-color:var(--gold)}
+  .box p:last-child{margin-bottom:0}
+  .box .bh{font-family:"JetBrains Mono",ui-monospace,monospace;font-size:10.5px;
+    letter-spacing:.12em;text-transform:uppercase;color:var(--muted);margin-bottom:9px;}
+
+  .scroller{overflow-x:auto;-webkit-overflow-scrolling:touch;margin:20px 0 6px;
+    border:1px solid var(--line);border-radius:var(--radius);background:var(--surface);}
+  table{border-collapse:collapse;width:100%;min-width:520px;font-size:14.5px;}
+  th,td{text-align:left;padding:11px 14px;border-bottom:1px solid var(--line);vertical-align:top;}
+  thead th{font-family:"JetBrains Mono",ui-monospace,monospace;font-size:10.5px;font-weight:600;
+    letter-spacing:.1em;text-transform:uppercase;color:var(--muted);background:var(--sunk);white-space:nowrap;}
+  tbody tr:last-child td{border-bottom:0}
+  td.num,th.num{font-family:"JetBrains Mono",ui-monospace,monospace;
+    font-variant-numeric:tabular-nums;text-align:right;white-space:nowrap;}
+  .win{color:var(--accent);font-weight:600} .bad{color:var(--hot);font-weight:600}
+  .cap{font-size:13.5px;color:var(--muted);margin:8px 0 0;max-width:62ch;}
+
+  ol.hooks{list-style:none;padding:0;margin:18px 0 0;}
+  ol.hooks li{display:grid;grid-template-columns:30px 1fr;gap:14px;padding:14px 0;border-top:1px solid var(--line);}
+  ol.hooks li:last-child{border-bottom:1px solid var(--line)}
+  .hn{font-family:"JetBrains Mono",ui-monospace,monospace;font-size:12px;color:var(--muted);padding-top:3px}
+  .ht{font-weight:600;font-size:16px;line-height:1.35;margin:0 0 4px;max-width:52ch}
+  .hs{color:var(--muted);font-size:14px;line-height:1.5;margin:0 0 7px;max-width:58ch}
+  .chip{display:inline-block;background:var(--chip);border-radius:999px;padding:3px 10px;
+    font-family:"JetBrains Mono",ui-monospace,monospace;font-size:10.5px;letter-spacing:.05em;
+    text-transform:uppercase;color:var(--muted);margin-right:5px;}
+
+  .script{border:1px solid var(--line);border-radius:var(--radius);background:var(--surface);margin:22px 0;overflow:hidden}
+  .script header{padding:16px 20px;border-bottom:1px solid var(--line);background:var(--sunk)}
+  .script .sid{font-family:"JetBrains Mono",ui-monospace,monospace;font-size:11px;
+    letter-spacing:.12em;text-transform:uppercase;color:var(--accent)}
+  .script h4{font-family:"Unbounded","Golos Text",sans-serif;font-weight:600;font-size:17px;margin:7px 0 10px;letter-spacing:-.01em}
+  .script .body{padding:2px 20px 20px}
+  .script table{min-width:480px;font-size:14px}
+  .script td:first-child{font-family:"JetBrains Mono",ui-monospace,monospace;font-size:11.5px;
+    color:var(--muted);white-space:nowrap;width:1%}
+  .tit{font-family:"JetBrains Mono",ui-monospace,monospace;font-size:12px;color:var(--accent)}
+  .note{margin-top:14px;padding:13px 16px;background:var(--sunk);border-radius:8px}
+  .note > b{font-family:"JetBrains Mono",ui-monospace,monospace;font-size:10.5px;
+    letter-spacing:.12em;text-transform:uppercase;color:var(--muted);display:block;margin-bottom:7px}
+  .note li b{font-weight:600}
+  .note ul{margin:0;padding-left:17px} .note li{font-size:14.5px;line-height:1.5;margin-bottom:5px}
+  .note li:last-child{margin-bottom:0}
+
+  .dm{background:var(--sunk);border-radius:var(--radius);padding:8px 10px;margin:18px 0}
+  .msg{background:var(--surface);border:1px solid var(--line);border-radius:12px 12px 12px 3px;
+    padding:11px 14px;margin:7px 0;font-size:14.5px;line-height:1.5;max-width:42ch}
+  .msg.me{border-radius:12px 12px 3px 12px;margin-left:auto;background:var(--accent);color:var(--paper);border-color:transparent}
+  .msg i{font-style:normal;font-family:"JetBrains Mono",ui-monospace,monospace;font-size:10px;
+    letter-spacing:.1em;text-transform:uppercase;color:var(--muted);display:block;margin-bottom:5px}
+  .msg.me i{color:var(--paper);opacity:.7}
+
+  .tiers{display:grid;grid-template-columns:repeat(3,1fr);gap:14px;margin:24px 0 6px}
+  .tier{background:var(--surface);border:1px solid var(--line);border-radius:var(--radius);
+    padding:20px;display:flex;flex-direction:column;gap:12px}
+  .tier.pick{border-color:var(--gold);box-shadow:0 0 0 1px var(--gold)}
+  .tier .bd{font-family:"JetBrains Mono",ui-monospace,monospace;font-size:10px;
+    letter-spacing:.14em;text-transform:uppercase;color:var(--gold)}
+  .tier .tn{font-family:"Unbounded","Golos Text",sans-serif;font-weight:600;font-size:18px}
+  .tier .pr{font-family:"JetBrains Mono",ui-monospace,monospace;font-weight:600;font-size:24px;letter-spacing:-.02em}
+  .tier .pr small{display:block;font-size:12px;font-weight:400;color:var(--muted);letter-spacing:0;margin-top:5px}
+  .tier ul{margin:0;padding-left:17px;flex:1} .tier li{font-size:14px;line-height:1.5;margin-bottom:6px}
+
+  footer{padding:26px 0 80px;color:var(--muted);font-size:13px;
+    font-family:"JetBrains Mono",ui-monospace,monospace}
+  footer .fl{display:flex;flex-wrap:wrap;gap:6px 20px;padding-top:20px;border-top:1px solid var(--line)}
+
+  @media (max-width:760px){.kpi{grid-template-columns:1fr 1fr}.tiers{grid-template-columns:1fr}}
+  @media (max-width:520px){.wrap{padding:36px 18px 30px}}
+  @media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
+</style>
+<style>
+  .calc{--c-bg:#0A0E0C;--c-panel:#101613;--c-line:#1E2A23;--c-ink:#DCE7E0;--c-dim:#728179;
+    --c-go:#48E39B;--c-hot:#FF6F59;--c-warn:#E3B14B;
+    background:var(--c-bg);color:var(--c-ink);border-radius:14px;border:1px solid var(--c-line);
+    padding:20px;margin:24px 0 6px;font-family:"JetBrains Mono",ui-monospace,monospace}
+  .calc .ch{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;
+    padding-bottom:15px;border-bottom:1px solid var(--c-line);font-size:11px;
+    letter-spacing:.18em;text-transform:uppercase;color:var(--c-dim)}
+  .calc .ch b{color:var(--c-ink);font-weight:600}
+  .verdict{margin:16px 0;padding:16px 18px;border-radius:9px;border:1px solid var(--c-line);background:var(--c-panel)}
+  .verdict .vt{font-size:10px;letter-spacing:.14em;text-transform:uppercase;color:var(--c-dim);margin-bottom:8px}
+  .verdict .vv{font-size:27px;font-weight:600;letter-spacing:-.02em;line-height:1.15;font-variant-numeric:tabular-nums}
+  .verdict .vd{font-size:11.5px;color:var(--c-dim);margin-top:7px;line-height:1.5}
+  .verdict.ok{border-color:var(--c-go)} .verdict.ok .vv{color:var(--c-go)}
+  .verdict.no{border-color:var(--c-hot)} .verdict.no .vv{color:var(--c-hot)}
+  .cg{display:grid;grid-template-columns:repeat(4,1fr);gap:1px;background:var(--c-line);
+    border:1px solid var(--c-line);border-radius:8px;overflow:hidden;margin-bottom:16px}
+  .cg div{background:var(--c-panel);padding:13px 14px;display:flex;flex-direction:column;gap:4px;min-width:0}
+  .cg span{font-size:9.5px;letter-spacing:.11em;text-transform:uppercase;color:var(--c-dim);
+    white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .cg b{font-size:20px;font-weight:600;letter-spacing:-.02em;font-variant-numeric:tabular-nums}
+  .cg b.go{color:var(--c-go)} .cg b.warn{color:var(--c-warn)}
+  .cc{display:grid;grid-template-columns:repeat(2,1fr);gap:14px 22px;padding-top:16px;border-top:1px solid var(--c-line)}
+  .cc label{display:flex;flex-direction:column;gap:7px;font-size:10px;letter-spacing:.11em;
+    text-transform:uppercase;color:var(--c-dim)}
+  .cc label b{color:var(--c-ink);font-size:13px;font-weight:600;letter-spacing:0;text-transform:none;
+    font-variant-numeric:tabular-nums}
+  .cc input{-webkit-appearance:none;appearance:none;width:100%;height:3px;background:var(--c-line);
+    border-radius:2px;outline:none;margin:0}
+  .cc input::-webkit-slider-thumb{-webkit-appearance:none;appearance:none;width:15px;height:15px;
+    border-radius:50%;background:var(--c-go);cursor:pointer;border:0}
+  .cc input::-moz-range-thumb{width:15px;height:15px;border-radius:50%;background:var(--c-go);cursor:pointer;border:0}
+  .cc input:focus-visible{outline:2px solid var(--c-go);outline-offset:4px}
+  .cfoot{margin-top:15px;padding-top:13px;border-top:1px solid var(--c-line);
+    font-size:11px;color:var(--c-dim);line-height:1.6}
+  @media (max-width:640px){.cg{grid-template-columns:1fr 1fr}.cc{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <div class="eyebrow">Картон · 2 сентября 2026</div>
+  <h1>30 000 сейчас.<br><em>100 000 к 30 сентября.</em></h1>
+  <p class="lede">Разрыв — 70 тысяч человек за 28 дней. Ниже: почему нынешним контентом он не закрывается, что в боте мешает конверсии прямо сейчас и что снимать со следующей недели.</p>
+
+  <div class="kpi">
+    <div><b>277 000</b><span>подписчиков</span></div>
+    <div><b>30 000+</b><span>пользователей</span></div>
+    <div><b class="win">100 000</b><span>цель</span></div>
+    <div><b class="hot">2 500</b><span>нужно в день</span></div>
+  </div>
+</div>
+
+<div class="wrap"><hr class="rule">
+<section>
+  <div class="sec-n">01</div>
+  <h2>Своей аудиторией цель не закрывается</h2>
+  <p>277 тысяч подписчиков дали 30 тысяч пользователей. Это 10,8% — хороший показатель, лучше, чем у большинства блогеров с продуктом. Но дальше начинается арифметика.</p>
+  <p>Неохваченных подписчиков осталось 247 тысяч. Если сконвертировать <strong>всю базу целиком</strong> с той же конверсией, это даст ещё 27 тысяч. До ста тысяч не хватит.</p>
+
+  <div class="box hot">
+    <div class="bh">Что это значит</div>
+    <p>70 тысяч новых пользователей могут прийти только с холодного охвата — от людей, которые на тебя не подписаны. Своя лента для этой цели уже отработана.</p>
+  </div>
+
+  <h3>Сколько нужно просмотров</h3>
+  <div class="scroller">
+  <table>
+    <thead><tr><th>Из просмотра в пользователя</th><th class="num">Просмотров за месяц</th><th class="num">Роликов по 150 000</th></tr></thead>
+    <tbody>
+      <tr><td>0,5% — слабо</td><td class="num">14 000 000</td><td class="num">93</td></tr>
+      <tr><td>0,8% — реалистично</td><td class="num">8 750 000</td><td class="num">58</td></tr>
+      <tr><td>1,5% — сильно</td><td class="num">4 700 000</td><td class="num">31</td></tr>
+    </tbody>
+  </table>
+  </div>
+  <p class="cap">Даже по верхней строке нужно около 5 миллионов просмотров за 28 дней. Это порядок, который берётся объёмом и разнообразием, а не одним удачным роликом.</p>
+</section>
+
+<hr class="rule">
+<section>
+  <div class="sec-n">02 · Проблема первая</div>
+  <h2>Один формат</h2>
+  <p>Все ролики устроены одинаково: карта не проходит — Картон спасает. Формат рабочий, он и привёл 30 тысяч человек. Но у него есть предел, и предел уже виден: одна и та же аудитория видит одно и то же, а новая не приходит, потому что алгоритму нечего ей показать нового.</p>
+  <p>Нужен не другой продукт в кадре. Нужны <strong>разные способы рассказать про тот же продукт</strong>. Шесть штук вместо одного:</p>
+
+  <div class="scroller">
+  <table>
+    <thead><tr><th>Формат</th><th>Что держит зрителя</th><th>Как часто</th></tr></thead>
+    <tbody>
+      <tr><td><b>Отказ платежа</b><br><span class="cap">текущий</span></td><td>узнавание: «у меня так же»</td><td class="num">1 из 5</td></tr>
+      <tr><td><b>Ставка</b></td><td>ждут результат, а не финал истории</td><td class="num">1 в неделю</td></tr>
+      <tr><td><b>Чужой человек в кадре</b></td><td>реакция живого человека, которую нельзя сыграть</td><td class="num">2 в неделю</td></tr>
+      <tr><td><b>Ответ на комментарий</b></td><td>зритель видит себя в вопросе</td><td class="num">2 в неделю</td></tr>
+      <tr><td><b>Честный антикейс</b></td><td>никто в нише так не делает</td><td class="num">1 в неделю</td></tr>
+      <tr><td><b>Счёт в рублях</b></td><td>цифру пересылают в личку</td><td class="num">1 в неделю</td></tr>
+    </tbody>
+  </table>
+  </div>
+
+  <div class="box">
+    <div class="bh">Правило серии</div>
+    <p>Три ролика подряд на один сервис, потом смена. Первый уходит в твою базу, второй начинает находить смежную аудиторию, третий работает уже на неё. Один ролик про Steam между двумя про Тай — выброшенный ролик, каким бы сильным он ни был.</p>
+  </div>
+</section>
+
+<hr class="rule">
+<section>
+  <div class="sec-n">03 · Проблема вторая</div>
+  <h2>Бот отпугивает на входе</h2>
+  <p>Человек доходит до бота на эмоции: ему только что показали, что его проблема решается. Дальше он видит дешёвые ИИ-картинки и упоминание госуслуг — и эмоция гаснет.</p>
+
+  <div class="scroller">
+  <table>
+    <thead><tr><th>Что видит</th><th>Что думает</th><th>Что делает</th></tr></thead>
+    <tbody>
+      <tr><td><b>ИИ-картинки, дешёвый визуал</b></td><td>«сделали за вечер, завтра исчезнут»</td><td class="bad">закрывает</td></tr>
+      <tr><td><b>Госуслуги</b></td><td>«зачем финансовому сервису мои документы и при чём тут государство»</td><td class="bad">закрывает</td></tr>
+      <tr><td><b>Меню сразу, без вопроса</b></td><td>«надо разбираться самому»</td><td class="bad">откладывает</td></tr>
+    </tbody>
+  </table>
+  </div>
+
+  <p>Твоя оценка — 10–20% недополученных конверсий. Считаю на цели:</p>
+
+  <div class="box hot">
+    <div class="bh">Цена этой проблемы</div>
+    <p>10–20% от 70 тысяч — это <strong>7 000–14 000 человек</strong>, которые дошли до бота и ушли. Если платить будет каждый десятый, это <strong>1,4–2,8 млн ₽ MRR</strong> в месяц. Каждый месяц, а не один раз.</p>
+    <p>И это растёт: чем больше холодного трафика, тем выше доля тех, кто тебя не знает и судит только по первому экрану бота.</p>
+  </div>
+
+  <h3>Что чинить, в порядке цены вопроса</h3>
+  <div class="note">
+    <b>Три правки</b>
+    <ul>
+      <li><b>Убрать ИИ-картинки с первых экранов.</b> Заменить на скриншоты реальной карты и реального платежа. В финансах визуал — это сигнал надёжности, а не украшение.</li>
+      <li><b>Убрать госуслуги оттуда, где их видно до регистрации.</b> Если они нужны технически — пусть появляются на шаге, где человек уже решил, а не на первом экране.</li>
+      <li><b>Первое сообщение — один вопрос, а не меню.</b> «Что не проходит?» Дальше ветка под ответ. Это же даёт сегментацию, которой сейчас нет.</li>
+    </ul>
+  </div>
+</section>
+
+<hr class="rule">
+<section>
+  <div class="sec-n">04 · Проблема третья</div>
+  <h2>Пользователи растут, MRR стоит</h2>
+  <p>Я уверен, что пользователи растут. И так же уверен, что MRR стоит на месте. Причина в тарифах, и она не в том, что они плохие.</p>
+
+  <div class="scroller">
+  <table>
+    <thead><tr><th>Тариф</th><th class="num">Цена</th><th>Кого приводит контент про «карта не проходит»</th></tr></thead>
+    <tbody>
+      <tr><td><b>Русская виртуалка</b></td><td class="num win">0 ₽</td><td>всех подряд: попробовать, посмотреть, «пусть будет»</td></tr>
+      <tr><td><b>Зарубежная карта</b></td><td class="num">1 990 ₽</td><td>только тех, кому нужен конкретный зарубежный сервис</td></tr>
+    </tbody>
+  </table>
+  </div>
+
+  <p>Ролик «моя карта не прошла» — это ролик про проблему вообще. Человек приходит, берёт бесплатное и остаётся в статистике пользователей, но не в MRR. Ролик <strong>«я не могу оплатить Steam»</strong> приводит человека, которому русская виртуалка не поможет по определению. Он идёт на 1 990 ₽, потому что другого варианта у него нет.</p>
+
+  <div class="box gold">
+    <div class="bh">Отсюда весь контент-план ниже</div>
+    <p>Сегментные ролики про конкретные зарубежные сервисы — это не «ещё одна тема». Это единственный тип контента, который двигает MRR, а не только счётчик пользователей.</p>
+  </div>
+
+  <h3>Что даёт цель в деньгах</h3>
+  <div class="scroller">
+  <table>
+    <thead><tr><th>Доля платящих из 70 000</th><th class="num">Подписок</th><th class="num">MRR</th></tr></thead>
+    <tbody>
+      <tr><td>5%</td><td class="num">3 500</td><td class="num">6,9 млн ₽</td></tr>
+      <tr><td>10%</td><td class="num">7 000</td><td class="num">13,9 млн ₽</td></tr>
+      <tr><td>15%</td><td class="num">10 500</td><td class="num">20,9 млн ₽</td></tr>
+    </tbody>
+  </table>
+  </div>
+  <p class="cap">По 1 990 ₽. Доля платящих — единственное число здесь, которого я не знаю: оно есть у тебя. Подставь своё в калькулятор ниже.</p>
+</section>
+</div>
+
+<div class="wrap"><hr class="rule">
+<section>
+  <div class="sec-n">05</div>
+  <h2>Посчитай сам</h2>
+  <p>Ползунки живые. Первые два — сколько снимаешь и как заходит. Вторые два — твоя воронка.</p>
+
+  <div class="calc">
+    <div class="ch"><span>Картон · <b>до 30 сентября</b></span><span>считает на лету</span></div>
+
+    <div class="verdict no" id="v-box">
+      <div class="vt">К 30 сентября</div>
+      <div class="vv" id="v-total">68 400</div>
+      <div class="vd" id="v-note">Не хватает 31 600. Нужно либо больше роликов, либо выше средний охват.</div>
+    </div>
+
+    <div class="cg">
+      <div><span>Просмотров за месяц</span><b id="o-views">4 800 000</b></div>
+      <div><span>Новых пользователей</span><b class="go" id="o-new">38 400</b></div>
+      <div><span>Новых подписок</span><b id="o-subs">3 840</b></div>
+      <div><span>Прирост MRR</span><b class="warn" id="o-mrr">7,6 млн ₽</b></div>
+    </div>
+
+    <div class="cc">
+      <label>Роликов в месяц <b id="l-r">40</b><input type="range" id="r-r" min="10" max="80" step="1" value="40"></label>
+      <label>Средний охват ролика <b id="l-v">120 000</b><input type="range" id="r-v" min="10000" max="300000" step="5000" value="120000"></label>
+      <label>Из просмотра в пользователя <b id="l-c">0,8%</b><input type="range" id="r-c" min="0.2" max="2.5" step="0.1" value="0.8"></label>
+      <label>Из пользователя в платящего <b id="l-p">10%</b><input type="range" id="r-p" min="3" max="25" step="1" value="10"></label>
+    </div>
+
+    <div class="cfoot">Стартовая база — 30 000, подписка — 1 990 ₽. Первые две недели работы заменяют мои значения по умолчанию на твои настоящие.</div>
+  </div>
+</section>
+
+<hr class="rule">
+<section>
+  <div class="sec-n">06</div>
+  <h2>Слово «Картон»: воронку не ломаем, чиним стыки</h2>
+  <p>Механика остаётся твоя: человек пишет «Картон» в сообщения, дальше бот. Слово менять не надо — оно короткое, на кириллице, набирается одним пальцем и уже узнаётся. Ломается не слово, а два стыка вокруг него.</p>
+
+  <h3>Стык первый: слово теряется в ролике</h3>
+  <div class="note">
+    <b>Четыре места, все обязательны</b>
+    <ul>
+      <li><b>В озвучке</b> — последние 3–4 секунды, с паузой перед словом. «Напиши мне в сообщения… Картон.»</li>
+      <li><b>Титром</b> — те же секунды, в средней трети кадра. Нижние 250 пикселей закрывает интерфейс, там не прочитают.</li>
+      <li><b>Первым комментарием от себя</b> — в первые пять минут после публикации, закрепить.</li>
+      <li><b>Первой строкой подписи</b> — до обрезки «ещё».</li>
+    </ul>
+  </div>
+
+  <h3>Стык второй: бот отвечает меню вместо вопроса</h3>
+  <p>Сейчас человек с эмоцией упирается в интерфейс. Один вопрос вместо меню решает и это, и сегментацию: по ответу видно, кому нужна зарубежная карта за 1 990 ₽, а кому хватит бесплатной.</p>
+
+  <div class="dm">
+    <div class="msg"><i>сразу</i>на связи 👋 скажи одно слово — что именно не проходит? стим, chatgpt, apple, что-то ещё?</div>
+    <div class="msg me"><i>человек</i>стим</div>
+    <div class="msg"><i>сразу после ответа</i>понял. стим русскую карту не принимает вообще, тут нужна зарубежная — сейчас покажу, как выпустить, это пара минут.<br><br>сколько обычно закидываешь на кошелёк?</div>
+  </div>
+  <p class="cap">Второй вопрос не праздный: по сумме сразу видно, сколько человек сэкономит, и это его же цифра, а не твоя.</p>
+</section>
+
+<hr class="rule">
+<section>
+  <div class="sec-n">07</div>
+  <h2>Двенадцать хуков</h2>
+  <p>Разложены по шести форматам. Все ведут на зарубежные сервисы — то есть на тариф 1 990 ₽, а не на бесплатный.</p>
+
+  <ol class="hooks">
+    <li><span class="hn">01</span><div><p class="ht">Пробую оплатить ChatGPT русской картой</p><p class="hs">3 сек: экран, четыре отказа подряд, крупно «declined». Ни слова за кадром.</p><span class="chip">отказ</span><span class="chip">сценарий 1</span></div></li>
+    <li><span class="hn">02</span><div><p class="ht">Steam: 6 попыток, 6 отказов</p><p class="hs">3 сек: счётчик попыток в углу растёт, платежи отклоняются один за другим.</p><span class="chip">отказ</span><span class="chip">сценарий 2</span></div></li>
+    <li><span class="hn">03</span><div><p class="ht">Оплатил iCloud из машины, не выходя</p><p class="hs">3 сек: «Хранилище заполнено» на весь экран, за окном Москва.</p><span class="chip">отказ</span></div></li>
+    <li><span class="hn">04</span><div><p class="ht">Ставлю 100 000, что моя карта пройдёт там, где твоя нет</p><p class="hs">3 сек: наличные на стол перед незнакомцем, две карты рядом.</p><span class="chip">ставка</span><span class="chip">сценарий 4</span></div></li>
+    <li><span class="hn">05</span><div><p class="ht">10 терминалов подряд. Сколько примут русскую карту?</p><p class="hs">3 сек: счётчик «0 / 10» в углу, первая касса. Счётчик идёт весь ролик.</p><span class="chip">ставка</span></div></li>
+    <li><span class="hn">06</span><div><p class="ht">Дал карту маме и не помогал</p><p class="hs">3 сек: мама с телефоном: «А куда тут нажимать?» Ты молчишь и снимаешь.</p><span class="chip">чужой человек</span><span class="chip">сценарий 5</span></div></li>
+    <li><span class="hn">07</span><div><p class="ht">Дал Картон блогеру на сутки. Смотрим, что он купил</p><p class="hs">3 сек: отдаёшь карту, ставишь лимит вслух. Выписка в конце.</p><span class="chip">чужой человек</span></div></li>
+    <li><span class="hn">08</span><div><p class="ht">Спросил, что вы не можете оплатить. Оплачиваю сам</p><p class="hs">3 сек: лента реальных комментариев, палец выбирает один.</p><span class="chip">ответ на коммент</span></div></li>
+    <li><span class="hn">09</span><div><p class="ht">Читаю негативные отзывы о Картоне вслух</p><p class="hs">3 сек: экран с отзывом на одну звезду, читаешь дословно, не оправдываясь.</p><span class="chip">ответ на коммент</span></div></li>
+    <li><span class="hn">10</span><div><p class="ht">Где Картон НЕ работает. Честно</p><p class="hs">3 сек: список из четырёх пунктов, первый уже перечёркнут.</p><span class="chip">антикейс</span><span class="chip">сценарий 3</span></div></li>
+    <li><span class="hn">11</span><div><p class="ht">Что будет с твоими деньгами, если мы закроемся</p><p class="hs">3 сек: в лоб в камеру, без монтажа: «Вопрос, который мне пишут каждый день».</p><span class="chip">антикейс</span></div></li>
+    <li><span class="hn">12</span><div><p class="ht">Посредник взял 15%. Считаем, сколько это за год</p><p class="hs">3 сек: калькулятор крупно, вводишь сумму подписок.</p><span class="chip">счёт в рублях</span></div></li>
+  </ol>
+  <p class="cap">Порядок на первую неделю: 01, 12, 10. Боль, деньги, доверие — три разных ответа, а не три версии одного.</p>
+</section>
+</div>
+
+<div class="wrap"><hr class="rule">
+<section>
+  <div class="sec-n">08</div>
+  <h2>Пять сценариев целиком</h2>
+  <p>Отдаются оператору и снимаются без тебя. Реплики меняй под свою речь, порядок тактов — нет: он и держит досмотр.</p>
+
+  <article class="script">
+    <header><div class="sid">Сценарий 1 · хук 01 · 32 сек</div><h4>Четыре отказа</h4></header>
+    <div class="body">
+      <p style="margin-top:14px"><b>Что нужно.</b> Стол у окна, ноут с открытым ChatGPT, четыре карты разных банков.</p>
+      <div class="scroller"><table><thead><tr><th>Тайм-код</th><th>Что в кадре</th><th>Что говоришь</th><th>Титр</th></tr></thead><tbody>
+        <tr><td>0:00–0:05</td><td>Экран ноута: жмёшь Upgrade to Plus, вводишь карту. Красное «declined». Резкая склейка — вторая карта, тот же экран</td><td>тишина, только клик</td><td class="tit">попытка 2</td></tr>
+        <tr><td>0:05–0:08</td><td>Третья, четвёртая. Склейки жёстче</td><td>«Четыре карты. Четыре банка.»</td><td class="tit">попытка 4</td></tr>
+        <tr><td>0:08–0:13</td><td>Отъезд, ты в кадре</td><td>«Дело не в твоём банке. Российскую карту режут до того, как платёж дойдёт до OpenAI. Отказ будет всегда.»</td><td class="tit">—</td></tr>
+        <tr><td>0:13–0:25</td><td>Телефон: выпуск карты, вставляешь номер. Зелёное «Payment successful». Держишь кадр две секунды</td><td>«А теперь смотри.»</td><td class="tit">—</td></tr>
+        <tr><td>0:25–0:32</td><td>В камеру, спокойно</td><td>«Если у тебя тоже отвалился — напиши мне в сообщения… Картон. Скажу, что делать, за две минуты.»</td><td class="tit">Картон → в сообщения</td></tr>
+      </tbody></table></div>
+      <div class="note"><b>Пометки</b><ul>
+        <li>Экран снимать телефоном под углом, не фронтально. Фронтальный кадр читается как запись экрана и теряет ощущение «происходит сейчас».</li>
+        <li>Живой звук оставить. Музыку не раньше восьмой секунды и тише голоса.</li>
+        <li>Логотип Картона не показывать первые восемь секунд. Ролик про боль, бренд появляется как решение.</li>
+      </ul></div>
+    </div>
+  </article>
+
+  <article class="script">
+    <header><div class="sid">Сценарий 2 · хук 02 · 29 сек</div><h4>Шесть отказов Steam</h4></header>
+    <div class="body">
+      <p style="margin-top:14px"><b>Что нужно.</b> За компьютером, вечер. Экран только на странице пополнения кошелька.</p>
+      <div class="scroller"><table><thead><tr><th>Тайм-код</th><th>Что в кадре</th><th>Что говоришь</th><th>Титр</th></tr></thead><tbody>
+        <tr><td>0:00–0:08</td><td>Пополнение кошелька, отказ. Счётчик в углу: 1, 2, 3, 4</td><td>«Четыре.»</td><td class="tit">4</td></tr>
+        <tr><td>0:08–0:12</td><td>Пятая, шестая</td><td>«Шесть.»</td><td class="tit">6</td></tr>
+        <tr><td>0:12–0:18</td><td>Отъезд, откидываешься на стуле</td><td>«Steam не принимает российские карты с двадцать второго года. Не «иногда не проходит» — не принимает.»</td><td class="tit">—</td></tr>
+        <tr><td>0:18–0:24</td><td>Другая карта, пополнение проходит, баланс обновился</td><td>«Седьмая.»</td><td class="tit">—</td></tr>
+        <tr><td>0:24–0:29</td><td>В камеру</td><td>«Напиши в сообщения Картон — покажу, как пополнять кошелёк, там есть нюанс с регионом.»</td><td class="tit">Картон → в сообщения</td></tr>
+      </tbody></table></div>
+      <div class="note"><b>Пометки</b><ul>
+        <li>Библиотеку игр не показывать: комментарии уйдут в обсуждение игр вместо оплаты.</li>
+        <li>Реальные щелчки оставить. Игровая аудитория слышит подделку быстрее любой другой.</li>
+        <li>Счётчик — крупным моноширинным, в правом верхнем углу.</li>
+      </ul></div>
+    </div>
+  </article>
+
+  <article class="script">
+    <header><div class="sid">Сценарий 3 · хук 10 · 45 сек</div><h4>Где мы не работаем</h4></header>
+    <div class="body">
+      <p style="margin-top:14px"><b>Что нужно.</b> Стол, ровный фронтальный свет, лист со списком из четырёх пунктов. Один план, без склеек.</p>
+      <div class="scroller"><table><thead><tr><th>Тайм-код</th><th>Что в кадре</th><th>Что говоришь</th><th>Титр</th></tr></thead><tbody>
+        <tr><td>0:00–0:03</td><td>Лист крупно, первый пункт уже перечёркнут</td><td>«Четыре вещи, которые Картоном не сделать.»</td><td class="tit">—</td></tr>
+        <tr><td>0:03–0:17</td><td>Перечёркиваешь пункты по одному</td><td>Четыре настоящих ограничения, своими словами, без смягчения</td><td class="tit">1 · 2 · 3 · 4</td></tr>
+        <tr><td>0:17–0:30</td><td>Кладёшь маркер, смотришь в камеру</td><td>«Я мог это не рассказывать. Половина тех, кто досмотрит, не пойдёт регистрироваться. Но остальные придут, зная, что получат, и не будут писать в поддержку «вы обещали». Мне это выгоднее.»</td><td class="tit">—</td></tr>
+        <tr><td>0:30–0:38</td><td>Берёшь телефон</td><td>«И главное. Пополняй карту ровно на сумму покупки, не на месяц вперёд. Тогда на балансе никогда не лежит больше, чем ты тратишь сегодня.»</td><td class="tit">ровно на сумму</td></tr>
+        <tr><td>0:38–0:45</td><td>В камеру</td><td>«Тогда тебе не нужно мне доверять. Ни мне, ни любому другому сервису. Напиши Картон — пришлю полный список ограничений текстом.»</td><td class="tit">Картон → в сообщения</td></tr>
+      </tbody></table></div>
+      <div class="note"><b>Пометки</b><ul>
+        <li>Пункты — настоящие. Если один окажется неправдой, эффект схлопнется на первом же комментарии.</li>
+        <li>Не заканчивать на «зато у нас…». Появилось «зато» — стало рекламой.</li>
+        <li>Свет фронтальный. Против окна не снимать: контровой свет здесь читается как «прячет лицо».</li>
+      </ul></div>
+    </div>
+  </article>
+
+  <article class="script">
+    <header><div class="sid">Сценарий 4 · хук 04 · 44 сек</div><h4>Сто тысяч на стол</h4></header>
+    <div class="body">
+      <p style="margin-top:14px"><b>Что нужно.</b> Три точки с терминалами рядом. Наличные настоящие, две карты, второй оператор.</p>
+      <div class="scroller"><table><thead><tr><th>Тайм-код</th><th>Что в кадре</th><th>Что говоришь</th><th>Титр</th></tr></thead><tbody>
+        <tr><td>0:00–0:09</td><td>Кладёшь наличные перед незнакомцем, рядом две карты. Он не понимает</td><td>«Сто тысяч. Твоя карта и моя, одна касса. Пройдёт твоя там, где моя нет — деньги твои.»</td><td class="tit">100 000 ₽</td></tr>
+        <tr><td>0:09–0:24</td><td>Три точки подряд. Он платит первым, каждый раз отказ. Крупно его лицо</td><td>тишина, звук терминала</td><td class="tit">1 · 2 · 3</td></tr>
+        <tr><td>0:24–0:32</td><td>Твоя карта. Approved. Держишь кадр на чеке</td><td>«Approved.»</td><td class="tit">—</td></tr>
+        <tr><td>0:32–0:44</td><td>Забираешь деньги, он смеётся. Потом в камеру</td><td>«Деньги остаются у меня. А ты теперь знаешь, что дело не в банке. Напиши Картон — покажу, сколько стоит это починить. Сильно меньше ста тысяч.»</td><td class="tit">Картон → в сообщения</td></tr>
+      </tbody></table></div>
+      <div class="note"><b>Пометки</b><ul>
+        <li>Деньги настоящие. Нарисованная ставка считывается на второй секунде, и весь формат после этого не работает.</li>
+        <li>Человека предупредить про съёмку заранее. Недоверие не умеют играть — его показывают всерьёз даже зная про камеру.</li>
+        <li>Не спорить с тем, кто явно не может позволить себе проиграть. Это видно в кадре и разворачивает комментарии против тебя.</li>
+      </ul></div>
+    </div>
+  </article>
+
+  <article class="script">
+    <header><div class="sid">Сценарий 5 · хук 06 · 40 сек</div><h4>Дал карту маме</h4></header>
+    <div class="body">
+      <p style="margin-top:14px"><b>Что нужно.</b> Кухня, дневной свет, съёмка с рук. Реплики не пишутся — снимается первый настоящий заход.</p>
+      <div class="scroller"><table><thead><tr><th>Тайм-код</th><th>Что в кадре</th><th>Что говоришь</th><th>Титр</th></tr></thead><tbody>
+        <tr><td>0:00–0:06</td><td>Мама с телефоном, растерянно. Ты за кадром, не помогаешь</td><td>«А куда тут нажимать?»</td><td class="tit">я не помогаю</td></tr>
+        <tr><td>0:06–0:24</td><td>Она сама тыкает, читает вслух, ошибается, находит. Вводит данные</td><td>«Так… «выпустить карту»… это сюда? Всё? Уже?»</td><td class="tit">—</td></tr>
+        <tr><td>0:24–0:32</td><td>Оплачивает iCloud. Проходит. Её лицо</td><td>«Ой. А я год Ване из-за этого звонила.»</td><td class="tit">—</td></tr>
+        <tr><td>0:32–0:40</td><td>Ты в кадре, впервые за ролик</td><td>«Если твоя мама тоже звонит тебе из-за хранилища — покажи ей этот ролик. И напиши Картон, пришлю инструкцию, которую она поймёт без тебя.»</td><td class="tit">Картон → в сообщения</td></tr>
+      </tbody></table></div>
+      <div class="note"><b>Пометки</b><ul>
+        <li>Не подсказывать. Весь ролик держится на том, что ты молчишь. Подсказал — получился туториал, а туториалы не смотрят.</li>
+        <li>Снимать с рук. Дрожь здесь работает: делает сцену домашней.</li>
+        <li>Второй дубль всегда хуже. Дать телефон и снять первый заход.</li>
+        <li>Не смеяться над ней и не ставить смешную музыку. Она — половина твоей аудитории.</li>
+      </ul></div>
+    </div>
+  </article>
+</section>
+</div>
+
+<div class="wrap"><hr class="rule">
+<section>
+  <div class="sec-n">09</div>
+  <h2>Кто ещё на этом поле</h2>
+  <p>Главное событие ниши за год: <strong>Pyypl ушёл.</strong> Сервис, который был для россиян дефолтным способом получить виртуальную Mastercard, закрыл выпуск: новые карты не оформляются, часть существующих заблокирована, остатки не выводятся.</p>
+  <p>Спрос освободился и делится между мелкими ботами. Но доверие в нише упало до нуля: люди своими глазами видели, как сервис исчез вместе с деньгами. Поэтому «купите нашу карту» больше не работает как аргумент, а ролики 10 и 11 работают.</p>
+
+  <div class="scroller">
+  <table>
+    <thead><tr><th>Кто</th><th>Чем берёт</th><th>Слабое место</th></tr></thead>
+    <tbody>
+      <tr><td><b>Pyypl</b></td><td>был лидером, узнаваемость</td><td class="bad">ушёл с рынка РФ, остатки недоступны</td></tr>
+      <tr><td><b>Wayment</b></td><td>бот в телеге, выпуск за 1–2 минуты</td><td>ноль узнаваемости, ноль лица</td></tr>
+      <tr><td><b>CosmoPay</b></td><td>Mastercard, пополнение криптой</td><td>вход $20–30, аудитория только крипта</td></tr>
+      <tr><td><b>PST.NET</b></td><td>американские BIN, карты от $10</td><td>продукт под медиабаинг, обывателю непонятен</td></tr>
+      <tr><td><b>Банки СНГ</b></td><td>«настоящий банк», пластик</td><td>поездка, доверенность, три недели–два месяца</td></tr>
+      <tr><td><b>Знакомый с картой</b></td><td>«по-человечески»</td><td>берёт 10–20%, но это твой главный конкурент</td></tr>
+    </tbody>
+  </table>
+  </div>
+
+  <div class="box gold">
+    <div class="bh">Дыра, в которую надо заходить</div>
+    <p>Открой рилсы любого из них: интерфейс, скриншоты, гайд голосом робота. <strong>Ни у кого нет лица.</strong> У тебя есть, и 277 тысяч человек уже знают, как ты говоришь. Это единственное в нише, что конкурент не купит за месяц.</p>
+    <p>Для сравнения, как это решают банки: Т-Банк выкупает микроинфлюэнсеров пачками и меряет результат тест-контролем, Альфа под это заводила фонд на 100 млн ₽. Они покупают чужие лица, потому что в финансах решает личная рекомендация. У тебя это уже есть и стоит ноль.</p>
+  </div>
+</section>
+
+<hr class="rule">
+<section>
+  <div class="sec-n">10</div>
+  <h2>Что делаю я</h2>
+  <p>Сценарии, отобранные до съёмки. UGC-креаторы под мою редактуру. ИИ-ролики там, где снимать дорого или невозможно. Дашборд, где видно каждый ролик и что он принёс. Разница между тарифами — не в объёме, а в том, сколько риска я беру на себя.</p>
+
+  <div class="tiers">
+    <div class="tier">
+      <span class="bd">вход</span>
+      <span class="tn">Сценарии</span>
+      <span class="pr">$1 000<small>в месяц + 10% с привлечённых</small></span>
+      <ul>
+        <li>20 сценариев в месяц по шести форматам</li>
+        <li>еженедельный разбор цифр</li>
+        <li>тексты бота и починка двух стыков</li>
+        <li>снимаешь и публикуешь сам</li>
+      </ul>
+    </div>
+    <div class="tier pick">
+      <span class="bd">рекомендую</span>
+      <span class="tn">Производство</span>
+      <span class="pr">$2 500<small>в месяц + 6% с привлечённых</small></span>
+      <ul>
+        <li>всё из первого</li>
+        <li>10 UGC-роликов: ищу креаторов, брифую, принимаю</li>
+        <li>8 ИИ-роликов: кадры, сцены, сборка</li>
+        <li>автопостинг в лучшее время</li>
+        <li>дашборд на твоих живых цифрах</li>
+      </ul>
+    </div>
+    <div class="tier">
+      <span class="bd">полный</span>
+      <span class="tn">Под ключ</span>
+      <span class="pr">$5 000<small>в месяц + 3% с привлечённых</small></span>
+      <ul>
+        <li>всё из второго</li>
+        <li>30+ роликов в месяц</li>
+        <li>ночная генерация: утром выбираешь готовое</li>
+        <li>вторая площадка с переупаковкой</li>
+        <li>воронка внутри бота целиком</li>
+        <li>отвечаю за цифру, а не за количество роликов</li>
+      </ul>
+    </div>
+  </div>
+
+  <p class="cap">Процент — с выручки по привлечённым за первые 12 месяцев. Если открывать выручку неудобно: фикс за платную подписку вместо процента — 650 / 400 / 250 ₽. Способ выбираешь до старта.</p>
+
+  <div class="box">
+    <div class="bh">Что нужно от тебя</div>
+    <p>Выгрузка Insights за 90 дней. Из бота: старты по дням и доля, которая берёт тариф за 1 990 ₽. Один человек, который может согласовать сценарий за сутки. Всё остальное — моя часть.</p>
+  </div>
+
+  <h3>Первая неделя</h3>
+  <div class="scroller">
+  <table>
+    <thead><tr><th>Что</th><th class="num">Когда</th></tr></thead>
+    <tbody>
+      <tr><td>Убрать ИИ-картинки и госуслуги с первых экранов бота, поставить вопрос вместо меню</td><td class="num">день 1–2</td></tr>
+      <tr><td>Съёмочный день: ролики 01, 12 и 10 целиком</td><td class="num">день 3</td></tr>
+      <tr><td>Первый ролик в ленте, слово «Картон» во всех четырёх местах</td><td class="num">день 4</td></tr>
+      <tr><td>Мои цифры в калькуляторе заменены на твои</td><td class="num">день 5</td></tr>
+      <tr><td>Ещё два ролика, первая серия по одному сервису</td><td class="num">день 6–7</td></tr>
+    </tbody>
+  </table>
+  </div>
+</section>
+
+<footer>
+  <div class="fl">
+    <span>Картон · @nikitakonev</span>
+    <span>2 сентября 2026</span>
+    <span>документ обновляется по ссылке</span>
+  </div>
+</footer>
+</div>
+
+<script>
+(function(){
+  var F={r:40,v:120000,c:0.8,p:10}, BASE=30000, GOAL=100000, PRICE=1990;
+  function $(id){return document.getElementById(id);}
+  function nf(n){return Math.round(n).toString().replace(/\B(?=(\d{3})+(?!\d))/g," ");}
+  function mrr(n){
+    if(n>=1000000) return (n/1000000).toFixed(1).replace(".",",")+" млн ₽";
+    return nf(n)+" ₽";
+  }
+  function render(){
+    var views=F.r*F.v, nw=views*F.c/100, total=BASE+nw, subs=nw*F.p/100, rev=subs*PRICE;
+    $("o-views").textContent=nf(views);
+    $("o-new").textContent=nf(nw);
+    $("o-subs").textContent=nf(subs);
+    $("o-mrr").textContent=mrr(rev);
+    $("v-total").textContent=nf(total);
+    var box=$("v-box");
+    if(total>=GOAL){
+      box.className="verdict ok";
+      $("v-note").textContent="Цель закрыта, сверху ещё "+nf(total-GOAL)+". Столько роликов при таком охвате — это режим, а не рывок: считай производство, а не только идеи.";
+    } else {
+      box.className="verdict no";
+      $("v-note").textContent="Не хватает "+nf(GOAL-total)+". Нужно либо больше роликов, либо выше средний охват — одним ползунком это не закрывается.";
+    }
+    $("l-r").textContent=F.r;
+    $("l-v").textContent=nf(F.v);
+    $("l-c").textContent=String(F.c).replace(".",",")+"%";
+    $("l-p").textContent=F.p+"%";
+  }
+  function bind(id,key,flt){
+    var el=$(id);
+    el.addEventListener("input",function(){
+      F[key]=flt?parseFloat(el.value):parseInt(el.value,10);
+      render();
+    });
+  }
+  bind("r-r","r",false); bind("r-v","v",false); bind("r-c","c",true); bind("r-p","p",false);
+  render();
+})();
+</script>
+
+</body>
+</html>
