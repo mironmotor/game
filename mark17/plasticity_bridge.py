@@ -140,7 +140,7 @@ class PlasticityBridge:
         h = hashlib.sha256(event.signature().encode()).hexdigest()[:12]
         return f"{event.type}:{h}"
 
-    def hot_topic(self, *, exclude: str = "") -> dict[str, Any] | None:
+    def hot_topic(self, *, exclude: str = "", min_hits: int = 2) -> dict[str, Any] | None:
         """Тема, к которой человек возвращается сейчас.
 
         Это ответ на «что дальше» — вопрос, на который ядро до сих пор отвечало
@@ -150,10 +150,18 @@ class PlasticityBridge:
         Выбор по свежести, а не по общему числу упоминаний: тема, которую
         обсуждали двадцать раз в марте, к «что дальше» сегодня отношения не
         имеет. Из одинаково свежих побеждает та, к которой возвращались чаще.
+
+        Порог min_hits отсекает случайно брошенное вслух ДО выбора по свежести,
+        а не после. Иначе достаточно одной новой реплики, чтобы «что дальше»
+        замолчало: самой свежей окажется она, порог её отбросит, и незакрытая
+        тема рядом останется ненайденной. Ровно это и вылезло на живом прогоне
+        диалога — по отдельности каждый кусок работал.
         """
         best: tuple[float, int, str] | None = None
         for pid, entry in self.pattern_cache.items():
             if not pid.startswith("user_message:") or not entry.topic:
+                continue
+            if entry.hits < min_hits:
                 continue
             if exclude and entry.topic == exclude:
                 continue

@@ -559,6 +559,8 @@ def _hot_topic_answer(result: dict[str, Any], confidence: float) -> dict[str, An
 
     topic = str(hot.get("topic") or "").strip()
     hits = int(hot.get("hits") or 0)
+    # Порог уже применён при выборе темы; здесь он остаётся только защитой от
+    # чужого вызова с сырыми данными.
     if not topic or hits < 2:
         return None
 

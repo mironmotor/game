@@ -90,9 +90,25 @@ def _stem(word: str) -> str:
 
 
 def normalize_for_similarity(text: str) -> str:
-    """Свести текст к основам слов — чтобы словоформы не считались разными."""
-    stems = [_stem(t) for t in _TOKEN_RE.findall(str(text or ""))]
-    return " ".join(s for s in stems if s and s not in _STOP)
+    """Свести текст к основам слов — чтобы словоформы не считались разными.
+
+    Стоп-слова отсеиваются ДО стемминга и ещё раз после. Сначала было только
+    «после», и это тихо ломало половину списка: в нём лежат целые слова, а
+    стеммер успевал превратить «чтобы» в «чтоб», «нужно» в «нужн», «можно» в
+    «можн» — ни одного из них в списке нет, и служебное слово проходило в тему
+    как значимое. На живом диалоге из-за одного такого «чтоб» похожесть двух
+    формулировок одной мысли падала с 0.67 до 0.57, ниже порога, и разговор
+    расходился на два паттерна.
+    """
+    out: list[str] = []
+    for token in _TOKEN_RE.findall(str(text or "")):
+        low = token.lower().replace("ё", "е")
+        if low in _STOP:
+            continue
+        stem = _stem(low)
+        if stem and stem not in _STOP:
+            out.append(stem)
+    return " ".join(out)
 
 
 def stems_of(text: str) -> set[str]:

@@ -20,6 +20,7 @@ if str(_ROOT) not in sys.path:
 
 from mark17.events import Event, topic_key
 from mark17.llm_bridge import CACHE_TTL_SEC, LlmBridge
+from mark17.compression import _stem, similarity
 from mark17.plasticity_bridge import TOPIC_MATCH, PlasticityBridge
 from mark17.responder import _hot_topic_answer, _is_echo, _plan_answer, _recall_note
 
@@ -225,8 +226,12 @@ def test_hot_topic(tmp: Path) -> None:
     for i in range(4):
         aged.process(Event(type="user_message",
                            payload={"text": "починить сборку проекта"}, ts=now - 86400 + i))
+    # Свежая тема тоже должна прозвучать хотя бы дважды: одиночную реплику
+    # порог отсекает намеренно, чтобы случайно брошенное не глушило незакрытое.
     aged.process(Event(type="user_message",
-                       payload={"text": "нужно нанять человека"}, ts=now))
+                       payload={"text": "нужно нанять человека"}, ts=now - 1))
+    aged.process(Event(type="user_message",
+                       payload={"text": "надо нанять человека в команду"}, ts=now))
     fresh = aged.hot_topic()
     check("побеждает свежая тема, а не самая частая",
           fresh is not None and "нан" in fresh["topic"], str(fresh))
@@ -248,6 +253,53 @@ def test_hot_topic(tmp: Path) -> None:
           _hot_topic_answer({"plasticity": {"hot_topic": {"topic": "доход подн", "hits": 1}}}, 0.5) is None)
     check("без горячей темы молчит", _hot_topic_answer({"plasticity": {}}, 0.5) is None)
     check("мусор не роняет", _hot_topic_answer({"plasticity": {"hot_topic": "нет"}}, 0.5) is None)
+
+
+def test_stopwords_survive_stemming() -> None:
+    print("\n-- стоп-слова отсекаются до стемминга --")
+    # В списке лежат целые слова, а стеммер успевает их изменить: «чтобы» →
+    # «чтоб», «нужно» → «нужн». Пока проверка шла только после стемминга,
+    # половина списка молча не работала.
+    base = topic_key("поднять доход")
+    for word in ("чтобы", "нужно", "можно", "хочу", "просто", "когда", "очень"):
+        # Проверяем во фразе: одиночное служебное слово темы не имеет и законно
+        # возвращается как есть — схлопывать «ок» и «привет» в одно нельзя.
+        check(f"«{word}» не добавляет основу к теме",
+              topic_key(f"{word} поднять доход") == base,
+              f"{topic_key(f'{word} поднять доход')!r} vs {base!r}")
+
+    a, b = "хочу поднять доход в этом месяце", "что сделать чтобы поднять доход"
+    score = similarity(topic_key(a), topic_key(b))
+    check("одна мысль двумя формулировками проходит порог",
+          score >= TOPIC_MATCH, f"Дайс {score:.3f}: {topic_key(a)!r} vs {topic_key(b)!r}")
+
+
+def test_whole_dialogue(tmp: Path) -> None:
+    print("\n-- диалог целиком держится без сети --")
+    # Куски проверены поштучно выше; здесь важно, что они складываются. Именно
+    # на сквозном прогоне вылезли обе дыры: порог hits применялся после выбора
+    # свежей темы, а стоп-слова — после стемминга.
+    bridge = PlasticityBridge(tmp)
+    seen = [
+        bridge.process(_msg("хочу поднять доход в этом месяце")).hits,
+        bridge.process(_msg("а как именно поднять доходы")).hits,
+        bridge.process(_msg("что сделать чтобы поднять доход")).hits,
+    ]
+    check("три формулировки — один паттерн", seen == [1, 2, 3], str(seen))
+
+    # Новая тема, произнесённая один раз, не должна глушить незакрытую.
+    bridge.process(_msg("надо ещё лендинг запустить"))
+    hot = bridge.hot_topic(exclude=topic_key("что дальше"))
+    check("после случайной реплики «что дальше» всё ещё отвечает", hot is not None)
+    check("и отвечает по незакрытой теме, а не по случайной",
+          hot is not None and "доход" in hot["topic"], str(hot))
+
+    # А когда новая тема сама становится повторяющейся — она и побеждает.
+    bridge.process(_msg("лендинг надо всё-таки запустить"))
+    bridge.process(_msg("запустить лендинг наконец"))
+    hot2 = bridge.hot_topic(exclude=topic_key("что дальше"))
+    check("свежая повторяющаяся тема забирает первенство",
+          hot2 is not None and "лендинг" in hot2["topic"], str(hot2))
 
 
 def test_echo_is_not_memory() -> None:
@@ -319,8 +371,11 @@ def main() -> int:
         test_match_threshold_is_not_a_sieve(Path(d))
     test_plan_answer()
     test_recall_note()
+    test_stopwords_survive_stemming()
     with tempfile.TemporaryDirectory() as d:
         test_hot_topic(Path(d))
+    with tempfile.TemporaryDirectory() as d:
+        test_whole_dialogue(Path(d))
     test_echo_is_not_memory()
     with tempfile.TemporaryDirectory() as d:
         test_cache(Path(d))
