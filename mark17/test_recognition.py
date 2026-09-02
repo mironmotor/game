@@ -160,6 +160,7 @@ def test_plan_answer() -> None:
         "learn": _plan_answer("хочу выучить английский", 0.5),
         "build": _plan_answer("надо запустить лендинг", 0.5),
         "people": _plan_answer("нужно нанять человека в команду", 0.5),
+        "content": _plan_answer("надо снять ролик для инсты", 0.5),
     }
     for want, got in by_domain.items():
         check(f"область «{want}» распознана",
