@@ -24,6 +24,32 @@ import urllib.parse
 import urllib.request
 from typing import Any
 
+# Один проверенный TLS-контекст на весь модуль, а не новый на каждый запрос.
+#
+# Две причины. Первая — цена: create_default_context() читает и разбирает весь
+# системный набор корневых сертификатов, и делать это заново на каждой
+# загрузке страницы — платить сотни миллисекунд ни за что.
+#
+# Вторая важнее. Имя _SSL_CONTEXT ждут соседние модули: на боевом сервере
+# gonka_bridge импортирует его отсюда, и без него весь код-агент падает с
+# ImportError ещё на загрузке. Модуль обязан отдавать это имя.
+#
+# certifi берём, когда он есть: системный набор корней на старых серверах
+# бывает просрочен, и тогда живые сайты выглядят как сломанный TLS. Когда
+# certifi нет — обычный системный контекст, он тоже проверяет сертификаты.
+# Чего здесь не будет никогда, так это отключённой проверки: молча ходить в
+# сеть без неё опаснее, чем не ходить вовсе.
+def _make_ssl_context() -> ssl.SSLContext:
+    try:
+        import certifi
+
+        return ssl.create_default_context(cafile=certifi.where())
+    except Exception:  # noqa: BLE001
+        return ssl.create_default_context()
+
+
+_SSL_CONTEXT = _make_ssl_context()
+
 USER_AGENT = "Max17-WebSense/1.0 (+GAME assistant)"
 TIMEOUT_SEC = 12
 MAX_BYTES = 2_000_000        # 2 МБ хватает на любую статью
@@ -155,7 +181,7 @@ def fetch_url(url: str) -> dict[str, Any]:
         "Accept-Language": "ru,en;q=0.8",
     })
     try:
-        ctx = ssl.create_default_context()
+        ctx = _SSL_CONTEXT
         with urllib.request.urlopen(req, timeout=TIMEOUT_SEC, context=ctx) as resp:
             raw = resp.read(MAX_BYTES)
             if resp.headers.get("Content-Encoding", "") == "gzip":
@@ -222,7 +248,7 @@ def search(query: str, limit: int = 5) -> dict[str, Any]:
         "Accept-Language": "ru,en;q=0.8",
     })
     try:
-        with urllib.request.urlopen(req, timeout=TIMEOUT_SEC, context=ssl.create_default_context()) as resp:
+        with urllib.request.urlopen(req, timeout=TIMEOUT_SEC, context=_SSL_CONTEXT) as resp:
             page = _decode(resp.read(MAX_BYTES), resp.headers)
     except Exception as exc:  # noqa: BLE001
         return {"ok": False, "query": query, "results": [], "error": f"поиск недоступен: {exc}"}
