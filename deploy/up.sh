@@ -26,8 +26,17 @@ say()  { printf '\033[1;36m[up]\033[0m %s\n' "$*"; }
 warn() { printf '\033[1;33m[up]\033[0m %s\n' "$*"; }
 fail() { printf '\033[1;31m[up]\033[0m %s\n' "$*"; exit 1; }
 
+# Режим диагностики: ничего не меняет, только рассказывает. Нужен, чтобы
+# разобраться в поломке одной короткой командой, а не диктовать человеку
+# десяток длинных по одной — набирать их приходится вручную, с телефона.
+MODE="deploy"
+ARG1="${1:-}"
+if [ "$ARG1" = "--diag" ] || [ "$ARG1" = "-d" ]; then
+  MODE="diag"; ARG1=""
+fi
+
 # ── где сайт ─────────────────────────────────────────────────────────────────
-APP_DIR="${APP_DIR:-${1:-}}"
+APP_DIR="${APP_DIR:-$ARG1}"
 if [ -z "$APP_DIR" ]; then
   for guess in /var/www/game /var/www/mir.care /opt/game /root/game /srv/game; do
     [ -f "$guess/package.json" ] && { APP_DIR="$guess"; break; }
@@ -64,6 +73,37 @@ for a in apps:
 ' "$APP_DIR" 2>/dev/null)"
 fi
 say "pm2-процессы: $(echo ${PM2_NAMES:-не найдены} | tr '\n' ' ')"
+
+# package.json сервера снимаем ДО того, как git его перезапишет. На mir.care
+# ровно это и сломало сборку: у сервера свой package.json с drizzle-orm под
+# свои роуты (lib/db, user-count, game-state), которых в репозитории нет.
+# reset --hard подменил его версией из гита, npm ci снёс node_modules и
+# поставил ровно то, что в lock-файле, — и сборка упала на собственных файлах
+# сервера. Снимок нужен, чтобы вернуть потерянное, а не гадать по тексту ошибки.
+PRE_PKG="$(mktemp)"
+[ -f package.json ] && cp package.json "$PRE_PKG"
+EXTRA_FILE="$APP_DIR/.deploy-extra-deps.json"
+
+if [ "$MODE" = "diag" ]; then
+  echo
+  say "──────────── ДИАГНОСТИКА (ничего не меняю) ────────────"
+  if [ -d .git ]; then
+    say "версия:  $(git rev-parse --short HEAD 2>/dev/null || echo '—')"
+    echo
+    say "файлы на сервере, которых НЕТ в репозитории:"
+    git status --porcelain 2>/dev/null | awk '/^\?\?/{print "  " $2}' | head -40
+  else
+    warn "папка ещё не под гитом — запусти без --diag"
+  fi
+  echo
+  say "зависимости, восстанавливаемые после npm ci:"
+  if [ -s "$EXTRA_FILE" ]; then cat "$EXTRA_FILE"; else echo "  (пусто)"; fi
+  echo
+  say "процессы pm2: $(echo ${PM2_NAMES:-нет} | tr '\n' ' ')"
+  say "numpy: $(python3 -c 'import numpy' 2>/dev/null && echo есть || echo НЕТ)"
+  say "свободно RAM: $(free -m 2>/dev/null | awk '/^Mem:/{print $7}') МБ"
+  exit 0
+fi
 
 # ── резервная копия ──────────────────────────────────────────────────────────
 # node_modules и .next не архивируем: они восстанавливаются сборкой, а весят
@@ -118,11 +158,47 @@ say "код обновлён"
 # ── зависимости ──────────────────────────────────────────────────────────────
 # Именно npm ci без --omit=dev: next build собирает через typescript и tailwind,
 # а они в devDependencies. Без них сборка падает на ровном месте.
+# Первое знакомство: своего списка ещё нет, а package.json сервера могла
+# перезаписать уже прошлая выкатка — сравнивать не с чем, разница нулевая, и
+# потеря невидима. Но прежний package.json лежит в резервных копиях, которые
+# эта же выкатка и делает, каждый раз ДО подмены файлов. Оттуда и достаём.
+#
+# Перебираем несколько копий, а не только свежую: свежая может быть сделана
+# уже после подмены и ничего не знать о потерянном. Объединение по нескольким
+# копиям находит расхождение независимо от того, на какой выкатке оно возникло.
+if [ ! -f "$EXTRA_FILE" ]; then
+  SEEDED=""
+  for archive in $(ls -1t /root/backups/game-*.tgz 2>/dev/null | head -5); do
+    SEED="$(mktemp)"
+    if tar xzOf "$archive" ./package.json > "$SEED" 2>/dev/null && [ -s "$SEED" ]; then
+      FOUND="$(python3 "$APP_DIR/deploy/extra_deps.py" save "$SEED" package.json "$EXTRA_FILE" 2>/dev/null)"
+      [ -n "$FOUND" ] && SEEDED="yes"
+    fi
+    rm -f "$SEED"
+  done
+  [ -n "$SEEDED" ] && say "из резервных копий восстановлен список серверных зависимостей"
+fi
+
+# Что было у сервера и пропало из репозитория — запоминаем НАВСЕГДА, в файл
+# вне гита. Иначе список живёт ровно один запуск: на следующем «прежним»
+# package.json окажется уже репозиторный, и потеря станет невидимой.
+python3 "$APP_DIR/deploy/extra_deps.py" save "$PRE_PKG" package.json "$EXTRA_FILE" || true
+
 say "ставлю зависимости…"
 npm ci --no-audit --no-fund 2>&1 | tail -3 || {
   warn "npm ci не прошёл, пробую npm install"
   npm install --no-audit --no-fund 2>&1 | tail -3 || fail "зависимости не встали"
 }
+
+# npm ci ставит ровно lock-файл и ничего сверх него, поэтому серверные пакеты
+# докладываем отдельно и после — иначе он их же и снесёт.
+if [ -s "$EXTRA_FILE" ]; then
+  EXTRA_ARGS="$(python3 "$APP_DIR/deploy/extra_deps.py" args "$EXTRA_FILE" 2>/dev/null)"
+  if [ -n "$EXTRA_ARGS" ]; then
+    say "возвращаю серверные зависимости: $EXTRA_ARGS"
+    npm i --no-audit --no-fund $EXTRA_ARGS 2>&1 | tail -2 || warn "не встали: $EXTRA_ARGS"
+  fi
+fi
 
 # ── сборка ───────────────────────────────────────────────────────────────────
 if [ -d .next ]; then
@@ -154,12 +230,29 @@ cleanup_swap() {
 trap cleanup_swap EXIT
 
 say "собираю…"
-if ! npm run build; then
+BUILD_LOG="$(mktemp)"
+if ! npm run build 2>&1 | tee "$BUILD_LOG"; then
   warn "сборка упала — возвращаю прежнюю"
   rm -rf .next
   [ -d .next.backup ] && mv .next.backup .next
+
+  # Голый вывод webpack человеку ничего не говорит. «Can't resolve X» почти
+  # всегда значит одно: на сервере лежит свой файл, которого нет в
+  # репозитории, и он тянет пакет, которого нет в package.json. Называем
+  # виновника прямо, вместо того чтобы заставлять читать сотню строк.
+  MISSING="$(grep -o "Can't resolve '[^']*'" "$BUILD_LOG" 2>/dev/null \
+    | sed "s/Can't resolve '//;s/'//" | cut -d/ -f1 | sort -u | tr '\n' ' ')"
+  if [ -n "$MISSING" ]; then
+    echo
+    warn "не хватает пакетов: $MISSING"
+    warn "их тянут файлы, которых нет в репозитории:"
+    git status --porcelain 2>/dev/null | awk '/^\?\?/{print "  " $2}' | head -15
+    warn "поставить и повторить:  npm i $MISSING && up"
+  fi
+  rm -f "$BUILD_LOG"
   fail "сайт остался на прежней версии, ничего не сломано"
 fi
+rm -f "$BUILD_LOG"
 rm -rf .next.backup
 cleanup_swap
 trap - EXIT
@@ -206,9 +299,19 @@ else
   warn "pm2 нет — перезапусти процесс сайта сам"
 fi
 
+# Дальше эта же выкатка вызывается двумя буквами. Восемьдесят символов,
+# набираемых с телефона по каждому поводу, — это и есть та цена, из-за
+# которой проверить догадку дольше, чем её придумать.
+if [ "$(id -u)" = "0" ] && [ -d /usr/local/bin ]; then
+  printf '#!/bin/sh\nexec bash %s/deploy/up.sh "$@"\n' "$APP_DIR" > /usr/local/bin/up
+  chmod +x /usr/local/bin/up
+  say "теперь достаточно:  up        (и  up --diag  для разбора)"
+fi
+
 echo
 say "──────────────── ГОТОВО ────────────────"
 say "версия:   $OLD_SHA → $NEW_SHA"
 say "откат:    tar xzf $BACKUP -C $APP_DIR"
 say "проверка: curl -s localhost:3000 >/dev/null && echo ok"
 say "лог:      pm2 logs --lines 50"
+rm -f "$PRE_PKG"
