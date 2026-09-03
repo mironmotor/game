@@ -143,6 +143,46 @@ if [ "$MODE" = "diag" ]; then
   say "процессы pm2: $(echo ${PM2_NAMES:-нет} | tr '\n' ' ')"
   say "numpy: $(python3 -c 'import numpy' 2>/dev/null && echo есть || echo НЕТ)"
   say "свободно RAM: $(free -m 2>/dev/null | awk '/^Mem:/{print $7}') МБ"
+
+  # «online» в pm2 ничего не доказывает: server.py поднимается на одной
+  # стандартной библиотеке, тяжёлое подтягивается позже, и процесс горит
+  # зелёным, будучи бесполезным. Спрашиваем сам мост и его память.
+  echo
+  say "ядро Макса:"
+  BPORT="$(pm2 jlist 2>/dev/null | python3 -c '
+import json, sys
+try:
+    apps = json.load(sys.stdin)
+except Exception:
+    raise SystemExit
+for a in apps:
+    name = (a.get("name") or "").lower()
+    if "max17" in name or "bridge" in name:
+        port = ((a.get("pm2_env") or {}).get("env") or {}).get("PORT")
+        if port:
+            print(port)
+            break
+' 2>/dev/null)"
+  # Порт в окружении pm2 может и не значиться — тогда спрашиваем ядро само,
+  # перебирая обычные места. 8000 — значение по умолчанию в server.py.
+  # Вывод неудачной попытки прячем: перебор портов — наша внутренняя кухня,
+  # и три строки «connection refused» подряд читаются как поломка, хотя это
+  # обычный поиск. Показываем только то, что нашлось, а если не нашлось
+  # ничего — одну внятную строку вместо четырёх невнятных.
+  CORE_OUT=""
+  for candidate in ${BPORT:-} 8000 8790 3001; do
+    [ -n "$candidate" ] || continue
+    if CORE_OUT="$(python3 "$APP_DIR/deploy/core_health.py" "http://127.0.0.1:$candidate" 2>/dev/null)"; then
+      printf '%s\n' "$CORE_OUT"
+      CORE_OUT="ok"
+      break
+    fi
+    CORE_OUT=""
+  done
+  if [ -z "$CORE_OUT" ]; then
+    warn "мост не отвечает ни на одном из портов: ${BPORT:-} 8000 8790 3001"
+    warn "лог:  pm2 logs max17-bridge --lines 30"
+  fi
   exit 0
 fi
 
