@@ -21,6 +21,7 @@ set -uo pipefail
 
 REPO="https://github.com/mironmotor/game.git"
 BRANCH="${BRANCH:-main}"
+RAW_BASE="https://raw.githubusercontent.com/mironmotor/game/$BRANCH"
 
 say()  { printf '\033[1;36m[up]\033[0m %s\n' "$*"; }
 warn() { printf '\033[1;33m[up]\033[0m %s\n' "$*"; }
@@ -169,10 +170,31 @@ for a in apps:
   # и три строки «connection refused» подряд читаются как поломка, хотя это
   # обычный поиск. Показываем только то, что нашлось, а если не нашлось
   # ничего — одну внятную строку вместо четырёх невнятных.
+  # Диагностика ничего не обновляет — а значит помощника рядом может и не
+  # быть: на сервере дерево остаётся на той версии, до которой дошла
+  # последняя удачная выкатка. Без этого разбор молча врал бы «мост не
+  # отвечает», хотя мост жив, а не хватает файла. Берём помощника оттуда же,
+  # откуда пришёл сам скрипт, во временный файл — папку сайта не трогаем.
+  HELPER="$APP_DIR/deploy/core_health.py"
+  if [ ! -f "$HELPER" ]; then
+    HELPER="$(mktemp)"
+    if ! curl -sfL -m 20 "$RAW_BASE/deploy/core_health.py" -o "$HELPER" 2>/dev/null; then
+      rm -f "$HELPER"; HELPER=""
+      warn "не смог получить core_health.py — проверю только, отвечает ли мост"
+    fi
+  fi
+
   CORE_OUT=""
   for candidate in ${BPORT:-} 8000 8790 3001; do
     [ -n "$candidate" ] || continue
-    if CORE_OUT="$(python3 "$APP_DIR/deploy/core_health.py" "http://127.0.0.1:$candidate" 2>/dev/null)"; then
+    if [ -z "$HELPER" ]; then
+      if curl -sf -m 5 "http://127.0.0.1:$candidate/health" >/dev/null 2>&1; then
+        say "  мост отвечает на порту $candidate"
+        CORE_OUT="ok"; break
+      fi
+      continue
+    fi
+    if CORE_OUT="$(python3 "$HELPER" "http://127.0.0.1:$candidate" 2>/dev/null)"; then
       printf '%s\n' "$CORE_OUT"
       CORE_OUT="ok"
       break
