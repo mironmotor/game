@@ -31,9 +31,10 @@ fail() { printf '\033[1;31m[up]\033[0m %s\n' "$*"; exit 1; }
 # десяток длинных по одной — набирать их приходится вручную, с телефона.
 MODE="deploy"
 ARG1="${1:-}"
-if [ "$ARG1" = "--diag" ] || [ "$ARG1" = "-d" ]; then
-  MODE="diag"; ARG1=""
-fi
+case "$ARG1" in
+  --diag|-d) MODE="diag"; ARG1="" ;;
+  --core|-c) MODE="core"; ARG1="" ;;
+esac
 
 # ── где сайт ─────────────────────────────────────────────────────────────────
 APP_DIR="${APP_DIR:-$ARG1}"
@@ -83,6 +84,46 @@ say "pm2-процессы: $(echo ${PM2_NAMES:-не найдены} | tr '\n' ' 
 PRE_PKG="$(mktemp)"
 [ -f package.json ] && cp package.json "$PRE_PKG"
 EXTRA_FILE="$APP_DIR/.deploy-extra-deps.json"
+
+# Только ядро: обновить mark17 и перезапустить мост, не трогая сайт.
+#
+# Понадобилось потому, что на mir.care сайт и репозиторий — разные
+# приложения в одной папке. У сервера свой lib/auth.ts на NextAuth, в
+# репозитории lib/auth.tsx на Firebase; оба отзываются на @/lib/auth, а Next
+# разрешает .tsx раньше .ts — и репозиторный файл заслоняет серверный.
+# Сборка сайта из-за этого не проходит и пройти не может, пока приложения не
+# сведены. Ядру же сборка не нужна вовсе: это отдельный процесс на python,
+# и обновляется он независимо.
+#
+# Отсюда checkout ровно одного каталога вместо reset всего дерева: остальные
+# файлы сервера не должны шелохнуться.
+if [ "$MODE" = "core" ]; then
+  [ -d .git ] || fail "папка ещё не под гитом — сначала запусти без флагов"
+  git config --global --add safe.directory "$APP_DIR" 2>/dev/null || true
+  say "обновляю только ядро (mark17), сайт не трогаю…"
+  git fetch -q --depth 1 origin "$BRANCH" || fail "не смог забрать $BRANCH"
+  git checkout -q FETCH_HEAD -- mark17 || fail "не смог обновить mark17"
+  say "ядро обновлено до $(git rev-parse --short FETCH_HEAD)"
+
+  if python3 -c 'import numpy' 2>/dev/null; then
+    say "numpy: на месте"
+  else
+    warn "numpy нет — ядро не поднимется:  apt-get install -y python3-numpy"
+  fi
+
+  # Перезапускаем только мост. Процессы сайта не трогаем намеренно: их код мы
+  # и не меняли, а лишний рестарт — лишний способ уронить работающее.
+  BRIDGE="$(echo "$PM2_NAMES" | grep -iE 'max17|bridge' | head -1)"
+  if [ -n "$BRIDGE" ]; then
+    pm2 restart "$BRIDGE" --update-env >/dev/null 2>&1 \
+      && say "перезапущен: $BRIDGE" || warn "не смог перезапустить $BRIDGE"
+  else
+    warn "не нашёл процесс моста среди: $(echo ${PM2_NAMES:-нет} | tr '\n' ' ')"
+    warn "перезапусти сам:  pm2 restart <имя>"
+  fi
+  say "готово. Проверка:  pm2 logs $BRIDGE --lines 30"
+  exit 0
+fi
 
 if [ "$MODE" = "diag" ]; then
   echo
@@ -305,7 +346,7 @@ fi
 if [ "$(id -u)" = "0" ] && [ -d /usr/local/bin ]; then
   printf '#!/bin/sh\nexec bash %s/deploy/up.sh "$@"\n' "$APP_DIR" > /usr/local/bin/up
   chmod +x /usr/local/bin/up
-  say "теперь достаточно:  up        (и  up --diag  для разбора)"
+  say "теперь достаточно:  up   |   up --core (только ядро)   |   up --diag"
 fi
 
 echo
