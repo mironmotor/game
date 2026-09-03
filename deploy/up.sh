@@ -33,8 +33,10 @@ fail() { printf '\033[1;31m[up]\033[0m %s\n' "$*"; exit 1; }
 MODE="deploy"
 ARG1="${1:-}"
 case "$ARG1" in
-  --diag|-d) MODE="diag"; ARG1="" ;;
-  --core|-c) MODE="core"; ARG1="" ;;
+  --diag|-d)   MODE="diag";     ARG1="" ;;
+  --core|-c)   MODE="core";     ARG1="" ;;
+  --auto)      MODE="auto";     ARG1="" ;;
+  --auto-off)  MODE="auto-off"; ARG1="" ;;
 esac
 
 # ── где сайт ─────────────────────────────────────────────────────────────────
@@ -44,10 +46,16 @@ if [ -z "$APP_DIR" ]; then
     [ -f "$guess/package.json" ] && { APP_DIR="$guess"; break; }
   done
 fi
+# Последняя догадка — та папка, из которой скрипт запустили. Известные пути
+# перечислены выше и проверяются первыми, но список конечен, а запуск изнутри
+# проекта — самый очевидный способ сказать «работай здесь».
+if [ -z "$APP_DIR" ] && [ -f "$PWD/package.json" ]; then
+  APP_DIR="$PWD"
+fi
 [ -n "$APP_DIR" ] || fail "не нашёл папку сайта — запусти так: APP_DIR=/путь bash up.sh"
 [ -f "$APP_DIR/package.json" ] || fail "в $APP_DIR нет package.json"
 cd "$APP_DIR" || fail "не смог зайти в $APP_DIR"
-say "папка сайта:  $APP_DIR"
+[ "$MODE" = "core" ] || say "папка сайта:  $APP_DIR"
 
 command -v git  >/dev/null || fail "нет git"
 command -v npm  >/dev/null || fail "нет npm"
@@ -74,7 +82,7 @@ for a in apps:
         print(name)
 ' "$APP_DIR" 2>/dev/null)"
 fi
-say "pm2-процессы: $(echo ${PM2_NAMES:-не найдены} | tr '\n' ' ')"
+[ "$MODE" = "core" ] || say "pm2-процессы: $(echo ${PM2_NAMES:-не найдены} | tr '\n' ' ')"
 
 # package.json сервера снимаем ДО того, как git его перезапишет. На mir.care
 # ровно это и сломало сборку: у сервера свой package.json с drizzle-orm под
@@ -85,6 +93,34 @@ say "pm2-процессы: $(echo ${PM2_NAMES:-не найдены} | tr '\n' ' 
 PRE_PKG="$(mktemp)"
 [ -f package.json ] && cp package.json "$PRE_PKG"
 EXTRA_FILE="$APP_DIR/.deploy-extra-deps.json"
+
+# Автообновление. Ради него всё и затевалось: человек набирает команды
+# вручную с телефона, в браузерной консоли, которая ещё и рвётся. Пока
+# выкатка требует набора, цена любой правки — не минута работы, а полчаса
+# мучений, и правки просто перестают делаться.
+#
+# Строка cron сначала обновляет deploy, и только потом запускает скрипт
+# оттуда. Порядок важен: bash читает файл по мере выполнения, и если
+# подменить его во время работы, исполнение поедет посреди строки. Здесь
+# обновление и запуск — разные процессы, так что подмена безопасна.
+CRON_MARK="max17-up-auto"
+CRON_LINE="*/10 * * * * cd $APP_DIR && git fetch -q --depth 1 origin $BRANCH >/dev/null 2>&1; git checkout -q FETCH_HEAD -- deploy >/dev/null 2>&1; bash $APP_DIR/deploy/up.sh --core >> /var/log/$CRON_MARK.log 2>&1  # $CRON_MARK"
+
+if [ "$MODE" = "auto" ]; then
+  [ -d .git ] || fail "папка ещё не под гитом — сначала запусти без флагов"
+  ( crontab -l 2>/dev/null | grep -v "$CRON_MARK"; echo "$CRON_LINE" ) | crontab - \
+    || fail "не смог записать расписание"
+  say "автообновление включено: раз в 10 минут ядро подтягивается само"
+  say "лог:       tail -f /var/log/$CRON_MARK.log"
+  say "выключить: up --auto-off"
+  exit 0
+fi
+
+if [ "$MODE" = "auto-off" ]; then
+  crontab -l 2>/dev/null | grep -v "$CRON_MARK" | crontab - 2>/dev/null || true
+  say "автообновление выключено"
+  exit 0
+fi
 
 # Только ядро: обновить mark17 и перезапустить мост, не трогая сайт.
 #
@@ -101,10 +137,22 @@ EXTRA_FILE="$APP_DIR/.deploy-extra-deps.json"
 if [ "$MODE" = "core" ]; then
   [ -d .git ] || fail "папка ещё не под гитом — сначала запусти без флагов"
   git config --global --add safe.directory "$APP_DIR" 2>/dev/null || true
-  say "обновляю только ядро (mark17), сайт не трогаю…"
   git fetch -q --depth 1 origin "$BRANCH" || fail "не смог забрать $BRANCH"
+
+  # Раз в десять минут перезапускать мост, когда ничего не поменялось, —
+  # значит раз в десять минут ронять живые запросы на ровном месте. Поэтому
+  # сверяемся с тем, что выкатывали в прошлый раз, и молча уходим, если
+  # версия та же. Тишина здесь и есть правильное поведение: в логе копится
+  # только то, что действительно произошло.
+  CORE_SHA="$(git rev-parse --short FETCH_HEAD)"
+  SHA_MARK="$APP_DIR/.deploy-core-sha"
+  if [ -f "$SHA_MARK" ] && [ "$(cat "$SHA_MARK" 2>/dev/null)" = "$CORE_SHA" ]; then
+    exit 0
+  fi
+
   git checkout -q FETCH_HEAD -- mark17 || fail "не смог обновить mark17"
-  say "ядро обновлено до $(git rev-parse --short FETCH_HEAD)"
+  printf '%s' "$CORE_SHA" > "$SHA_MARK"
+  say "$(date '+%d.%m %H:%M') · $APP_DIR · ядро обновлено до $CORE_SHA"
 
   if python3 -c 'import numpy' 2>/dev/null; then
     say "numpy: на месте"
@@ -408,7 +456,7 @@ fi
 if [ "$(id -u)" = "0" ] && [ -d /usr/local/bin ]; then
   printf '#!/bin/sh\nexec bash %s/deploy/up.sh "$@"\n' "$APP_DIR" > /usr/local/bin/up
   chmod +x /usr/local/bin/up
-  say "теперь достаточно:  up   |   up --core (только ядро)   |   up --diag"
+  say "дальше:  up  |  up --core  |  up --diag  |  up --auto (само, раз в 10 мин)"
 fi
 
 echo
