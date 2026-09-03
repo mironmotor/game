@@ -43,9 +43,12 @@ command -v npm  >/dev/null || fail "нет npm"
 
 # Процесс запоминаем ДО обновления кода: pm2 перечитает список после рестарта,
 # а нам нужно знать, кого именно перезапускать, ещё на старом состоянии.
-PM2_NAME=""
+# Процессов в одной папке бывает несколько: рядом с сайтом живёт мост Макса.
+# Первый найденный — не тот, кого достаточно перезапустить: код обновился у
+# обоих. Поэтому собираем всех, у кого рабочая папка совпадает.
+PM2_NAMES=""
 if command -v pm2 >/dev/null 2>&1; then
-  PM2_NAME="$(pm2 jlist 2>/dev/null | python3 -c '
+  PM2_NAMES="$(pm2 jlist 2>/dev/null | python3 -c '
 import json, sys, os
 try:
     apps = json.load(sys.stdin)
@@ -55,12 +58,12 @@ want = os.path.realpath(sys.argv[1])
 for a in apps:
     env = a.get("pm2_env", {}) or {}
     cwd = env.get("pm_cwd") or env.get("cwd") or ""
-    if cwd and os.path.realpath(cwd) == want:
-        print(a.get("name", ""))
-        break
+    name = a.get("name", "")
+    if name and cwd and os.path.realpath(cwd) == want:
+        print(name)
 ' "$APP_DIR" 2>/dev/null)"
 fi
-say "pm2-процесс:  ${PM2_NAME:-не найден}"
+say "pm2-процессы: $(echo ${PM2_NAMES:-не найдены} | tr '\n' ' ')"
 
 # ── резервная копия ──────────────────────────────────────────────────────────
 # node_modules и .next не архивируем: они восстанавливаются сборкой, а весят
@@ -77,12 +80,25 @@ else
 fi
 
 # ── усыновление или обновление ───────────────────────────────────────────────
+# /var/www принадлежит не root, и git на этом останавливается: «detected
+# dubious ownership». Защита правильная — она не даёт выполнить чужой
+# .git/config от имени root, — но здесь папка своя, и запрет надо снять
+# явно. Ровно эту команду git и предлагает сам в тексте ошибки.
+git config --global --add safe.directory "$APP_DIR" 2>/dev/null || true
+
 if [ ! -d .git ]; then
   say "папка не под гитом — усыновляю (история появится, файлы вне репозитория останутся)"
   git init -q || fail "git init не прошёл"
-  git remote add origin "$REPO" 2>/dev/null || git remote set-url origin "$REPO"
+fi
+
+# Remote выставляем отдельно от init, а не следом за ним: если прошлый запуск
+# успел создать .git и споткнулся до remote, папка выглядит как «уже под
+# гитом», а origin в ней нет — и fetch падает с «origin does not appear to be
+# a git repository». Спрашиваем git, есть ли remote, вместо того чтобы гадать.
+if git remote get-url origin >/dev/null 2>&1; then
+  git remote set-url origin "$REPO" || fail "не смог поправить origin"
 else
-  git remote set-url origin "$REPO" 2>/dev/null || true
+  git remote add origin "$REPO" || fail "не смог добавить origin"
 fi
 
 say "забираю $BRANCH…"
@@ -173,9 +189,15 @@ fi
 
 # ── перезапуск ───────────────────────────────────────────────────────────────
 say "перезапускаю…"
-if [ -n "$PM2_NAME" ]; then
-  pm2 restart "$PM2_NAME" --update-env >/dev/null 2>&1 && say "pm2: $PM2_NAME перезапущен" \
-    || warn "pm2 не перезапустил $PM2_NAME — сделай сам: pm2 restart $PM2_NAME"
+if [ -n "$PM2_NAMES" ]; then
+  echo "$PM2_NAMES" | while read -r proc; do
+    [ -n "$proc" ] || continue
+    if pm2 restart "$proc" --update-env >/dev/null 2>&1; then
+      say "pm2: $proc перезапущен"
+    else
+      warn "pm2 не перезапустил $proc — сделай сам: pm2 restart $proc"
+    fi
+  done
 elif command -v pm2 >/dev/null 2>&1; then
   warn "не понял, какой процесс отвечает за $APP_DIR"
   pm2 list
@@ -189,4 +211,4 @@ say "──────────────── ГОТОВО ────�
 say "версия:   $OLD_SHA → $NEW_SHA"
 say "откат:    tar xzf $BACKUP -C $APP_DIR"
 say "проверка: curl -s localhost:3000 >/dev/null && echo ok"
-say "лог:      pm2 logs ${PM2_NAME:-} --lines 50"
+say "лог:      pm2 logs --lines 50"
