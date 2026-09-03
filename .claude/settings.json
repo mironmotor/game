@@ -1,0 +1,22 @@
+{
+  "permissions": {
+    "deny": [
+      "Read(./piper/**)",
+      "Read(./certs/**)",
+      "Read(./uploads/**)",
+      "Read(./.env)",
+      "Read(./.env.*)",
+      "Read(**/max17_bridge_token)",
+      "Read(/root/backups/**)",
+      "Read(/etc/max17/**)",
+      "Read(**/*.tgz)",
+      "Read(**/id_rsa*)",
+      "Read(**/*.pem)",
+      "Read(**/*.key)",
+      "Bash(cat .env*)",
+      "Bash(cat /etc/max17/*)",
+      "Bash(printenv)",
+      "Bash(env)"
+    ]
+  }
+}
