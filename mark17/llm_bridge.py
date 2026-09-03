@@ -2,20 +2,51 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
+import time
 import urllib.error
 import urllib.request
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 
+from .compression import TOPIC_MATCH, similarity
+from .events import topic_key
 from .max_prompt import system_prompt
 
 
 # MBA 2015 ~8GB RAM: qwen2.5:0.5b (~400MB). phi3:mini ~2.3GB — если хватает памяти.
 DEFAULT_MODEL = "qwen2.5:0.5b"
 DEFAULT_HOST = "http://127.0.0.1:11434"
-TIMEOUT_SEC = 45
+
+# Сколько ждать провайдера. Было 45 секунд — столько человек и стоял перед
+# пустым экраном, если провайдер тупил: детерминированный ответ ядра готов за
+# миллисекунды, но выдавался только после того, как ожидание сети закончится.
+# 20 секунд хватает любому нормальному ответу; всё, что дольше, — это уже не
+# «медленно», а «не приехало», и честнее отдать ответ ядра.
+TIMEOUT_SEC = max(3, int(os.environ.get("MAX17_LLM_TIMEOUT_SEC", "20") or 20))
+
+# Кеш ответов провайдера. Неделя — компромисс: за это время ответ на «как
+# поднять доход» не протухает, а сдвиг в проекте успевает до кеша дойти.
+CACHE_TTL_SEC = 7 * 24 * 3600
+CACHE_LIMIT = 500
+
+# Порядок выбора модели на OpenRouter. Раньше здесь стояла одна бесплатная
+# gemini-flash: быстрая и болтливая, но она проваливает ровно то, ради чего
+# LLM тут вообще нужен — держать инструкцию на несколько шагов, не терять
+# формат и не выдумывать вызовы. Список отсортирован по агентности, а не по
+# цене и не по скорости: первый пункт — то, чем Макс думает по умолчанию,
+# остальные идут запасными, если первый недоступен.
+#
+# MAX17_LLM_MODEL по-прежнему главнее всего списка.
+OPENROUTER_AGENTIC = (
+    "anthropic/claude-sonnet-4.5",
+    "openai/gpt-5-mini",
+    "google/gemini-2.5-flash",
+    "google/gemini-2.0-flash-exp:free",
+)
 
 
 @dataclass
@@ -34,8 +65,12 @@ class LlmBridge:
         host: str = DEFAULT_HOST,
         model: str = DEFAULT_MODEL,
         enabled: bool = True,
+        state_dir: Path | None = None,
     ) -> None:
         self.host = host.rstrip("/")
+        # Где лежит кеш ответов. Не задан — кеш просто не работает, и это
+        # законно: ядро обязано отвечать и без него.
+        self.state_dir = state_dir
         self.model = model
         self.enabled = enabled
         self._checked = False
@@ -62,7 +97,7 @@ class LlmBridge:
         if env_model:
             self.model = env_model
         elif self.provider == "openrouter":
-            self.model = "google/gemini-2.0-flash-exp:free"
+            self.model = OPENROUTER_AGENTIC[0]
         elif self.provider == "minimax":
             self.model = os.environ.get("MINIMAX_MODEL", "").strip() or "MiniMax-M2"
 
@@ -103,6 +138,72 @@ class LlmBridge:
 Память:
 {mem}"""
 
+    def _cache_path(self) -> Path | None:
+        return (self.state_dir / "llm_cache.json") if self.state_dir else None
+
+    def _cache_key(self, prompt: str) -> str:
+        # Модель входит в ключ: ответы разных моделей смешивать нельзя.
+        return hashlib.sha256(f"{self.model}|{topic_key(prompt)}".encode()).hexdigest()[:24]
+
+    def _cache_get(self, prompt: str) -> str:
+        """Найти прошлый ответ на этот же по смыслу вопрос.
+
+        Точного ключа мало по той же причине, по какой его не хватало
+        паттернам: «как поднять доход» и «как мне поднять доход в этом месяце»
+        дают разные хеши, а поход в сеть за ними один и тот же. Поэтому здесь
+        не поиск по ключу, а перебор с той же мерой похожести. Записей не
+        больше CACHE_LIMIT, так что перебор дешевле одного запроса к сети на
+        три порядка.
+        """
+        path = self._cache_path()
+        if not path or not path.exists():
+            return ""
+        try:
+            raw = json.loads(path.read_text())
+        except (OSError, ValueError):
+            return ""
+        if not isinstance(raw, dict):
+            return ""
+
+        topic = topic_key(prompt)
+        now = time.time()
+        best_text, best_score = "", 0.0
+        for row in raw.values():
+            if not isinstance(row, dict) or row.get("model") != self.model:
+                continue
+            if now - float(row.get("ts", 0)) > CACHE_TTL_SEC:
+                continue
+            score = similarity(topic, str(row.get("topic") or ""))
+            if score > best_score:
+                best_text, best_score = str(row.get("text") or ""), score
+        return best_text if best_score >= TOPIC_MATCH else ""
+
+    def _cache_put(self, prompt: str, text: str) -> None:
+        path = self._cache_path()
+        if not path or not text.strip():
+            return
+        try:
+            raw = json.loads(path.read_text()) if path.exists() else {}
+            if not isinstance(raw, dict):
+                raw = {}
+        except (OSError, ValueError):
+            raw = {}
+        raw[self._cache_key(prompt)] = {
+            "text": text,
+            "ts": time.time(),
+            "topic": topic_key(prompt),
+            "model": self.model,
+        }
+        if len(raw) > CACHE_LIMIT:
+            # Выкидываем самые старые: кеш — это ускорение, а не архив.
+            keep = sorted(raw.items(), key=lambda kv: kv[1].get("ts", 0), reverse=True)
+            raw = dict(keep[:CACHE_LIMIT])
+        try:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(json.dumps(raw, ensure_ascii=False))
+        except OSError:
+            pass  # кеш не обязан работать, чтобы работал ответ
+
     def ask(
         self,
         prompt: str,
@@ -115,6 +216,13 @@ class LlmBridge:
                 text="LLM отключён (--no-llm). Используй plasticity hint.",
                 model=self.model,
                 status="skipped",
+            )
+
+        # Тот же по смыслу вопрос второй раз в сеть не идёт.
+        cached = self._cache_get(prompt)
+        if cached:
+            return LlmResponse(
+                ok=True, text=cached, model=self.model, status="cached", latency_ms=0.0
             )
 
         if self.provider == "openrouter":
@@ -162,6 +270,8 @@ class LlmBridge:
                 raw = json.loads(resp.read().decode())
             text = str(raw.get("response", "")).strip()
             ms = (_time.time() - t0) * 1000
+            if text:
+                self._cache_put(prompt, text)
             return LlmResponse(
                 ok=bool(text),
                 text=text or "(пустой ответ)",
@@ -227,6 +337,8 @@ class LlmBridge:
                         status="error",
                         latency_ms=round(ms, 1),
                     )
+            if text:
+                self._cache_put(prompt, text)
             return LlmResponse(
                 ok=bool(text),
                 text=text or "(пустой ответ)",

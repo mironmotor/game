@@ -9,7 +9,9 @@ from __future__ import annotations
 import re
 from typing import Any
 
+from mark17.compression import similarity
 from mark17.events import Event
+from mark17.planner import build_plan, _detect_domain
 from mark17.principles import REALITY_CONTACT_HINT
 
 CAPABILITY_TRIGGERS = (
@@ -251,12 +253,31 @@ def _clean_public_text(value: Any, *, limit: int = 220) -> str:
     return " ".join(text.split()).rstrip(".")[:limit]
 
 
+# Насколько «воспоминание» должно совпасть с текущим вопросом, чтобы считаться
+# его эхом. Выше этого — ядро собирается пересказать человеку его же реплику.
+ECHO_MATCH = 0.85
+
+
+def _is_echo(user_text: Any, memory_text: Any) -> bool:
+    """Не воспоминание, а эхо: та же реплика, вернувшаяся из памяти.
+
+    Каждое сообщение попадает в память, поэтому на повторный вопрос ядро
+    находило ближайшим совпадением сам этот вопрос и отвечало «в памяти есть
+    похожий смысл: <ровно то, что ты сейчас спросил>». Формально верно,
+    практически — пустой ход, который выглядел как непонимание.
+    """
+    return similarity(str(user_text or ""), str(memory_text or "")) >= ECHO_MATCH
+
+
 def _public_memory_summary(row: dict[str, Any], user_text: str, *, limit: int = 220) -> str:
     for key in ("summary", "reinforce", "text", "event_type"):
         value = row.get(key)
         if value and is_memory_relevant(user_text, value):
             cleaned = _clean_public_text(value, limit=limit)
-            if cleaned:
+            # Эхо проверяем ПОСЛЕ очистки: служебный префикс «user_message: »
+            # добавляет свои основы и разбавляет похожесть настолько, что
+            # дословный повтор вопроса перестаёт выглядеть дословным.
+            if cleaned and not _is_echo(user_text, cleaned):
                 return cleaned
     return ""
 
@@ -347,6 +368,14 @@ def _next_adaptation(result: dict[str, Any], user_text: str) -> str:
         return "продолжить копить контекст и проверять повторяющиеся паттерны"
 
     if user_text and text.lower() == user_text.lower():
+        # Совет должен согласовываться с уверенностью в том же предложении.
+        # На устойчивом паттерне «закрепить как новый» звучало прямым
+        # самопротиворечием: «уверенность 100%… закрепить как новый».
+        if _confidence(result) >= 0.8:
+            return (
+                "перейти от разговора к результату: этот запрос повторяется, "
+                "пора не уточнять его, а сделать по нему один шаг"
+            )
         return "закрепить этот запрос как новый паттерн и связать его с будущими результатами"
 
     return text.rstrip(".")[:220]
@@ -509,6 +538,47 @@ def _debug_answer(result: dict[str, Any], self_evaluation: dict[str, Any] | None
     }
 
 
+def _hot_topic_answer(result: dict[str, Any], confidence: float) -> dict[str, Any] | None:
+    """Ответ на «что дальше» — по теме, к которой человек возвращается.
+
+    Это самый частый вопрос в HUD, и до сих пор ядро отвечало на него
+    перечислением собственных возможностей: «могу принять сообщение, вспомнить
+    релевантную память, обновить ассоциации». Между тем ответ у него был —
+    тема, о которой шёл разговор, и первый шаг по ней.
+
+    Восстанавливать точную формулировку из ключа темы нельзя: там основы слов,
+    а не фраза. Поэтому план строится прямо по ним — планировщику для узнавания
+    области хватает и основ.
+    """
+    plasticity = result.get("plasticity")
+    if not isinstance(plasticity, dict):
+        return None
+    hot = plasticity.get("hot_topic")
+    if not isinstance(hot, dict):
+        return None
+
+    topic = str(hot.get("topic") or "").strip()
+    hits = int(hot.get("hits") or 0)
+    # Порог уже применён при выборе темы; здесь он остаётся только защитой от
+    # чужого вызова с сырыми данными.
+    if not topic or hits < 2:
+        return None
+
+    plan = _plan_answer(topic, confidence)
+    if not plan:
+        return None
+
+    return {
+        "text": (
+            f"Незакрытым остаётся то, о чём мы говорили {hits} раза подряд.\n\n"
+            f"{plan['text']}"
+        ),
+        "source": "composer_hot_topic",
+        "confidence": round(max(confidence, 0.6), 4),
+        "domain": plan.get("domain"),
+    }
+
+
 def _vague_status_answer(confidence: float) -> dict[str, Any]:
     return {
         "text": (
@@ -518,6 +588,102 @@ def _vague_status_answer(confidence: float) -> dict[str, Any]:
         ),
         "source": "composer",
         "confidence": round(confidence, 4),
+    }
+
+
+# С какого раза возвращение к теме перестаёт быть совпадением. Два — это ещё
+# «уточнил», три — уже «ходишь кругами», и сказать об этом полезнее, чем ещё
+# раз разложить ту же цель по полочкам.
+CIRCLING_HITS = 3
+
+
+def _hits(result: dict[str, Any]) -> int:
+    plasticity = result.get("plasticity")
+    if isinstance(plasticity, dict):
+        try:
+            return max(0, int(plasticity.get("hits") or 0))
+        except (TypeError, ValueError):
+            return 0
+    return 0
+
+
+def _recall_note(result: dict[str, Any], user_text: str) -> str:
+    """Одна строка о том, что этот разговор уже был.
+
+    Ядро действительно это знает — счётчик темы лежит в паттерне, — но наружу
+    знание не выходило: человек получал ту же аккуратную раскладку в третий
+    раз подряд, как будто говорит с ним впервые. Заметить повтор и сказать о
+    нём — самое честное, что тут можно сделать, и это не требует ни сети, ни
+    выдумывания.
+    """
+    hits = _hits(result)
+    if hits < CIRCLING_HITS:
+        return ""
+
+    # Цитировать прошлую реплику здесь нельзя: раз hits вырос, тема та же, и
+    # «в прошлый раз речь шла о том же: <почти тот же вопрос>» — снова эхо,
+    # только другими словами. Порог ECHO_MATCH его не ловит: у переформулировок
+    # одной темы похожесть держится около 0.8, чуть ниже отсечки.
+    times = "третий" if hits == 3 else f"{hits}-й"
+    return (
+        f"Ты возвращаешься к этому {times} раз. Значит, дело не в том, чтобы обдумать ещё раз, "
+        "а в том, что первый шаг до сих пор не сделан."
+    )
+
+
+def _plan_answer(user_text: str, confidence: float) -> dict[str, Any] | None:
+    """Ответ по существу для вопроса про действие — своими силами, без сети.
+
+    До сих пор на «как поднять доход» ядро отвечало «Я понял запрос. Близкого
+    воспоминания пока нет. Уверенность средняя» — отчётом о маршрутизации, а не
+    ответом. Своего содержания у него не было, поэтому за содержанием всегда
+    шли к LLM, и каждый ответ начинался с ожидания сети.
+
+    Между тем разбор цели на шаги в ядре уже есть — `planner.build_plan`, с
+    интегралом по траекториям и проверкой реальностью на каждом шаге. Он просто
+    был заперт в режиме /autoplan. Здесь он отвечает в чате.
+
+    Срабатывает только когда планировщик уверенно узнал область (деньги, тело,
+    учёба, дело, люди). На «default» ответа нет: выдавать план на любую реплику
+    значило бы делать вид, что понял, — а это ровно то, чем LLM и грешит.
+    """
+    goal = user_text.strip()
+    if len(goal) < 8:
+        return None
+    if _detect_domain(goal.lower()) == "default":
+        return None
+
+    plan = build_plan(goal)
+    tasks = [t for t in plan.get("tasks", []) if t.get("desc")]
+    if not tasks:
+        return None
+
+    steps = "\n".join(
+        f"{i}. {t['desc']}" for i, t in enumerate(tasks[:5], 1)
+    )
+    check = next((t.get("reality_check") for t in tasks if t.get("reality_check")), "")
+
+    # Порядок шагов выбран интегралом по траекториям, а не «сначала важное»:
+    # первым идёт самый дешёвый старт, потому что дороже всего именно начать.
+    # Без этой строчки ответ открывался мелкой логистикой и выглядел так, будто
+    # ядро не поняло, о чём его спросили.
+    breakthrough = next((t["desc"] for t in tasks if t.get("mgr") == "MGR-3"), "")
+    head = f"Главное здесь — {breakthrough[0].lower() + breakthrough[1:]}." if breakthrough else ""
+
+    text = (
+        f"{head}\n"
+        f"Порядок ниже — от самого дешёвого старта: начать всегда дороже всего.\n\n"
+        f"{steps}\n\n"
+        f"{check}"
+    ).strip()
+
+    return {
+        "text": text,
+        "source": "composer_plan",
+        # Уверенность паттерна тут не при чём: план собран разбором цели, а не
+        # узнаванием. Отдаём уверенность разбора, не занижая и не завышая.
+        "confidence": round(max(confidence, 0.6), 4),
+        "domain": plan.get("domain"),
     }
 
 
@@ -600,7 +766,29 @@ def compose_answer(
         return _memory_question_answer(event, response)
 
     if _is_vague_input(user_text):
-        return _vague_status_answer(confidence)
+        # «Ок», «что дальше» — не пустая реплика, а вопрос про незакрытое.
+        # Ответ у ядра есть, если разговор уже шёл о чём-то конкретном.
+        hot = _hot_topic_answer(response, confidence)
+        return hot or _vague_status_answer(confidence)
+
+    # Сначала пробуем ответить по существу своими силами. Получилось — за
+    # содержанием не нужно идти в сеть вообще.
+    planned = _plan_answer(user_text, confidence)
+    if planned:
+        # Повтор темы дописывается сверху: план остаётся, но человек видит, что
+        # ядро помнит предыдущие заходы, а не начинает разговор с чистого листа.
+        note = _recall_note(response, user_text)
+        if note:
+            planned["text"] = f"{note}\n\n{planned['text']}"
+        return planned
+
+    note = _recall_note(response, user_text)
+    if note:
+        return {
+            "text": f"{note} {REALITY_CONTACT_HINT}",
+            "source": "composer_recall",
+            "confidence": round(confidence, 4),
+        }
 
     recalled = _first_recalled_summary(response, user_text)
     semantic = _first_semantic_summary(response, user_text)

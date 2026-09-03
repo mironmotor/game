@@ -7,6 +7,26 @@ import time
 from dataclasses import dataclass, field
 from typing import Any
 
+from mark17.compression import stems_of
+
+
+def topic_key(text: Any, *, limit: int = 12) -> str:
+    """Ключ темы реплики: основы значимых слов, отсортированные и без повторов.
+
+    Порядок слов и словоформы не должны влиять: «поднять доход» и «доход
+    поднимать» — про одно. Ограничение в 12 основ не даёт длинному сообщению
+    развалиться на уникальный ключ из-за одной лишней детали в конце; берутся
+    самые длинные основы, потому что короткие чаще всего служебные.
+
+    Пусто (одни стоп-слова, смайлик, «ок») — ключ вырождается в сам текст,
+    иначе все такие реплики схлопнулись бы в один паттерн.
+    """
+    stems = sorted(set(stems_of(text)))
+    if not stems:
+        return str(text or "").strip().lower()[:60]
+    top = sorted(sorted(stems, key=len, reverse=True)[:limit])
+    return " ".join(top)
+
 
 KNOWN_TYPES = frozenset(
     {
@@ -30,7 +50,21 @@ class Event:
     source: str = "stdin"
 
     def signature(self) -> str:
-        """Стабильный ключ паттерна для meta/plasticity cache."""
+        """Стабильный ключ паттерна для meta/plasticity cache.
+
+        Для реплики человека ключ строится по СМЫСЛУ, а не по строке.
+
+        Раньше здесь был json.dumps всего payload, то есть SHA от точного
+        текста. Из-за этого «как поднять доход» и «как поднять доход в этом
+        месяце» были двумя разными паттернами, каждый со счётчиком с нуля.
+        В живом чате человек дословно не повторяется никогда — значит hits
+        почти всегда оставался единицей, а уверенность (0.45·hits/6 + …)
+        навсегда прилипала к трети. Ядро училось только на копипасте.
+
+        Теперь берутся основы значимых слов, отсортированные и без повторов:
+        одна и та же мысль разными словами — один паттерн, и повторный разговор
+        о том же наконец засчитывается как повтор.
+        """
         if self.type == "terminal_error":
             line = str(self.payload.get("line", ""))[:120]
             return f"terminal_error:{line}"
@@ -38,6 +72,8 @@ class Event:
             return f"open_folder:{self.payload.get('path', '')}"
         if self.type == "shell_command":
             return f"shell_command:{self.payload.get('cmd', '')}"
+        if self.type == "user_message":
+            return f"user_message:{topic_key(self.payload.get('text', ''))}"
         return f"{self.type}:{json.dumps(self.payload, sort_keys=True)}"
 
 

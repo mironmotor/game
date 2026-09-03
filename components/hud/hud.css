@@ -221,8 +221,10 @@
 /* ── Ядро: кнопка с canvas-сферой из частиц ── */
 .hud-orb {
   position: relative;
-  width: 150px;
-  height: 150px;
+  /* Было 150px — орб съедал центр экрана и на телефоне выдавливал подсказку
+     с текстом под сгиб. 112px читается так же и оставляет место контенту. */
+  width: 112px;
+  height: 112px;
   display: grid;
   place-items: center;
   background: none;

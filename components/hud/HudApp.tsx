@@ -293,23 +293,42 @@ function HudContent() {
         ? `${userMsg}\n\n[ФАЙЛ: ${attached.name}]\n${attached.text}`
         : userMsg;
 
-      const max17 = await emitMax17HudEvent(
-        {
-          type: 'user_message',
-          text: textForCore,
-          source: 'hud',
-          timestamp: new Date().toISOString(),
-        },
-        true,
-      );
+      // Два прохода вместо одного. Раньше ответ ждал провайдера целиком: до
+      // 45 секунд перед пустым экраном, хотя ядро своё уже досчитало. Теперь
+      // сначала берём ответ ядра (`llm: false` — сети не касается вообще), а
+      // развёрнутый забираем следом и подменяем текст, когда тот доедет.
+      const base = {
+        type: 'user_message' as const,
+        text: textForCore,
+        source: 'hud',
+        timestamp: new Date().toISOString(),
+      };
 
-      const fullResponse = max17
-        ? formatMax17HudReply(max17)
+      const fast = await emitMax17HudEvent({ ...base, llm: false }, true);
+      const fastResponse = fast
+        ? formatMax17HudReply(fast)
         : 'Локальный Max17-мост сейчас недоступен. Сообщение принято, основной HUD продолжает работать.';
 
-      setAgiMessage(`Вы: ${userMsg} MAX17: ${fullResponse}`);
+      setAgiMessage(`Вы: ${userMsg} MAX17: ${fastResponse}`);
       setAttached(null);
-      await saveMessage('model', fullResponse, sid);
+      setIsLoading(false);
+      await saveMessage('model', fastResponse, sid);
+
+      // Апгрейд идёт фоном и только дополняет: если провайдер молчит, не
+      // отвечает или его вовсе нет, на экране остаётся ответ ядра.
+      if (fast) {
+        void emitMax17HudEvent(base, false)
+          .then(async (deep) => {
+            if (!deep) return;
+            const deepText = formatMax17HudReply(deep);
+            if (!deepText || deepText === fastResponse) return;
+            setAgiMessage(`Вы: ${userMsg} MAX17: ${deepText}`);
+            await saveMessage('model', deepText, sid);
+          })
+          .catch(() => {
+            // молча: ответ ядра уже показан и остаётся верным
+          });
+      }
     } catch (e) {
       console.error(e);
       setAgiMessage(

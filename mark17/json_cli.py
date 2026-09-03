@@ -479,11 +479,34 @@ def _attach_links(event: Event) -> None:
         event.payload["link_context"] = context
 
 
+def _wants_llm(event: Event, args: argparse.Namespace) -> bool:
+    """Нужен ли LLM именно этому запросу.
+
+    Раньше это решалось только флагом процесса: LLM либо включён на всё, либо
+    выключен на всё. На практике из-за этого каждый ответ в чате ждал сеть —
+    сначала до 45 секунд запроса к провайдеру, и только потом человек видел
+    хоть что-то, хотя детерминированный ответ ядра был готов сразу.
+
+    Теперь запрос может сказать `"llm": false` и получить мгновенный ответ
+    ядра, а интерфейс — прислать второй запрос за развёрнутым ответом и
+    подменить текст, когда тот доедет. Флаг процесса по-прежнему главнее:
+    выключенный `--no-llm` запросом не включить.
+    """
+    if args.no_llm:
+        return False
+    want = event.payload.get("llm")
+    if isinstance(want, bool):
+        return want
+    if isinstance(want, str):
+        return want.strip().lower() not in {"false", "0", "no", "off"}
+    return True
+
+
 def _handle_event(event: Event, args: argparse.Namespace, state_dir: Path) -> dict[str, Any]:
     brain = Mark17Brain(
         state_dir,
         plasticity_threshold=args.plasticity_threshold,
-        llm_enabled=not args.no_llm,
+        llm_enabled=_wants_llm(event, args),
         llm_model=args.ollama_model,
         llm_host=args.ollama_host,
     )

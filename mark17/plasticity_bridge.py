@@ -10,7 +10,8 @@ from typing import Any
 
 import numpy as np
 
-from mark17.events import Event
+from mark17.compression import TOPIC_MATCH, similarity
+from mark17.events import Event, topic_key
 from mark17.snn_core import PlasticityNetwork, StepResult
 
 # Индексы входов (фиксированная семантика + хеш payload)
@@ -26,6 +27,12 @@ class PatternEntry:
     hits: int = 0
     last_activation: float = 0.0
     last_action: str = ""
+    # Нормализованная тема реплики. Нужна, чтобы узнать уже виденный вопрос,
+    # заданный другими словами; для остальных типов событий пустая.
+    topic: str = ""
+    # Когда тему поднимали в последний раз. Нужна, чтобы на «что дальше»
+    # отвечать по недавнему разговору, а не по самому частому за всю историю.
+    last_seen: float = 0.0
 
     @property
     def confidence(self) -> float:
@@ -38,6 +45,10 @@ class PatternEntry:
 class PlasticityResponse:
     pattern_id: str
     confidence: float
+    # Сколько раз эта тема уже поднималась. Наружу отдаётся, потому что «в
+    # третий раз спрашиваешь об одном» — это то, что ядро реально знает, и то,
+    # что человеку полезнее любой цифры уверенности.
+    hits: int
     action: str
     hint: str
     snn: dict[str, float]
@@ -74,6 +85,8 @@ class PlasticityBridge:
                 hits=v.get("hits", 0),
                 last_activation=v.get("last_activation", 0.0),
                 last_action=v.get("last_action", ""),
+                topic=v.get("topic", ""),
+                last_seen=v.get("last_seen", 0.0),
             )
             for k, v in raw.items()
         }
@@ -88,6 +101,8 @@ class PlasticityBridge:
                         "hits": e.hits,
                         "last_activation": e.last_activation,
                         "last_action": e.last_action,
+                        "topic": e.topic,
+                        "last_seen": e.last_seen,
                     }
                     for k, e in self.pattern_cache.items()
                 },
@@ -96,8 +111,66 @@ class PlasticityBridge:
         )
 
     def pattern_id(self, event: Event) -> str:
+        """Ключ паттерна. Для реплики человека — с узнаванием по смыслу.
+
+        Хеш от текста опознаёт только дословный повтор, а человек дословно не
+        повторяется. Поэтому для `user_message` сначала ищем среди уже виденных
+        тем ту, что совпадает с этой хотя бы на TOPIC_MATCH по основам слов, и
+        возвращаем ЕЁ ключ — тогда третий разговор об одном и том же и
+        засчитывается как третий, а не как первый.
+
+        Побеждает самая похожая тема, а при равенстве — ключ, меньший
+        лексикографически: одинаковый вход обязан давать одинаковый ключ
+        независимо от порядка обхода словаря.
+        """
+        if event.type == "user_message":
+            topic = topic_key(event.payload.get("text", ""))
+            if topic:
+                mine = set(topic.split())
+                best_pid, best_score = "", 0.0
+                for pid, entry in self.pattern_cache.items():
+                    if not entry.topic or not pid.startswith("user_message:"):
+                        continue
+                    score = similarity(mine, set(entry.topic.split()))
+                    if score > best_score or (score == best_score and pid < best_pid):
+                        best_pid, best_score = pid, score
+                if best_score >= TOPIC_MATCH:
+                    return best_pid
+
         h = hashlib.sha256(event.signature().encode()).hexdigest()[:12]
         return f"{event.type}:{h}"
+
+    def hot_topic(self, *, exclude: str = "", min_hits: int = 2) -> dict[str, Any] | None:
+        """Тема, к которой человек возвращается сейчас.
+
+        Это ответ на «что дальше» — вопрос, на который ядро до сих пор отвечало
+        описанием собственных возможностей, хотя знало ответ: вот тема, к
+        которой ты возвращаешься чаще всего в последнее время.
+
+        Выбор по свежести, а не по общему числу упоминаний: тема, которую
+        обсуждали двадцать раз в марте, к «что дальше» сегодня отношения не
+        имеет. Из одинаково свежих побеждает та, к которой возвращались чаще.
+
+        Порог min_hits отсекает случайно брошенное вслух ДО выбора по свежести,
+        а не после. Иначе достаточно одной новой реплики, чтобы «что дальше»
+        замолчало: самой свежей окажется она, порог её отбросит, и незакрытая
+        тема рядом останется ненайденной. Ровно это и вылезло на живом прогоне
+        диалога — по отдельности каждый кусок работал.
+        """
+        best: tuple[float, int, str] | None = None
+        for pid, entry in self.pattern_cache.items():
+            if not pid.startswith("user_message:") or not entry.topic:
+                continue
+            if entry.hits < min_hits:
+                continue
+            if exclude and entry.topic == exclude:
+                continue
+            key = (entry.last_seen, entry.hits, entry.topic)
+            if best is None or key > best:
+                best = key
+        if best is None:
+            return None
+        return {"topic": best[2], "hits": best[1], "last_seen": best[0]}
 
     def encode_event(self, event: Event) -> np.ndarray:
         x = np.zeros(self.network.num_inputs, dtype=np.float32)
@@ -169,6 +242,13 @@ class PlasticityBridge:
         entry.hits += 1
         entry.last_activation = max(entry.last_activation, result.hidden_activation)
         entry.last_action = action
+        if event.type == "user_message":
+            entry.last_seen = event.ts
+        if event.type == "user_message" and not entry.topic:
+            # Тема пишется один раз, при рождении паттерна. Переписывать её на
+            # каждом попадании нельзя: тема поплывёт вслед за формулировками и
+            # через десяток реплик паттерн перестанет узнавать сам себя.
+            entry.topic = topic_key(event.payload.get("text", ""))
         self.pattern_cache[pid] = entry
 
         conf = entry.confidence
@@ -177,6 +257,7 @@ class PlasticityBridge:
         return PlasticityResponse(
             pattern_id=pid,
             confidence=round(conf, 4),
+            hits=entry.hits,
             action=action,
             hint=hint,
             snn={
