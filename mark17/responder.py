@@ -580,12 +580,15 @@ def _hot_topic_answer(result: dict[str, Any], confidence: float) -> dict[str, An
 
 
 def _vague_status_answer(confidence: float) -> dict[str, Any]:
+    """На «привет» и «спасибо» — человеческая реплика, а не список умений.
+
+    Прежний ответ перечислял, что ядро умеет: принять сообщение, вспомнить
+    релевантную память, обновить ассоциации. Всё правда — и всё мимо. Человек
+    поздоровался, а ему зачитали техническое задание. Никто не отвечает на
+    «привет» описанием своего устройства.
+    """
     return {
-        "text": (
-            "Я на связи в Game. Могу принять сообщение, вспомнить релевантную память, "
-            "обновить ассоциации и предложить следующий маленький шаг. "
-            "Сформулируй задачу или вопрос чуть конкретнее, и я отвечу по делу."
-        ),
+        "text": "Здесь. Что делаем?",
         "source": "composer",
         "confidence": round(confidence, 4),
     }
@@ -794,21 +797,28 @@ def compose_answer(
     semantic = _first_semantic_summary(response, user_text)
     next_step = _next_adaptation(response, user_text)
 
-    parts = ["Я понял запрос."]
-    if semantic:
-        parts.append(f"В памяти есть похожий смысл: {semantic}.")
-    elif recalled:
-        parts.append(f"В памяти есть похожий след: {recalled}.")
-    else:
-        parts.append("Близкого воспоминания пока нет.")
-
-    parts.append(_confidence_tone(confidence))
-    if next_step:
-        parts.append(f"Полезный следующий шаг: {next_step}.")
-    parts.append(REALITY_CONTACT_HINT)
+    # Последняя ветка: предметного ответа нет. Раньше здесь собиралась
+    # приборная панель — «Я понял запрос», «Близкого воспоминания пока нет»,
+    # процент уверенности, «Полезный следующий шаг» (а в шаге лежало эхо
+    # самого вопроса). Человеку показывали внутренности вместо разговора, и
+    # на «расскажи анекдот» он получал рассуждение про паттерны.
+    #
+    # Признать, что нечего сказать, — тоже ответ, и честный. Выдумывать
+    # хуже: у ядра нет ни анекдотов, ни погоды, и делать вид, что есть,
+    # значит один раз соврать и навсегда потерять доверие к остальному.
+    if semantic or recalled:
+        seen = semantic or recalled
+        return {
+            "text": f"Ты про это уже говорил: {seen}.\n\n{REALITY_CONTACT_HINT}",
+            "source": "composer",
+            "confidence": round(confidence, 4),
+        }
 
     return {
-        "text": " ".join(parts),
+        "text": (
+            "Про это у меня ничего нет — ни опыта, ни записей.\n"
+            "Скажи, что нужно сделать, и я разложу по шагам."
+        ),
         "source": "composer",
         "confidence": round(confidence, 4),
     }
