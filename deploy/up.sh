@@ -150,8 +150,31 @@ if [ "$MODE" = "core" ]; then
     exit 0
   fi
 
+  # Снимок ДО подмены. Через git откатиться нельзя: fetch идёт с --depth 1,
+  # прошлого коммита в репозитории просто нет. Каталог маленький, копия
+  # мгновенная — и это единственный способ вернуться к тому, что работало.
+  #
+  # Копия сохраняет и файлы, которых в репозитории нет: на этом сервере рядом
+  # с ядром живут свои модули, и потерять их при откате было бы хуже самой
+  # поломки.
+  # Как мост чувствовал себя ДО того, как мы его тронули. Без этого замера
+  # любое падение выглядит нашей виной, а «уже лежал» и «мы уронили» требуют
+  # ровно противоположных действий: во втором случае надо откатываться, в
+  # первом — не трогать и не зацикливаться.
+  HEALTHY_BEFORE="no"
+  probe_now() {
+    for port in ${BPORT_HINT:-} 8017 8000 8790 3001; do
+      [ -n "$port" ] || continue
+      curl -sf -m 2 "http://127.0.0.1:$port/health" >/dev/null 2>&1 && return 0
+    done
+    return 1
+  }
+  probe_now && HEALTHY_BEFORE="yes"
+
+  PREV_DIR="$APP_DIR/.deploy-mark17-prev"
+  rm -rf "$PREV_DIR" && cp -a mark17 "$PREV_DIR" 2>/dev/null || PREV_DIR=""
+
   git checkout -q FETCH_HEAD -- mark17 || fail "не смог обновить mark17"
-  printf '%s' "$CORE_SHA" > "$SHA_MARK"
   say "$(date '+%d.%m %H:%M') · $APP_DIR · ядро обновлено до $CORE_SHA"
 
   if python3 -c 'import numpy' 2>/dev/null; then
@@ -162,6 +185,19 @@ if [ "$MODE" = "core" ]; then
 
   # Перезапускаем только мост. Процессы сайта не трогаем намеренно: их код мы
   # и не меняли, а лишний рестарт — лишний способ уронить работающее.
+  BPORT_HINT="$(pm2 jlist 2>/dev/null | python3 -c '
+import json, sys
+try:
+    apps = json.load(sys.stdin)
+except Exception:
+    raise SystemExit
+for a in apps:
+    if "max17" in (a.get("name") or "").lower() or "bridge" in (a.get("name") or "").lower():
+        port = ((a.get("pm2_env") or {}).get("env") or {}).get("PORT")
+        if port:
+            print(port)
+            break
+' 2>/dev/null)"
   BRIDGE="$(echo "$PM2_NAMES" | grep -iE 'max17|bridge' | head -1)"
   if [ -n "$BRIDGE" ]; then
     pm2 restart "$BRIDGE" --update-env >/dev/null 2>&1 \
@@ -170,7 +206,55 @@ if [ "$MODE" = "core" ]; then
     warn "не нашёл процесс моста среди: $(echo ${PM2_NAMES:-нет} | tr '\n' ' ')"
     warn "перезапусти сам:  pm2 restart <имя>"
   fi
-  say "готово. Проверка:  pm2 logs $BRIDGE --lines 30"
+  # Перезапустить и уйти — значит узнать о падении от человека через сутки.
+  # Ровно это и случилось: мост лёг, а выкатка отрапортовала «готово» и
+  # замолчала на двадцать часов. Поэтому спрашиваем мост, поднялся ли он.
+  #
+  # Ждём до 25 секунд: холодный старт читает состояние с диска и поднимает
+  # numpy, на скромном дроплете это заметно дольше мгновения.
+  probe_bridge() {
+    for _ in $(seq 1 "${1:-25}"); do
+      for port in ${BPORT_HINT:-} 8017 8000 8790 3001; do
+        [ -n "$port" ] || continue
+        curl -sf -m 2 "http://127.0.0.1:$port/health" >/dev/null 2>&1 && return 0
+      done
+      sleep 1
+    done
+    return 1
+  }
+
+  if probe_bridge; then
+    printf '%s' "$CORE_SHA" > "$SHA_MARK"
+    say "мост отвечает — версия $CORE_SHA принята"
+  elif [ "$HEALTHY_BEFORE" != "yes" ]; then
+    # Мост не отвечал и до нашего вмешательства. Значит дело не в выкатке, и
+    # откатывать нечего — прежняя версия лежала точно так же.
+    #
+    # Версию при этом запоминаем, и это принципиально. Иначе выкатка сочтёт
+    # себя виноватой, будет перезапускать мост каждые десять минут и вечно
+    # ждать, что на этот раз повезёт. А если мост просто слушает порт, о
+    # котором я не знаю, — она так и будет дёргать живой процесс без конца.
+    printf '%s' "$CORE_SHA" > "$SHA_MARK"
+    warn "$(date '+%d.%m %H:%M') · мост не отвечал и до выкатки — причина не в ядре"
+    warn "лог моста:  pm2 logs ${BRIDGE:-max17-bridge} --lines 30 --nostream"
+  else
+    warn "$(date '+%d.%m %H:%M') · мост работал до выкатки и не поднялся на $CORE_SHA"
+    if [ -n "$PREV_DIR" ] && [ -d "$PREV_DIR" ]; then
+      rm -rf mark17 && cp -a "$PREV_DIR" mark17
+      [ -n "$BRIDGE" ] && pm2 restart "$BRIDGE" --update-env >/dev/null 2>&1
+      if probe_bridge; then
+        warn "откатил ядро к прежней версии — мост снова отвечает"
+      else
+        warn "мост не отвечает и после отката: дело не в ядре"
+      fi
+      # Версию НЕ запоминаем: пусть следующая выкатка попробует снова, когда
+      # в main появится починка. Запомнить сломанное — значит замолчать
+      # навсегда, а это ровно та тишина, из-за которой мост лежал сутки.
+      warn "лог моста:  pm2 logs ${BRIDGE:-max17-bridge} --lines 30 --nostream"
+    else
+      warn "снимка для отката нет — ядро осталось на $CORE_SHA"
+    fi
+  fi
   exit 0
 fi
 
