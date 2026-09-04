@@ -185,6 +185,15 @@ if [ "$MODE" = "core" ]; then
 
   # Перезапускаем только мост. Процессы сайта не трогаем намеренно: их код мы
   # и не меняли, а лишний рестарт — лишний способ уронить работающее.
+  #
+  # Без --update-env, и это не мелочь. Флаг заставляет pm2 перечитать
+  # окружение из текущей оболочки, а под cron оболочка пустая: ни PORT, ни
+  # MAX17_STATE_DIR, ни токена. Мост поднимается на порту по умолчанию и с
+  # чужой папкой состояния — процесс живой, зелёный, отвечает, но не там, где
+  # его ищет сайт, и с пустой памятью. Ровно так он и «уснул» на сутки:
+  # ручной перезапуск без флага работал, сломалось после первого прогона по
+  # расписанию. Обычный restart сохраняет окружение, с которым процесс
+  # заводили.
   BPORT_HINT="$(pm2 jlist 2>/dev/null | python3 -c '
 import json, sys
 try:
@@ -200,7 +209,7 @@ for a in apps:
 ' 2>/dev/null)"
   BRIDGE="$(echo "$PM2_NAMES" | grep -iE 'max17|bridge' | head -1)"
   if [ -n "$BRIDGE" ]; then
-    pm2 restart "$BRIDGE" --update-env >/dev/null 2>&1 \
+    pm2 restart "$BRIDGE" >/dev/null 2>&1 \
       && say "перезапущен: $BRIDGE" || warn "не смог перезапустить $BRIDGE"
   else
     warn "не нашёл процесс моста среди: $(echo ${PM2_NAMES:-нет} | tr '\n' ' ')"
@@ -241,7 +250,7 @@ for a in apps:
     warn "$(date '+%d.%m %H:%M') · мост работал до выкатки и не поднялся на $CORE_SHA"
     if [ -n "$PREV_DIR" ] && [ -d "$PREV_DIR" ]; then
       rm -rf mark17 && cp -a "$PREV_DIR" mark17
-      [ -n "$BRIDGE" ] && pm2 restart "$BRIDGE" --update-env >/dev/null 2>&1
+      [ -n "$BRIDGE" ] && pm2 restart "$BRIDGE" >/dev/null 2>&1
       if probe_bridge; then
         warn "откатил ядро к прежней версии — мост снова отвечает"
       else
@@ -520,7 +529,7 @@ say "перезапускаю…"
 if [ -n "$PM2_NAMES" ]; then
   echo "$PM2_NAMES" | while read -r proc; do
     [ -n "$proc" ] || continue
-    if pm2 restart "$proc" --update-env >/dev/null 2>&1; then
+    if pm2 restart "$proc" >/dev/null 2>&1; then
       say "pm2: $proc перезапущен"
     else
       warn "pm2 не перезапустил $proc — сделай сам: pm2 restart $proc"
